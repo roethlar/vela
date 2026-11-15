@@ -261,9 +261,6 @@ export default {
        select.value = 'fullscreen';
        select.dispatchEvent(new Event('change', { bubbles: true }));`,
     );
-    await driver.click(
-      await driver.find('xpath', `//button[normalize-space(.)='Save player window']`),
-    );
     await pollUntil(() => {
       const config = readConfigSafely();
       return config?.mpv_window_mode === 'fullscreen' && !('mpv_window' in config);

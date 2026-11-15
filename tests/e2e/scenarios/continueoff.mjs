@@ -113,9 +113,6 @@ export default {
        select.value = 'off';
        select.dispatchEvent(new Event('change', { bubbles: true }));`,
     );
-    await driver.click(
-      await driver.find('xpath', `//button[normalize-space(.)='Save Continue Playing']`),
-    );
     await pollUntil(
       () => readConfig().continue_playing === 'off',
       'the Off mode in config.json',

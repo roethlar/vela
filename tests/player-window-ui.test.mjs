@@ -407,8 +407,8 @@ const playerWindowParts = async () => {
   const ast = parse(settings, { modern: true });
 
   // The control: one select with the id player-window, bound to
-  // playerWindowMode, and in its section one button, which saves it and is
-  // disabled while a save is under way. The control is offered, so it is
+  // playerWindow.mode, and saves on change without disabling the select.
+  // The control is offered, so it is
   // required.
   const elements = [];
   const seen = new Set();
@@ -431,12 +431,6 @@ const playerWindowParts = async () => {
     Array.isArray(a?.value) && a.value.every((part) => part.type === 'Text')
       ? a.value.map((part) => part.data).join('')
       : undefined;
-  const identifier = (a) => {
-    const tag = Array.isArray(a?.value) ? (a.value.length === 1 ? a.value[0] : undefined) : a?.value;
-    return tag?.type === 'ExpressionTag' && tag.expression.type === 'Identifier'
-      ? tag.expression.name
-      : undefined;
-  };
   const selects = elements.filter(
     ({ node }) => node.name === 'select' && text(attribute(node, 'id')) === 'player-window',
   );
@@ -445,14 +439,13 @@ const playerWindowParts = async () => {
   const binds = select.attributes.filter((a) => a.type === 'BindDirective');
   assert.equal(binds.length, 1, 'the select has one binding');
   assert.equal(binds[0].name, 'value');
-  assert.equal(binds[0].expression.type, 'Identifier');
-  assert.equal(binds[0].expression.name, 'playerWindowMode', 'the select shows playerWindowMode');
+  assert.equal(settings.slice(binds[0].expression.start, binds[0].expression.end), 'playerWindow.mode');
   assert.ok(section, 'the select is in a section');
-  const buttons = elements.filter((e) => e.section === section && e.node.name === 'button');
-  assert.equal(buttons.length, 1, 'the section has one button');
-  const [{ node: button }] = buttons;
-  assert.equal(identifier(attribute(button, 'onclick')), 'savePlayerWindowMode', 'the button saves the mode');
-  assert.equal(identifier(attribute(button, 'disabled')), 'playerWindowBusy', 'and is disabled while saving');
+  const changeAttribute = attribute(select, 'onchange');
+  const changeTag = Array.isArray(changeAttribute?.value) ? changeAttribute.value[0] : changeAttribute?.value;
+  assert.ok(changeTag?.expression, 'changing the select saves the mode');
+  const change = settings.slice(changeTag.expression.start, changeTag.expression.end);
+  assert.equal(attribute(select, 'disabled'), undefined, 'the user can change their mind while saving');
 
   // The script, from the parser, read by the TypeScript compiler. Only
   // declarations are taken from it: a copy in a comment is not one.
@@ -542,12 +535,13 @@ const playerWindowParts = async () => {
       code(load),
       code(save),
       'return {',
-      '  load, savePlayerWindowMode,',
-      '  get mode() { return playerWindowMode; }, set mode(value) { playerWindowMode = value; },',
-      '  get confirmed() { return playerWindowSaved; },',
-      '  get sharedConfirmed() { return playerWindowConfirmed.mode; },',
-      '  get saving() { return playerWindowBusy; },',
-      '  get err() { return err; },',
+      '  load,',
+      `  change() { return (${change})({ currentTarget: { value: playerWindow.mode } }); },`,
+      '  get mode() { return playerWindow.mode; }, set mode(value) { playerWindowDraft.edit("mode"); playerWindow.mode = value; },',
+      '  get confirmed() { return playerWindowSetting.confirmed.value.mode; },',
+      '  get sharedConfirmed() { return playerWindowSetting.confirmed.value.mode; },',
+      '  get saving() { return playerWindowSetting.status.pending > 0; },',
+      '  get err() { return playerWindowDraft.feedback.error ?? err; },',
       '  close() { for (const fn of destroyed.splice(0)) fn(); },',
       '};',
       '};',
@@ -608,7 +602,7 @@ test('a failed save of the player window setting puts the control back to the sa
   assert.equal(control.mode, 'default');
   control.mode = 'fullscreen';
   backend.refuse = true;
-  await control.savePlayerWindowMode();
+  await control.change();
   assert.equal(control.mode, 'default', 'a refused save must show what the backend holds');
   assert.match(control.err, /could not be saved/, 'and say why');
   assert.equal(backend.mode, 'default');
@@ -617,12 +611,12 @@ test('a failed save of the player window setting puts the control back to the sa
   // back to it.
   backend.refuse = false;
   control.mode = 'fullscreen';
-  await control.savePlayerWindowMode();
+  await control.change();
   assert.equal(control.mode, 'fullscreen');
   assert.equal(control.err, null);
   backend.refuse = true;
   control.mode = 'remember';
-  await control.savePlayerWindowMode();
+  await control.change();
   assert.equal(control.mode, 'fullscreen', 'a refused save must show what the backend holds');
   assert.equal(backend.mode, 'fullscreen');
 });
@@ -640,14 +634,14 @@ test('a load that read the mode before a save was confirmed does not put the old
     const loading = control.load();
     backend.holdLoads = false;
     control.mode = 'fullscreen';
-    await control.savePlayerWindowMode();
+    await control.change();
     assert.equal(backend.mode, 'fullscreen');
     await backend.release();
     await loading;
     assert.equal(control.mode, 'fullscreen', 'a load must not undo a save confirmed after it read');
     backend.refuse = true;
     control.mode = 'default';
-    await control.savePlayerWindowMode();
+    await control.change();
     assert.equal(backend.mode, 'fullscreen');
     assert.equal(control.mode, 'fullscreen', 'a refused save must show what the backend holds');
   }
@@ -662,12 +656,12 @@ test('a load that read the mode before a save was confirmed does not put the old
     backend.holdLoads = false;
     control.mode = 'fullscreen';
     backend.refuse = true;
-    await control.savePlayerWindowMode();
+    await control.change();
     await backend.release();
     await loading;
     assert.equal(control.mode, 'default', 'a load after a refused save shows what it read');
     control.mode = 'fullscreen';
-    await control.savePlayerWindowMode();
+    await control.change();
     assert.equal(control.mode, 'default', 'and a later refused save goes back to it');
   }
 
@@ -678,7 +672,7 @@ test('a load that read the mode before a save was confirmed does not put the old
     const control = build(backend.invoke);
     control.mode = 'fullscreen';
     backend.holdSaves = true;
-    const saving = control.savePlayerWindowMode();
+    const saving = control.change();
     backend.holdSaves = false;
     backend.holdLoads = true;
     const loading = control.load();
@@ -688,7 +682,7 @@ test('a load that read the mode before a save was confirmed does not put the old
       backend.held.push(backend.held.shift());
       await backend.release();
       await loading;
-      assert.equal(control.mode, 'default', 'nothing confirmed yet: what the load read');
+      assert.equal(control.mode, 'fullscreen', 'the slow load keeps the newer choice while it is saving');
       await backend.release();
       await saving;
     } else {
@@ -701,7 +695,7 @@ test('a load that read the mode before a save was confirmed does not put the old
     assert.equal(control.mode, 'fullscreen', 'the confirmed save is what the control shows');
     backend.refuse = true;
     control.mode = 'remember';
-    await control.savePlayerWindowMode();
+    await control.change();
     assert.equal(control.mode, 'fullscreen', 'a refused save must show what the backend holds');
   }
 
@@ -713,7 +707,7 @@ test('a load that read the mode before a save was confirmed does not put the old
     control.mode = 'fullscreen';
     backend.holdSaves = true;
     backend.refuse = true;
-    const saving = control.savePlayerWindowMode();
+    const saving = control.change();
     backend.holdSaves = false;
     backend.holdLoads = true;
     const loading = control.load();
@@ -743,7 +737,7 @@ test('a load that read the mode before a save was confirmed does not put the old
     assert.equal(control.mode, 'fullscreen', 'an overtaken load changes nothing');
     backend.refuse = true;
     control.mode = 'remember';
-    await control.savePlayerWindowMode();
+    await control.change();
     assert.equal(control.mode, 'fullscreen', 'a refused save must show what the backend holds');
   }
 });
@@ -767,7 +761,7 @@ test('a save confirmed while a reopened Settings is loading is what it shows', a
     await a.load();
     a.mode = 'fullscreen';
     backend.holdSaves = true;
-    const saving = a.savePlayerWindowMode();
+    const saving = a.change();
     backend.holdSaves = false;
     if (closeA) a.close();
     const b = app.open();
@@ -788,7 +782,7 @@ test('a save confirmed while a reopened Settings is loading is what it shows', a
     }
     backend.refuse = true;
     b.mode = 'default';
-    await b.savePlayerWindowMode();
+    await b.change();
     assert.equal(backend.mode, 'fullscreen');
     assert.equal(b.mode, 'fullscreen', 'a refused save must show what the backend holds');
   }
@@ -803,7 +797,7 @@ test('a save confirmed while a reopened Settings is loading is what it shows', a
     await a.load();
     a.mode = 'fullscreen';
     backend.holdSaves = true;
-    const saving = a.savePlayerWindowMode();
+    const saving = a.change();
     backend.holdSaves = false;
     if (closeA) a.close();
     const b = app.open();
@@ -820,7 +814,7 @@ test('a save confirmed while a reopened Settings is loading is what it shows', a
     assert.equal(b.confirmed, 'fullscreen');
     backend.refuse = true;
     b.mode = 'default';
-    await b.savePlayerWindowMode();
+    await b.change();
     assert.equal(b.mode, 'fullscreen', 'a refused save must show what the backend holds');
   }
 });
@@ -838,7 +832,7 @@ test('a Settings opened after one that closed with its save out shows what that 
     await a.load();
     a.mode = 'fullscreen';
     backend.holdSaves = true;
-    const saving = a.savePlayerWindowMode();
+    const saving = a.change();
     backend.holdSaves = false;
     a.close();
     await backend.release();
@@ -857,7 +851,7 @@ test('a Settings opened after one that closed with its save out shows what that 
       backend.holdLoads = false;
       backend.refuse = true;
       b.mode = 'default';
-      await b.savePlayerWindowMode();
+      await b.change();
       assert.equal(b.mode, 'fullscreen', 'a refused save before the load answers must show what the backend holds');
       backend.refuse = false;
       await backend.release();
@@ -867,21 +861,21 @@ test('a Settings opened after one that closed with its save out shows what that 
     assert.equal(b.confirmed, 'fullscreen');
     backend.refuse = true;
     b.mode = 'remember';
-    await b.savePlayerWindowMode();
+    await b.change();
     assert.equal(b.mode, 'fullscreen', 'a refused save must show what the backend holds');
 
     // A closed opening is no longer told of saves.
     backend.refuse = false;
-    const before = [a.mode, a.confirmed];
+    const before = a.mode;
     b.mode = 'default';
-    await b.savePlayerWindowMode();
+    await b.change();
     assert.equal(backend.mode, 'default');
     assert.equal(b.mode, 'default');
-    assert.deepEqual([a.mode, a.confirmed], before, 'a closed Settings must not be told of later saves');
+    assert.equal(a.mode, before, 'a closed Settings must not be told of later saves');
   }
 });
 
-test('a save confirmed in one open Settings reaches another, keeping an unsaved choice the save does not change', async () => {
+test('a save confirmed in one open Settings reaches another, keeping a newer draft', async () => {
   const build = await playerWindowParts();
   const backend = madeUpBackend('remember');
   const app = build.app(backend.invoke);
@@ -892,27 +886,27 @@ test('a save confirmed in one open Settings reaches another, keeping an unsaved 
 
   // B has loaded and is open; A's save is confirmed: B shows it.
   a.mode = 'fullscreen';
-  await a.savePlayerWindowMode();
+  await a.change();
   assert.equal(b.mode, 'fullscreen', 'a save confirmed from another opening must reach this one');
   assert.equal(b.confirmed, 'fullscreen');
   backend.refuse = true;
   b.mode = 'default';
-  await b.savePlayerWindowMode();
+  await b.change();
   assert.equal(b.mode, 'fullscreen', 'a refused save must show what the backend holds');
   backend.refuse = false;
 
   // B's user picks default and has not saved. A save that confirms what the
   // backend already held, and a load that reads it, leave that choice.
   b.mode = 'default';
-  await a.savePlayerWindowMode();
+  await a.change();
   assert.equal(b.mode, 'default', 'an unsaved choice stays while the backend has not changed');
   await b.load();
   assert.equal(b.mode, 'default', 'and a load that reads the same mode keeps it');
   assert.equal(b.confirmed, 'fullscreen');
-  // A save that changes the backend under it replaces it.
+  // A save from another opening still leaves the newer draft alone.
   a.mode = 'remember';
-  await a.savePlayerWindowMode();
-  assert.equal(b.mode, 'remember', 'a changed backend replaces an unsaved choice');
+  await a.change();
+  assert.equal(b.mode, 'default', 'a changed backend leaves the newer draft alone');
   assert.equal(b.confirmed, 'remember');
 
   // Two save requests, one from each: both complete, and both openings
@@ -921,8 +915,8 @@ test('a save confirmed in one open Settings reaches another, keeping an unsaved 
   a.mode = 'fullscreen';
   b.mode = 'default';
   backend.holdSaves = true;
-  const savingA = a.savePlayerWindowMode();
-  const savingB = b.savePlayerWindowMode();
+  const savingA = a.change();
+  const savingB = b.change();
   await backend.release();
   await savingA;
   await backend.release();
@@ -946,14 +940,14 @@ test('a refused save in one open Settings goes back to what the backend holds an
   b.mode = 'remember';
   backend.refuse = true;
   a.mode = 'default';
-  await a.savePlayerWindowMode();
+  await a.change();
   assert.equal(backend.mode, 'fullscreen');
   assert.equal(a.mode, 'fullscreen', 'a refused save must show what the backend holds');
   assert.equal(a.confirmed, 'fullscreen');
   assert.equal(b.mode, 'remember', "the other's unsaved choice is left alone");
   assert.equal(b.confirmed, 'fullscreen');
   b.mode = 'default';
-  await b.savePlayerWindowMode();
+  await b.change();
   assert.equal(b.mode, 'fullscreen', 'a refused save must show what the backend holds');
 });
 
@@ -1012,7 +1006,7 @@ test('an applied save from closed A cannot reply after reopened B is confirmed',
   const a = app.open();
   await a.load();
   a.mode = 'fullscreen';
-  const savingA = a.savePlayerWindowMode();
+  const savingA = a.change();
   await nextTurn();
   backend.apply(0);
   a.close();
@@ -1021,7 +1015,7 @@ test('an applied save from closed A cannot reply after reopened B is confirmed',
   await b.load();
   assertBackendMode(b, backend, 'B reads the applied fullscreen before A replies');
   b.mode = 'default';
-  const savingB = b.savePlayerWindowMode();
+  const savingB = b.change();
   await nextTurn();
 
   // Attempt the reviewer's exact order: B applies and is confirmed, then
@@ -1058,14 +1052,14 @@ for (const applyA of [false, true]) {
     const a = app.open();
     await a.load();
     a.mode = 'fullscreen';
-    const savingA = a.savePlayerWindowMode();
+    const savingA = a.change();
     await nextTurn();
     if (applyA) backend.apply(0);
     a.close();
     const b = app.open();
     await b.load();
     b.mode = 'default';
-    const savingB = b.savePlayerWindowMode();
+    const savingB = b.change();
     await nextTurn();
     assert.equal(backend.writes.length, 1, 'B must wait even if A will refuse');
     backend.deliver(0, true);
@@ -1090,14 +1084,14 @@ test('a refused retry after reopened B saves default restores default', async ()
   const a = app.open();
   await a.load();
   a.mode = 'fullscreen';
-  const savingA = a.savePlayerWindowMode();
+  const savingA = a.change();
   await nextTurn();
   backend.apply(0);
   a.close();
   const b = app.open();
   await b.load();
   b.mode = 'default';
-  const savingB = b.savePlayerWindowMode();
+  const savingB = b.change();
   await nextTurn();
   const overlapped = backend.writes.length > 1;
   if (overlapped) {
@@ -1114,7 +1108,7 @@ test('a refused retry after reopened B saves default restores default', async ()
     await savingB;
   }
   b.mode = 'remember';
-  const retry = b.savePlayerWindowMode();
+  const retry = b.change();
   await nextTurn();
   backend.deliver(2, true);
   await retry;
@@ -1124,7 +1118,7 @@ test('a refused retry after reopened B saves default restores default', async ()
 
   // The refusal must leave the page able to retry successfully too.
   b.mode = 'fullscreen';
-  const success = b.savePlayerWindowMode();
+  const success = b.change();
   await nextTurn();
   backend.apply(3);
   backend.deliver(3);
@@ -1140,30 +1134,35 @@ test('one page prevents replies in reverse application order', async () => {
   const control = build(backend.invoke);
   await control.load();
   control.mode = 'fullscreen';
-  const first = control.savePlayerWindowMode();
+  const first = control.change();
   await nextTurn();
   backend.apply(0);
   control.mode = 'default';
-  const duplicate = control.savePlayerWindowMode();
+  const second = control.change();
+  control.mode = 'remember';
+  const last = control.change();
   await nextTurn();
-  assert.equal(backend.writes.length, 1, 'a busy page must not send a second write');
+  assert.equal(backend.writes.length, 1, 'later changes wait for the first reply');
   assert.throws(() => backend.deliver(1), /write 1 has not been sent/);
   backend.deliver(0);
   await first;
   await nextTurn();
-  assert.equal(backend.writes.length, 1, 'a busy page must not queue a hidden second save');
-  await duplicate;
-  assertBackendMode(control, backend, 'the first reply confirms fullscreen');
-  control.mode = 'default';
-  const second = control.savePlayerWindowMode();
-  await nextTurn();
-  assert.equal(backend.writes.length, 2, 'a new click after the reply must send');
+  assert.equal(backend.writes.length, 2, 'the second change is sent after the first reply');
+  assert.equal(control.mode, 'remember', 'the first reply keeps the latest choice visible');
+  assert.equal(backend.writes[1].mode, 'default');
   backend.apply(1);
   backend.deliver(1);
   await second;
-  assertBackendMode(control, backend, 'the later save confirms default');
-  assert.deepEqual(backend.applied, [0, 1]);
-  assert.deepEqual(backend.delivered, [0, 1]);
+  await nextTurn();
+  assert.equal(backend.writes.length, 3, 'the last change is sent after the second reply');
+  assert.equal(control.mode, 'remember', 'the second reply keeps the latest choice visible');
+  backend.apply(2);
+  backend.deliver(2);
+  await last;
+  assert.equal(backend.mode, 'remember');
+  assertBackendMode(control, backend, 'the last change is stored and shown');
+  assert.deepEqual(backend.applied, [0, 1, 2]);
+  assert.deepEqual(backend.delivered, [0, 1, 2]);
 });
 
 test('two open pages prevent replies in reverse application order', async () => {
@@ -1175,11 +1174,11 @@ test('two open pages prevent replies in reverse application order', async () => 
   await a.load();
   await b.load();
   a.mode = 'fullscreen';
-  const savingA = a.savePlayerWindowMode();
+  const savingA = a.change();
   await nextTurn();
   backend.apply(0);
   b.mode = 'default';
-  const savingB = b.savePlayerWindowMode();
+  const savingB = b.change();
   await nextTurn();
   const overlapped = backend.writes.length > 1;
   if (overlapped) {
@@ -1214,7 +1213,7 @@ test('queued choices survive several closings and openings', async () => {
     const control = app.open();
     await control.load();
     control.mode = choice;
-    pending.push(control.savePlayerWindowMode());
+    pending.push(control.change());
     control.close();
   }
   await nextTurn();
@@ -1222,7 +1221,7 @@ test('queued choices survive several closings and openings', async () => {
   // Drain with NO page open: unmounting must not discard queued choices.
   for (const [index, choice] of choices.entries()) {
     assert.equal(backend.writes.length, index + 1, 'only the next queued write is sent');
-    assert.equal(backend.writes[index].mode, choice, 'every closed page keeps its clicked choice');
+    assert.equal(backend.writes[index].mode, choice, 'every closed page keeps its changed choice');
     backend.apply(index);
     backend.deliver(index);
     await pending[index];
@@ -1234,7 +1233,7 @@ test('queued choices survive several closings and openings', async () => {
   assertBackendMode(reopened, backend, 'loading agrees with the last queued confirmation');
 });
 
-test('a queued save keeps its clicked choice when an earlier confirmation changes the control', async () => {
+test('a queued save keeps its changed choice through an earlier confirmation', async () => {
   const build = await playerWindowParts();
   const backend = splitWriteBackend('remember');
   const app = build.app(backend.invoke);
@@ -1243,25 +1242,30 @@ test('a queued save keeps its clicked choice when an earlier confirmation change
   await a.load();
   await b.load();
   a.mode = 'fullscreen';
-  const savingA = a.savePlayerWindowMode();
+  const savingA = a.change();
   b.mode = 'default';
-  const savingB = b.savePlayerWindowMode();
+  const savingB = b.change();
   await nextTurn();
   backend.apply(0);
   backend.deliver(0);
   await savingA;
   await nextTurn();
-  assert.equal(b.mode, 'fullscreen', 'the earlier confirmation reaches B while B is waiting');
-  assert.equal(backend.writes[1]?.mode, 'default', 'the queued write must keep the clicked default');
-  // An unrelated load and another unsaved selection cannot change the
-  // already captured request either.
+  assert.equal(b.mode, 'default', 'the earlier confirmation does not replace B while B is waiting');
+  assert.equal(backend.writes[1]?.mode, 'default', 'the queued write must keep the changed default');
+  // Neither a load nor another change alters the already captured request.
   await b.load();
   b.mode = 'remember';
+  const newer = b.change();
   backend.apply(1);
   backend.deliver(1);
   await savingB;
   assert.equal(backend.mode, 'default');
-  assertBackendMode(b, backend, 'the queued default is what was saved');
+  assert.equal(b.mode, 'remember', 'the reply keeps the newer choice visible');
+  await nextTurn();
+  backend.apply(2);
+  backend.deliver(2);
+  await newer;
+  assertBackendMode(b, backend, 'the newer choice follows the captured default');
 });
 
 test('a refusal in the middle of the queue does not discard the following save', async () => {
@@ -1273,7 +1277,7 @@ test('a refusal in the middle of the queue does not discard the following save',
     control.mode = mode;
     return control;
   });
-  const pending = controls.map((control) => control.savePlayerWindowMode());
+  const pending = controls.map((control) => control.change());
   await nextTurn();
   backend.apply(0);
   backend.deliver(0);
@@ -1302,7 +1306,7 @@ test('a fresh page sends and confirms its first save', async () => {
   const control = build(backend.invoke);
   await control.load();
   control.mode = 'fullscreen';
-  const saving = control.savePlayerWindowMode();
+  const saving = control.change();
   await nextTurn();
   assert.equal(backend.writes.length, 1, 'a fresh page must send its first save');
   assert.equal(backend.writes[0].mode, 'fullscreen');
@@ -1314,7 +1318,7 @@ test('a fresh page sends and confirms its first save', async () => {
   backend.deliver(0);
   await saving;
   assertBackendMode(control, backend, 'the fresh page confirms its save');
-  assert.equal(control.saving, false, 'a confirmed save must release its button');
+  assert.equal(control.saving, false, 'a confirmed save clears the pending status');
   assert.equal(control.err, null);
 });
 
@@ -1324,7 +1328,7 @@ test('a new page can save after a queue has drained', async () => {
   const app = build.app(backend.invoke);
   const first = app.open();
   first.mode = 'fullscreen';
-  const savingFirst = first.savePlayerWindowMode();
+  const savingFirst = first.change();
   await nextTurn();
   backend.apply(0);
   backend.deliver(0);
@@ -1334,7 +1338,7 @@ test('a new page can save after a queue has drained', async () => {
   const fresh = app.open();
   await fresh.load();
   fresh.mode = 'default';
-  const savingFresh = fresh.savePlayerWindowMode();
+  const savingFresh = fresh.change();
   await nextTurn();
   assert.equal(backend.writes.length, 2, 'a drained queue must accept a new page\'s save');
   backend.apply(1);
@@ -1350,9 +1354,9 @@ test('an earlier completion cannot release the queue while a later write is unan
   const a = app.open();
   const b = app.open();
   a.mode = 'fullscreen';
-  const savingA = a.savePlayerWindowMode();
+  const savingA = a.change();
   b.mode = 'default';
-  const savingB = b.savePlayerWindowMode();
+  const savingB = b.change();
   await nextTurn();
   backend.apply(0);
   backend.deliver(0);
@@ -1364,7 +1368,7 @@ test('an earlier completion cannot release the queue while a later write is unan
   const c = app.open();
   await c.load();
   c.mode = 'remember';
-  const savingC = c.savePlayerWindowMode();
+  const savingC = c.change();
   await nextTurn();
   assert.equal(backend.writes.length, 2, 'finishing A must not let C bypass unanswered B');
   backend.apply(1);
@@ -1386,7 +1390,7 @@ test('an unanswered save keeps later writes queued while pages can load and clos
   await a.load();
   a.mode = 'fullscreen';
   let finished = 0;
-  void a.savePlayerWindowMode().then(() => { finished += 1; });
+  void a.change().then(() => { finished += 1; });
   await nextTurn();
   backend.apply(0);
   a.close();
@@ -1398,9 +1402,9 @@ test('an unanswered save keeps later writes queued while pages can load and clos
     assert.equal(loaded, true, 'an unanswered save must not block a new page load');
     await loading;
     assertBackendMode(control, backend, 'a pending save does not block loading a new page');
-    assert.equal(control.saving, false, 'a new page is usable while another waits');
+    assert.equal(control.saving, true, 'a new page reports the shared pending save without disabling the control');
     control.mode = choice;
-    void control.savePlayerWindowMode().then(() => { finished += 1; });
+    void control.change().then(() => { finished += 1; });
     assert.equal(control.saving, true, 'this page reports its queued save as pending');
     control.close();
     await nextTurn();

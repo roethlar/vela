@@ -34,30 +34,26 @@
     qualityTiers: QualityTier[];
   };
 
-  // Shared across openings, so closing Settings during a read or save cannot
-  // let a later opening race it or lose its confirmation. One request at a time.
-  const playerTls = $state({
-    verify: true,
-    skip: false,
-    loaded: false,
-    busy: false,
-    error: null as string | null,
-  });
+  const playerTls = $state({ loaded: false });
 
   // Each backend setting has one confirmation and one write queue for the
   // app's lifetime (pw-7). A reply must arrive before the next write starts;
   // otherwise reply order need not be the order the backend stored them.
   function createSetting<T>(initial: T) {
-    const confirmed = { saves: 0, value: initial };
+    const confirmed = { saves: 0, known: false, value: initial };
+    const status = $state({ pending: 0, saved: false });
+    let savedTimer: ReturnType<typeof setTimeout> | undefined;
     const followers = new Set<(value: T) => void>();
     let reads = 0;
     let tail: Promise<void> | undefined;
     function show(value: T) {
+      confirmed.known = true;
       confirmed.value = value;
       for (const follower of [...followers]) follower(value);
     }
     return {
       confirmed,
+      status,
       follow(show: (value: T) => void) {
         followers.add(show);
         return () => { followers.delete(show); };
@@ -71,13 +67,27 @@
         show(value);
       },
       queue<R>(write: () => Promise<R>): Promise<R> {
+        clearTimeout(savedTimer);
+        status.saved = false;
+        status.pending += 1;
         const pending = tail ? tail.then(write) : write();
-        const settled = pending.then(() => {}, () => {});
+        const tracked = pending.then((value) => {
+          status.pending -= 1;
+          if (status.pending === 0) {
+            status.saved = true;
+            savedTimer = setTimeout(() => { status.saved = false; }, 2000);
+          }
+          return value;
+        }, (error) => {
+          status.pending -= 1;
+          throw error;
+        });
+        const settled = tracked.then(() => {}, () => {});
         tail = settled;
         void settled.then(() => {
           if (tail === settled) tail = undefined;
         });
-        return pending;
+        return tracked;
       },
     };
   }
@@ -87,7 +97,9 @@
   // untouched fields; finishing our save settles only the edits it submitted.
   function createDraft<T extends object>(setting: ReturnType<typeof createSetting<T>>) {
     const value = $state({ ...setting.confirmed.value });
+    const feedback = $state({ error: null as string | null });
     const edits = new Map<keyof T, number>();
+    let submittedEdits = new Map<keyof T, number>();
     const dirty = new Set<keyof T>();
     const keys = Object.keys(value) as (keyof T)[];
     const unfollow = setting.follow((confirmed) => {
@@ -95,12 +107,24 @@
     });
     return {
       value,
+      feedback,
       unfollow,
       edit(key: keyof T) {
         edits.set(key, (edits.get(key) ?? 0) + 1);
         dirty.add(key);
       },
-      capture() { return { value: { ...value }, edits: new Map(edits) }; },
+      needsSave(key: keyof T, normalize: (value: T[keyof T]) => unknown) {
+        if (!dirty.has(key) || edits.get(key) === submittedEdits.get(key)) return false;
+        if (setting.confirmed.known && !setting.status.pending && normalize(value[key]) === normalize(setting.confirmed.value[key])) {
+          dirty.delete(key);
+          return false;
+        }
+        return true;
+      },
+      capture(submit = true) {
+        if (submit) submittedEdits = new Map(edits);
+        return { value: { ...value }, edits: new Map(edits) };
+      },
       finish(submitted: { edits: Map<keyof T, number> }, keepDraft?: keyof T) {
         for (const key of keys) {
           if (edits.get(key) !== submitted.edits.get(key)) continue;
@@ -112,22 +136,17 @@
     };
   }
 
-  // Keep the Player window control's existing load and draft rules.
-  const playerWindowSetting = createSetting<PlayerWindowMode>("remember");
-  const playerWindowConfirmed = {
-    get saves() { return playerWindowSetting.confirmed.saves; },
-    get mode() { return playerWindowSetting.confirmed.value; },
-    set mode(mode: PlayerWindowMode) { playerWindowSetting.confirmed.value = mode; },
-  };
-  const followPlayerWindowMode = playerWindowSetting.follow;
-  function queuePlayerWindowSave(write: () => Promise<PlayerWindowMode>) {
-    return playerWindowSetting.queue(async () => {
-      const mode = await write();
-      playerWindowSetting.confirm(mode);
-      return mode;
-    });
+  function changeDraft<T extends object, K extends keyof T>(
+    draft: ReturnType<typeof createDraft<T>>, key: K, value: T[K], save: () => Promise<void>,
+  ) {
+    // Svelte calls an explicit change handler before updating bind:value.
+    draft.value[key] = value;
+    draft.edit(key);
+    return save();
   }
 
+  const playerWindowSetting = createSetting({ mode: "remember" as PlayerWindowMode });
+  const tlsSetting = createSetting({ skip: false });
   const continuePlayingSetting = createSetting({ mode: "only-tv" as ContinuePlayingMode });
   const videoPlayerSetting = createSetting<VideoPlayer>({ player: "external", offered: false, note: null });
   const mpvSetting = createSetting({ info: null as MpvInfo | null, path: "" });
@@ -194,32 +213,29 @@
   });
 
   async function loadPlayerTls() {
-    if (playerTls.busy) return;
-    playerTls.busy = true;
-    playerTls.error = null;
+    const read = tlsSetting.beginLoad();
     try {
-      playerTls.verify = await invoke<boolean>("get_mpv_tls_verify");
-      playerTls.skip = !playerTls.verify;
+      const verify = await invoke<boolean>("get_mpv_tls_verify");
+      tlsSetting.loaded({ skip: !verify }, read);
       playerTls.loaded = true;
     } catch {
-      playerTls.loaded = false;
-      playerTls.error = "Could not read the certificate setting. Close Settings and try again.";
-    } finally {
-      playerTls.busy = false;
+      tlsDraft.feedback.error = "Could not read the certificate setting. Close Settings and try again.";
     }
   }
 
   async function savePlayerTls() {
-    if (playerTls.busy || !playerTls.loaded) return;
-    playerTls.busy = true;
-    playerTls.error = null;
+    if (!playerTls.loaded) return;
+    const submitted = tlsDraft.capture();
     try {
-      playerTls.verify = await invoke<boolean>("set_mpv_tls_verify", { verify: !playerTls.skip });
-    } catch {
-      playerTls.error = "Could not save the certificate setting. Your previous setting is still in use.";
+      await tlsSetting.queue(async () => {
+        const verify = await invoke<boolean>("set_mpv_tls_verify", { verify: !submitted.value.skip });
+        tlsSetting.confirm({ skip: !verify });
+      });
+      tlsDraft.feedback.error = null;
+    } catch (e) {
+      tlsDraft.feedback.error = String(e);
     } finally {
-      playerTls.skip = !playerTls.verify;
-      playerTls.busy = false;
+      tlsDraft.finish(submitted);
     }
   }
 
@@ -304,14 +320,12 @@
   const mpvPath = mpvDraft.value;
   let mpv = $derived(mpvPath.info);
   onDestroy(mpvDraft.unfollow);
-  let mpvBusy = $state(false);
   let installingMpv = $state(false);
 
   // The defaults in the module match the backend's missing-field defaults.
   const advancedDraft = createDraft(advancedSetting);
   const advanced = advancedDraft.value;
   onDestroy(advancedDraft.unfollow);
-  let mpvAdvBusy = $state(false);
   let showMpvHelp = $state(false);
 
   // What a cleanly-finished single item or exhausted playlist should do next.
@@ -320,41 +334,51 @@
   const continueDraft = createDraft(continuePlayingSetting);
   const continuation = continueDraft.value;
   onDestroy(continueDraft.unfollow);
-  let continuePlayingBusy = $state(false);
 
   const videoPlayerDraft = createDraft(videoPlayerSetting);
   const videoPlayer = videoPlayerDraft.value;
   onDestroy(videoPlayerDraft.unfollow);
-  let videoPlayerBusy = $state(false);
 
   // How the first mpv window after Vela starts opens. The control starts on
   // the mode the backend last confirmed to the app (see the module script).
-  let playerWindowMode = $state<PlayerWindowMode>(playerWindowConfirmed.mode);
-  let playerWindowBusy = $state(false);
-  // The confirmed mode this opening last put in the control. While the
-  // control shows something else, the user has a choice not yet saved
-  // (review finding pw-7).
-  let playerWindowSaved: PlayerWindowMode = playerWindowConfirmed.mode;
-  // This opening is told of every save confirmed while it is open, from
-  // whichever opening sent it, and stops being told when it closes.
-  const playerWindowUnfollow = followPlayerWindowMode(showPlayerWindowConfirmed);
-  onDestroy(playerWindowUnfollow);
+  const playerWindowDraft = createDraft(playerWindowSetting);
+  const playerWindow = playerWindowDraft.value;
+  onDestroy(playerWindowDraft.unfollow);
 
-  // Puts a mode the backend confirmed in the control. A choice the user has
-  // made and not saved is kept, unless the backend's mode has changed under
-  // it (review finding pw-7).
-  function showPlayerWindowConfirmed(mode: PlayerWindowMode) {
-    const unsaved = playerWindowMode !== playerWindowSaved;
-    if (!unsaved || mode !== playerWindowSaved) playerWindowMode = mode;
-    playerWindowSaved = mode;
-  }
+  const tlsDraft = createDraft(tlsSetting);
+  const tls = tlsDraft.value;
+  onDestroy(tlsDraft.unfollow);
 
   // Duplicate-copy selection and the display profile used by Compatible.
   const playbackDraft = createDraft(playbackSetting);
   const playback = playbackDraft.value;
   let playbackPreferences = $derived(playback.preferences);
   onDestroy(playbackDraft.unfollow);
-  let playbackPreferencesBusy = $state(false);
+
+  // One save status for the whole page, shown in its header where it is
+  // always in view. A status beside each control would be out of sight for a
+  // control at the foot of a long section, and seven of them were noise.
+  let saving = $derived(
+    [playbackSetting, continuePlayingSetting, videoPlayerSetting, playerWindowSetting, tlsSetting, mpvSetting, advancedSetting]
+      .some((setting) => setting.status.pending > 0),
+  );
+  let justSaved = $derived(
+    [playbackSetting, continuePlayingSetting, videoPlayerSetting, playerWindowSetting, tlsSetting, mpvSetting, advancedSetting]
+      .some((setting) => setting.status.saved),
+  );
+  // A refused save is explained in its own section; the header says there is one.
+  let notSaved = $derived(
+    [playbackDraft, continueDraft, videoPlayerDraft, playerWindowDraft, tlsDraft, mpvDraft, advancedDraft]
+      .some((draft) => draft.feedback.error !== null),
+  );
+
+  // Teardown covers Close, Escape, the overlay and removal by the parent.
+  // Captured writes and their confirmations outlive this opening in the queues.
+  onDestroy(flushTextDrafts);
+  function flushTextDrafts() {
+    void saveMpvPath();
+    void blurMpvAdvanced();
+  }
 
   const playbackPolicies: {
     value: PlaybackSourcePolicy;
@@ -425,7 +449,7 @@
     // A load reads the mode at one moment and applies it later. A save
     // confirmed in between, from this opening or any other, is newer than
     // what the load read (review finding pw-7).
-    const windowSaves = playerWindowConfirmed.saves;
+    const windowRead = playerWindowSetting.beginLoad();
     const mpvRead = mpvSetting.beginLoad();
     const advancedRead = advancedSetting.beginLoad();
     const continueRead = continuePlayingSetting.beginLoad();
@@ -449,10 +473,7 @@
       qualityTiers = tiers;
       advancedSetting.loaded(options, advancedRead);
       continuePlayingSetting.loaded({ mode: continueMode }, continueRead);
-      if (windowSaves === playerWindowConfirmed.saves) {
-        playerWindowConfirmed.mode = windowMode;
-      }
-      showPlayerWindowConfirmed(playerWindowConfirmed.mode);
+      playerWindowSetting.loaded({ mode: windowMode }, windowRead);
       playbackSetting.loaded(playbackValues(playbackPrefs), playbackRead);
       videoPlayerSetting.loaded(player, videoPlayerRead);
     } catch (e) {
@@ -522,7 +543,6 @@
   }
 
   async function browseMpv() {
-    err = null;
     const picked = await openDialog({
       directory: false,
       multiple: false,
@@ -540,18 +560,16 @@
   }
 
   async function saveMpvPath() {
-    if (mpvBusy) return;
-    mpvBusy = true;
-    err = null;
+    if (!mpvDraft.needsSave("path", (value) => String(value).trim())) return;
     const submitted = mpvDraft.capture();
     const path = submitted.value.path.trim() || null;
     try {
       await writeMpv(() => invoke<MpvInfo>("set_mpv_path", { path }));
+      mpvDraft.feedback.error = null;
     } catch (e) {
-      err = String(e);
+      mpvDraft.feedback.error = String(e);
     } finally {
       mpvDraft.finish(submitted);
-      mpvBusy = false;
     }
   }
 
@@ -564,12 +582,12 @@
   async function installMpv() {
     if (installingMpv) return;
     installingMpv = true;
-    err = null;
-    const submitted = mpvDraft.capture();
+    const submitted = mpvDraft.capture(false);
     try {
       await writeMpv(() => invoke<MpvInfo>("install_mpv"));
+      mpvDraft.feedback.error = null;
     } catch (e) {
-      err = String(e);
+      mpvDraft.feedback.error = String(e);
     } finally {
       mpvDraft.finish(submitted);
       installingMpv = false;
@@ -577,9 +595,6 @@
   }
 
   async function saveMpvAdvanced() {
-    if (mpvAdvBusy) return;
-    mpvAdvBusy = true;
-    err = null;
     const submitted = advancedDraft.capture();
     const options = submitted.value;
     let saved = false;
@@ -591,20 +606,17 @@
         advancedSetting.confirm({ ...options, extraArgs: options.extraArgs.trim() });
       });
       saved = true;
+      advancedDraft.feedback.error = null;
     } catch (e) {
-      err = String(e);
+      advancedDraft.feedback.error = String(e);
     } finally {
       // Keep the author's formatting after success, as before; rollback uses
       // the trimmed text actually stored. New edits always remain drafts.
       advancedDraft.finish(submitted, saved ? "extraArgs" : undefined);
-      mpvAdvBusy = false;
     }
   }
 
   async function saveContinuePlaying() {
-    if (continuePlayingBusy) return;
-    continuePlayingBusy = true;
-    err = null;
     const submitted = continueDraft.capture();
     const mode = submitted.value.mode;
     try {
@@ -613,18 +625,15 @@
         continuePlayingSetting.confirm({ mode: normalized });
         onContinuePlayingChanged?.(normalized);
       });
+      continueDraft.feedback.error = null;
     } catch (e) {
-      err = String(e);
+      continueDraft.feedback.error = String(e);
     } finally {
       continueDraft.finish(submitted);
-      continuePlayingBusy = false;
     }
   }
 
   async function saveVideoPlayer() {
-    if (videoPlayerBusy) return;
-    videoPlayerBusy = true;
-    err = null;
     const submitted = videoPlayerDraft.capture();
     const player = submitted.value.player;
     try {
@@ -640,38 +649,31 @@
           throw e;
         }
       });
+      videoPlayerDraft.feedback.error = null;
     } catch (e) {
-      err = String(e);
+      videoPlayerDraft.feedback.error = String(e);
     } finally {
       videoPlayerDraft.finish(submitted);
-      videoPlayerBusy = false;
     }
   }
 
   async function savePlayerWindowMode() {
-    if (playerWindowBusy) return;
-    playerWindowBusy = true;
-    err = null;
-    // Capture the click's choice before an earlier save or a load can
-    // change this opening's control while its write is queued.
-    const mode = playerWindowMode;
+    const submitted = playerWindowDraft.capture();
+    const mode = submitted.value.mode;
     try {
-      const saved = await queuePlayerWindowSave(() =>
-        invoke<PlayerWindowMode>("set_mpv_window_mode", { mode }),
-      );
-      playerWindowMode = playerWindowSaved = saved;
+      await playerWindowSetting.queue(async () => {
+        const saved = await invoke<PlayerWindowMode>("set_mpv_window_mode", { mode });
+        playerWindowSetting.confirm({ mode: saved });
+      });
+      playerWindowDraft.feedback.error = null;
     } catch (e) {
-      playerWindowMode = playerWindowSaved = playerWindowConfirmed.mode;
-      err = String(e);
+      playerWindowDraft.feedback.error = String(e);
     } finally {
-      playerWindowBusy = false;
+      playerWindowDraft.finish(submitted);
     }
   }
 
   async function savePlaybackPreferences() {
-    if (playbackPreferencesBusy) return;
-    playbackPreferencesBusy = true;
-    err = null;
     const submitted = playbackDraft.capture();
     const { policy, resolutionOverride, hdrOverride } = submitted.value;
     try {
@@ -694,11 +696,11 @@
           throw e;
         }
       });
+      playbackDraft.feedback.error = null;
     } catch (e) {
-      err = String(e);
+      playbackDraft.feedback.error = String(e);
     } finally {
       playbackDraft.finish(submitted);
-      playbackPreferencesBusy = false;
     }
   }
 
@@ -722,12 +724,23 @@
     advancedDraft.edit("extraArgs");
     const cur = advanced.extraArgs.trimEnd();
     advanced.extraArgs = (cur ? cur + "\n" : "") + args + "\n";
+    return saveMpvAdvanced();
+  }
+
+  function blurMpvAdvanced() {
+    if (advancedDraft.needsSave("extraArgs", (value) => String(value).trim())) {
+      return saveMpvAdvanced();
+    }
   }
 
   function navigatorIsWindows() {
     return typeof navigator !== "undefined" && /Win/i.test(navigator.platform);
   }
 </script>
+
+{#snippet saveError(error: string | null)}
+  {#if error}<p class="err" role="alert">{error}</p>{/if}
+{/snippet}
 
 <svelte:window onkeydown={(e) => e.key === "Escape" && onClose()} />
 
@@ -746,6 +759,9 @@
   >
     <header>
       <h2>Settings</h2>
+      <span class="save-status" class:failed={!saving && notSaved} aria-live="polite">
+        {saving ? "Saving…" : notSaved ? "Not saved" : justSaved ? "Saved" : ""}
+      </span>
       <button class="x" bind:this={closeBtn} onclick={onClose} aria-label="Close"><Icon name="close" size={17} /></button>
     </header>
 
@@ -790,6 +806,7 @@
     {#if activeTab === "player"}
     <section>
       <h3>Duplicate playback source</h3>
+      {@render saveError(playbackDraft.feedback.error)}
       <div class="form">
         <p class="muted small">
           This chooses <b>which copy</b> plays, not how it is delivered — that's
@@ -805,7 +822,7 @@
                 name="playback-source-policy"
                 value={policy.value}
                 bind:group={playback.policy}
-                onchange={() => playbackDraft.edit("policy")}
+                onchange={(e) => changeDraft(playbackDraft, "policy", e.currentTarget.value as PlaybackSourcePolicy, savePlaybackPreferences)}
               />
               <span>
                 <b>{policy.label}</b>
@@ -850,7 +867,7 @@
           <div class="overridegrid">
             <div class="field">
               <label for="playback-resolution-override">Resolution</label>
-              <select id="playback-resolution-override" bind:value={playback.resolutionOverride} onchange={() => playbackDraft.edit("resolutionOverride")}>
+              <select id="playback-resolution-override" bind:value={playback.resolutionOverride} onchange={(e) => changeDraft(playbackDraft, "resolutionOverride", e.currentTarget.value, savePlaybackPreferences)}>
                 <option value="">Auto (detected)</option>
                 <option value="720p">1280 × 720</option>
                 <option value="1080p">1920 × 1080</option>
@@ -861,7 +878,7 @@
             </div>
             <div class="field">
               <label for="playback-hdr-override">HDR</label>
-              <select id="playback-hdr-override" bind:value={playback.hdrOverride} onchange={() => playbackDraft.edit("hdrOverride")}>
+              <select id="playback-hdr-override" bind:value={playback.hdrOverride} onchange={(e) => changeDraft(playbackDraft, "hdrOverride", e.currentTarget.value, savePlaybackPreferences)}>
                 <option value="">Auto (detected)</option>
                 <option value="enabled">HDR enabled</option>
                 <option value="disabled">SDR / HDR disabled</option>
@@ -870,20 +887,16 @@
           </div>
         </details>
 
-        <div class="btnrow">
-          <button class="primary" disabled={playbackPreferencesBusy} onclick={savePlaybackPreferences}>
-            {playbackPreferencesBusy ? "Saving…" : "Save playback source preference"}
-          </button>
-        </div>
       </div>
     </section>
 
     <section>
       <h3>Continue Playing</h3>
+      {@render saveError(continueDraft.feedback.error)}
       <div class="form">
         <div class="field">
           <label for="continue-playing">After a video or playlist finishes</label>
-          <select id="continue-playing" bind:value={continuation.mode} onchange={() => continueDraft.edit("mode")}>
+          <select id="continue-playing" bind:value={continuation.mode} onchange={(e) => changeDraft(continueDraft, "mode", e.currentTarget.value as ContinuePlayingMode, saveContinuePlaying)}>
             <option value="off">Off</option>
             <option value="on">On — continue through Continue Watching</option>
             <option value="only-tv">TV only — play the next episode</option>
@@ -893,21 +906,17 @@
             On walks the same Continue Watching list shown on Home.
           </p>
         </div>
-        <div class="btnrow">
-          <button class="primary" disabled={continuePlayingBusy} onclick={saveContinuePlaying}>
-            {continuePlayingBusy ? "Saving…" : "Save Continue Playing"}
-          </button>
-        </div>
       </div>
     </section>
 
     {#if videoPlayer.offered}
     <section>
       <h3>Video player <span class="badge experimental">Experimental</span></h3>
+      {@render saveError(videoPlayerDraft.feedback.error)}
       <div class="form">
         <div class="field">
           <label for="video-player">Videos play in</label>
-          <select id="video-player" bind:value={videoPlayer.player} onchange={() => videoPlayerDraft.edit("player")}>
+          <select id="video-player" bind:value={videoPlayer.player} onchange={(e) => changeDraft(videoPlayerDraft, "player", e.currentTarget.value as VideoPlayer["player"], saveVideoPlayer)}>
             <option value="external">mpv's own window</option>
             <option value="embedded">Vela's window (experimental)</option>
           </select>
@@ -923,21 +932,17 @@
             <p class="muted small">{videoPlayer.note}</p>
           {/if}
         </div>
-        <div class="btnrow">
-          <button class="primary" disabled={videoPlayerBusy} onclick={saveVideoPlayer}>
-            {videoPlayerBusy ? "Saving…" : "Save video player"}
-          </button>
-        </div>
       </div>
     </section>
     {/if}
 
     <section>
       <h3>Player window</h3>
+      {@render saveError(playerWindowDraft.feedback.error)}
       <div class="form">
         <div class="field">
           <label for="player-window">After Vela starts, the first video opens</label>
-          <select id="player-window" bind:value={playerWindowMode}>
+          <select id="player-window" bind:value={playerWindow.mode} onchange={(e) => changeDraft(playerWindowDraft, "mode", e.currentTarget.value as PlayerWindowMode, savePlayerWindowMode)}>
             <option value="remember">As you last left it</option>
             <option value="fullscreen">Full screen</option>
             <option value="default">Default — as mpv and your options say</option>
@@ -947,11 +952,6 @@
             screen, maximized, its screen and its size. This only chooses how
             the first one opens.
           </p>
-        </div>
-        <div class="btnrow">
-          <button class="primary" disabled={playerWindowBusy} onclick={savePlayerWindowMode}>
-            {playerWindowBusy ? "Saving…" : "Save player window"}
-          </button>
         </div>
       </div>
     </section>
@@ -963,8 +963,9 @@
           <input
             type="checkbox"
             id="player-skip-certificate-checks"
-            bind:checked={playerTls.skip}
-            disabled={playerTls.busy || !playerTls.loaded}
+            bind:checked={tls.skip}
+            onchange={(e) => changeDraft(tlsDraft, "skip", e.currentTarget.checked, savePlayerTls)}
+            disabled={!playerTls.loaded}
             aria-describedby="player-certificate-help"
           />
           Skip server certificate checks
@@ -976,14 +977,7 @@
           to mpv with <code>tls-ca-file</code> in Advanced options or your own mpv configuration.
           Applies to the next video; plain HTTP is unchanged.
         </p>
-        <div class="btnrow">
-          <button class="primary" disabled={playerTls.busy || !playerTls.loaded} onclick={savePlayerTls}>
-            {playerTls.busy ? (playerTls.loaded ? "Saving…" : "Loading…") : "Save certificate setting"}
-          </button>
-        </div>
-        {#if playerTls.error}
-          <p class="warn small" role="alert">{playerTls.error}</p>
-        {/if}
+        {@render saveError(tlsDraft.feedback.error)}
       </div>
       {#if mpv}
         <p class="muted small">
@@ -1002,17 +996,17 @@
             placeholder={navigatorIsWindows() ? "C:\\Program Files\\mpv\\mpv.exe" : "/usr/local/bin/mpv"}
             bind:value={mpvPath.path}
             oninput={() => mpvDraft.edit("path")}
+            onblur={saveMpvPath}
+            onkeydown={(e) => { if (e.key === "Enter") { e.preventDefault(); void saveMpvPath(); } }}
           />
         </div>
         <div class="btnrow">
-          <button class="primary" disabled={mpvBusy} onclick={saveMpvPath}>
-            {mpvBusy ? "Saving…" : "Save path"}
-          </button>
-          <button disabled={mpvBusy} onclick={browseMpv}>Browse…</button>
+          <button onclick={browseMpv}>Browse…</button>
           {#if mpv?.configuredPath}
-            <button class="rm" disabled={mpvBusy} onclick={clearMpvPath}>Clear</button>
+            <button class="rm" onclick={clearMpvPath}>Clear</button>
           {/if}
         </div>
+        {@render saveError(mpvDraft.feedback.error)}
         {#if mpv?.canAutoInstall}
           <button class="primary" disabled={installingMpv} onclick={installMpv}>
             {installingMpv ? "Installing mpv…" : "Install mpv automatically"}
@@ -1032,6 +1026,7 @@
 
         <div class="field">
           <label for="mpv-extra">Advanced mpv options</label>
+          {@render saveError(advancedDraft.feedback.error)}
           <textarea
             id="mpv-extra"
             rows="4"
@@ -1039,6 +1034,7 @@
             placeholder={"One option per line, e.g.\n--vo=gpu\n--profile=fast"}
             bind:value={advanced.extraArgs}
             oninput={() => advancedDraft.edit("extraArgs")}
+            onblur={blurMpvAdvanced}
           ></textarea>
           <p class="muted small">
             One mpv option per line, appended when launching mpv — so these override
@@ -1049,7 +1045,7 @@
         </div>
 
         <label class="check">
-          <input type="checkbox" bind:checked={advanced.useOwnConfig} onchange={() => advancedDraft.edit("useOwnConfig")} />
+          <input type="checkbox" bind:checked={advanced.useOwnConfig} onchange={(e) => changeDraft(advancedDraft, "useOwnConfig", e.currentTarget.checked, saveMpvAdvanced)} />
           Use my own mpv config (<code>~/.config/mpv/mpv.conf</code>)
         </label>
         <p class="muted small">
@@ -1060,7 +1056,7 @@
 
         <div class="field">
           <label for="mpv-autocrop">Black-bar cropping (mpv autocrop)</label>
-          <select id="mpv-autocrop" bind:value={advanced.autocrop} onchange={() => advancedDraft.edit("autocrop")}>
+          <select id="mpv-autocrop" bind:value={advanced.autocrop} onchange={(e) => changeDraft(advancedDraft, "autocrop", e.currentTarget.value as AutocropMode, saveMpvAdvanced)}>
             <option value="off">Off</option>
             <option value="manual">Manual — press Shift+C to crop</option>
             <option value="auto">Automatic — crop every video</option>
@@ -1082,7 +1078,7 @@
 
         <div class="field">
           <label for="playback-quality">Playback quality</label>
-          <select id="playback-quality" bind:value={advanced.playbackQuality} onchange={() => advancedDraft.edit("playbackQuality")}>
+          <select id="playback-quality" bind:value={advanced.playbackQuality} onchange={(e) => changeDraft(advancedDraft, "playbackQuality", e.currentTarget.value, saveMpvAdvanced)}>
             <option value="original">Original — play the file as it is</option>
             {#each qualityTiers as tier (tier.id)}
               <!-- Two tiers share the label "Convert to 1080p HD" and differ
@@ -1125,7 +1121,7 @@
 
         <div class="field">
           <label for="skip-intros">Skip intros</label>
-          <select id="skip-intros" bind:value={advanced.skipIntros} onchange={() => advancedDraft.edit("skipIntros")}>
+          <select id="skip-intros" bind:value={advanced.skipIntros} onchange={(e) => changeDraft(advancedDraft, "skipIntros", e.currentTarget.value as SkipPolicy, saveMpvAdvanced)}>
             <option value="off">Off</option>
             <option value="button">Button — ask on screen</option>
             <option value="autoskip">Auto-skip</option>
@@ -1134,7 +1130,7 @@
 
         <div class="field">
           <label for="skip-credits">Skip credits</label>
-          <select id="skip-credits" bind:value={advanced.skipCredits} onchange={() => advancedDraft.edit("skipCredits")}>
+          <select id="skip-credits" bind:value={advanced.skipCredits} onchange={(e) => changeDraft(advancedDraft, "skipCredits", e.currentTarget.value as SkipPolicy, saveMpvAdvanced)}>
             <option value="off">Off</option>
             <option value="button">Button — ask on screen</option>
             <option value="autoskip">Auto-skip</option>
@@ -1143,7 +1139,7 @@
 
         <div class="field">
           <label for="skip-commercials">Skip commercials</label>
-          <select id="skip-commercials" bind:value={advanced.skipCommercials} onchange={() => advancedDraft.edit("skipCommercials")}>
+          <select id="skip-commercials" bind:value={advanced.skipCommercials} onchange={(e) => changeDraft(advancedDraft, "skipCommercials", e.currentTarget.value as SkipPolicy, saveMpvAdvanced)}>
             <option value="off">Off</option>
             <option value="button">Button — ask on screen</option>
             <option value="autoskip">Auto-skip</option>
@@ -1158,9 +1154,6 @@
         </div>
 
         <div class="btnrow">
-          <button class="primary" disabled={mpvAdvBusy} onclick={saveMpvAdvanced}>
-            {mpvAdvBusy ? "Saving…" : "Save mpv options"}
-          </button>
           <button onclick={() => (showMpvHelp = !showMpvHelp)}>
             {showMpvHelp ? "Hide examples" : "Show examples"}
           </button>
@@ -1267,6 +1260,17 @@
 </div>
 
 <style>
+  /* Beside the Close button; its width is kept so the header does not move. */
+  .save-status {
+    margin: 0 0.75rem 0 auto;
+    min-width: 5.5em;
+    text-align: right;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+  }
+  .save-status.failed {
+    color: var(--danger-text);
+  }
   .overlay {
     position: fixed;
     inset: 0;
@@ -1639,9 +1643,6 @@
     flex-wrap: wrap;
     gap: 0.5rem;
     align-items: center;
-  }
-  .btnrow button.primary {
-    align-self: auto;
   }
   /* Secondary buttons (e.g. Browse…) inside the panel. */
   .btnrow button:not(.primary):not(.rm) {

@@ -94,12 +94,6 @@ async function setPolicy(driver, configRoot, label, expected) {
       `//*[@role='dialog' and @aria-label='Settings']//label[.//b[normalize-space(.)='${label}']]`,
     ),
   );
-  await driver.click(
-    await driver.find(
-      'xpath',
-      `//*[@role='dialog' and @aria-label='Settings']//button[normalize-space(.)='Save playback source preference']`,
-    ),
-  );
   await pollUntil(
     () => (readConfig(configRoot).playback_source_policy ?? 'best') === expected,
     `${label} to persist`,
