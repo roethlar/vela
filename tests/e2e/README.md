@@ -273,9 +273,9 @@ A scenario that runs in both players shows its rows in both, except where
 `parity.mjs` records it as failing there on a product defect
 (`KNOWN_FAILURES`: the scenario, the player, the exact text the failure
 carries, and the defect with its evidence; `intermittent` for a race that
-does not fail every run, such as `pagefail`'s). Such a scenario shows nothing in
-that player; a row only it claims there is printed as NOT SHOWN, RED, and
-not counted. Today: `pagefail` in both players (it claims no row).
+does not fail every run). Such a scenario shows nothing in that player;
+a row only it claims there is printed as NOT SHOWN, RED, and not counted.
+Today no scenario is allowed to fail on a recorded product defect.
 
 The parity test reads declarations only: it cannot see that a scenario
 fails in one player, or claims a row it never reaches. That is the parity

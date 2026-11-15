@@ -232,10 +232,18 @@ async function scrollGridToEnd(driver) {
     `return !!document.querySelector('main.grid')`,
     "the browse grid",
   );
+  // One scroll event per call, never two. Moving the grid makes WebKit send a
+  // scroll event of its own, a moment later; a synthetic one on top of it is a
+  // second request for the next page whenever the first has already failed by
+  // the time the real one arrives (WebKitGTK 2.54 on `continuum`: every run).
+  // That retry is the app working as it should, and it broke this scenario's
+  // "page 2 never arrived". The synthetic event is for a grid that is already
+  // at its end, which moving cannot make scroll.
   await driver.exec(
     `const g = document.querySelector('main.grid');
+     const before = g.scrollTop;
      g.scrollTop = g.scrollHeight;
-     g.dispatchEvent(new Event('scroll'));`,
+     if (g.scrollTop === before) g.dispatchEvent(new Event('scroll'));`,
   );
 }
 

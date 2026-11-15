@@ -61,23 +61,7 @@ export const SPLITS = {
 // race that does not fail every run: a pass is then accepted too, never a
 // different failure. Remove an entry once the product is fixed and the
 // scenario passes.
-export const KNOWN_FAILURES = [
-  {
-    scenario: 'pagefail',
-    player: 'external',
-    intermittent: true,
-    failsWith: 'precondition: back on the truncated grid, page 2 never arrived',
-    defect:
-      "The grid's onScroll in src/routes/+page.svelte loads the next page from a scroll event WebKit delivers after the grid has left the DOM (all sizes 0), so the page the scenario failed on purpose is fetched again. Recorded in .agents/state.md (E2E pagefail); fix needs a plan and a go.",
-  },
-  {
-    scenario: 'pagefail',
-    player: 'embedded',
-    intermittent: true,
-    failsWith: 'precondition: back on the truncated grid, page 2 never arrived',
-    defect: 'As in the external player: the same product race (.agents/state.md, E2E pagefail). It passed in the full embedded run of 6787b9f, so it is a race in this player too, not a failure of every run.',
-  },
-];
+export const KNOWN_FAILURES = [];
 
 // A row and player that no scenario of the suite shows, and why. An exemption
 // is not coverage: the parity test lists every one of them each time it runs.

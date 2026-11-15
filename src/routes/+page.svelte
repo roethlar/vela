@@ -2026,6 +2026,8 @@
       myGen === loadGen &&
       hasMore &&
       gridEl &&
+      gridEl.isConnected &&
+      gridEl.clientHeight > 0 &&
       gridEl.scrollHeight <= gridEl.clientHeight
     ) {
       return await loadMore(myGen, onError);
@@ -2035,6 +2037,8 @@
 
   function onScroll(e: Event) {
     const el = e.currentTarget as HTMLElement;
+    // WebKit can deliver a queued scroll after the grid leaves the document.
+    if (!el.isConnected || el.clientHeight === 0) return;
     if (el.scrollHeight - el.scrollTop - el.clientHeight < 600) loadMore();
   }
 
@@ -2845,6 +2849,8 @@
         hasMore &&
         !loadingMore &&
         gridEl &&
+        gridEl.isConnected &&
+        gridEl.clientHeight > 0 &&
         gridEl.scrollHeight <= gridEl.clientHeight
       ) {
         loadMore();
