@@ -2093,7 +2093,10 @@ it. A screenshot of the open list was looked at.
 the unpacked package's own binary passed `embeddedtracks`,
 `embeddedcontrols`, `playback`, `sourcepolicy` and `continueoff` in the
 embedded player and `playback`, `smoke`, `sourcepolicy`, `continueoff`
-and `windowsetting` in the external one. The full run of both suites at `2a954d0`, each building its app, passed everything: external 48 of 48, embedded 51 of 51, parity verdict PASS (results on `continuum` in `~/dev/vela-agent-keep/full-2a954d0-e2e/`).
+and `windowsetting` in the external one. The full run of both suites at
+`2a954d0`, each building its app, passed everything: external 48 of 48,
+embedded 51 of 51, parity verdict PASS (results on `continuum` in
+`~/dev/vela-agent-keep/full-2a954d0-e2e/`).
 
 **Not seen.** The owner's desktop with the fix; a list of thirty
 subtitle tracks (the clip has one).
