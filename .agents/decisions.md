@@ -2271,3 +2271,55 @@ setting.
 Supersedes:
 Nothing. It answers the entry "The external player does not check the
 media server's TLS certificate" under Blockers in `.agents/state.md`.
+
+## 2026-11-15 - The embedded player is offered in Settings; the owner is Vela's only user
+
+Status: OWNER RULING (2026-11-15).
+
+Decision:
+- **The embedded player is to be usable from the app.** The agent's report
+  on the run of 2026-11-12 to 14 called the embedded player "hidden" (no
+  Settings control; chosen only by writing `"player": "embedded"` into
+  `config.json`) and said it would stay so, away from users, until the
+  owner had done the by-eye checks. The owner: "what users are you not
+  showing it to? I'm the only user." The agent then asked whether to add
+  the Settings control. The owner: "so you're asking me, apparently for a
+  second time, whether I want the thing I asked you to build days ago to
+  actually be usable?" The Settings control is added now, under the plan's
+  D1 and D2: the external player stays the default, and the embedded one
+  is offered beside it marked experimental.
+- **The owner is Vela's only user.** Nothing is being kept from anyone by
+  holding work back from the app.
+
+Supersedes:
+The "Build on, keep hidden" choice in the entry of 2026-11-12 ("...
+owner-only checks wait and the embedded setting stays hidden"), as far as
+the Settings control, the documents and the release note go; and the
+sentence in `.agents/repo-guidance.md` (Mission Detail) that forbade
+showing the player choice until the by-eye checks were done.
+
+What does not change:
+- External is the default on every desktop system, and the embedded player
+  keeps its experimental mark (D1, 2026-11-12).
+- The by-eye checks in `.agents/plans/embedded-player.md` ("Owner checks
+  outstanding") are still the owner's. They are how the owner judges the
+  player; they no longer hold anything back.
+- Nothing is tagged or released by the agent, and the agent does not edit
+  `.github/workflows`. A package from the release workflow therefore does
+  not carry the embedded player's library yet; a local
+  `scripts/build.sh --with-libmpv` build does.
+
+Agent's reading (not the owner's words), for how to work here:
+- Something the owner asked to be built is to be made usable by the owner
+  as part of building it. Do not ask whether to, and do not describe
+  finished work as held back from "users".
+- An ask that the owner has already answered, in substance, is not put
+  again in other words.
+- This entry does not by itself retire the compatibility rules recorded
+  elsewhere (the legacy fields kept in `config.json`, the notes on going
+  back to an older Vela). Those are separate decisions and stand until the
+  owner says otherwise.
+
+Updates:
+`.agents/repo-guidance.md` (Mission Detail); `.agents/plans/embedded-player.md`
+(Status and log); `.agents/state.md`.

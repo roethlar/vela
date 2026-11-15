@@ -17,9 +17,10 @@
   `.agents/plans/embedded-player.md` (decisions `.agents/decisions.md`
   2026-11-12): Linux on Wayland first, experimental, off by default, using
   a libmpv that Vela ships. Embed video only as that plan describes; its
-  Status and log say how far it has landed. Do not show the player choice
-  to users (Settings, docs, release notes) until the owner has done the
-  by-eye checks the plan lists.
+  Status and log say how far it has landed. Since 2026-11-15 the choice is
+  offered in Settings (Player, "Video player"), marked experimental, by the
+  owner's ruling of that day (`.agents/decisions.md`): the owner is Vela's
+  only user, and what is built is to be usable from the app.
 - SvelteKit is configured as a static SPA for Tauri. Vite dev uses port `1420`
   with strict port behavior.
 - Linux release packaging lives in `src-tauri/bundle/linux/` for Tauri bundles
