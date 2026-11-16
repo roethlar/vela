@@ -10,6 +10,54 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 const workflow = (
   await readFile(path.join(repoRoot, ".github", "workflows", "release.yml"), "utf8")
 ).replace(/\r\n/g, "\n");
+const ci = (
+  await readFile(path.join(repoRoot, ".github", "workflows", "ci.yml"), "utf8")
+).replace(/\r\n/g, "\n");
+
+function otherPlatformsJob() {
+  const job = ci.match(/^  other-platforms:\n[\s\S]*?(?=^  [a-z][a-z0-9_-]*:\n|(?![\s\S]))/m)?.[0];
+  assert.ok(job, "CI must keep its other-platforms job");
+  return job.split("\n").filter((line) => !/^\s*#/.test(line)).join("\n");
+}
+
+test("CI installs both targets of the universal macOS release", () => {
+  const job = otherPlatformsJob();
+  assert.match(job, /^        os: \[macos-latest, windows-latest\]$/m);
+  assert.match(job, /^    runs-on: \$\{\{ matrix\.os \}\}$/m);
+  assert.match(job, /    defaults:\n      run:\n        working-directory: src-tauri\n/);
+  assert.match(job, /^      fail-fast: false$/m);
+  assert.doesNotMatch(job, /continue-on-error:/);
+  assert.ok(
+    job.includes(
+      "      - uses: dtolnay/rust-toolchain@stable\n" +
+      "        with:\n" +
+      "          targets: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}\n",
+    ),
+    "the macOS toolchain must install both Darwin targets; Windows keeps its host target",
+  );
+});
+
+for (const target of ["aarch64-apple-darwin", "x86_64-apple-darwin"]) {
+  test(`CI explicitly checks ${target} on macOS`, () => {
+    assert.match(
+      otherPlatformsJob(),
+      new RegExp(
+        "^      - name: [^\\n]+\\n" +
+        "        if: runner\\.os == 'macOS'\\n" +
+        `        run: cargo \\+stable check --locked --target ${target}\\n`,
+        "m",
+      ),
+      `CI must check ${target} explicitly, regardless of the macOS runner's host architecture`,
+    );
+  });
+}
+
+test("CI scopes the host-only compile check to Windows", () => {
+  assert.match(
+    otherPlatformsJob(),
+    /      - name: [^\n]+\n        if: runner\.os == 'Windows'\n        run: cargo \+stable check --locked\n/,
+  );
+});
 
 test("release artifacts fail closed through a final inventory", () => {
   assert.doesNotMatch(workflow, /if-no-files-found:\s*ignore/);

@@ -48,8 +48,9 @@ jobs:
     name: Rust compiles (${{ matrix.os }})
     # The release builds for macOS and Windows, and nothing else compiled the
     # backend there between releases: a break was found at the tag, after the
-    # fact. This is `cargo check` of what the release compiles, on both. It
-    # runs no test and builds no bundle; a warning does not fail it.
+    # fact. This checks both architectures of the universal macOS release
+    # and the Windows host target. It runs no test and builds no bundle;
+    # a warning does not fail it.
     strategy:
       fail-fast: false
       matrix:
@@ -62,12 +63,22 @@ jobs:
       - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
 
-      - run: cargo +stable check --locked
+      - name: Check macOS (Apple Silicon)
+        if: runner.os == 'macOS'
+        run: cargo +stable check --locked --target aarch64-apple-darwin
+      - name: Check macOS (Intel)
+        if: runner.os == 'macOS'
+        run: cargo +stable check --locked --target x86_64-apple-darwin
+      - name: Check Windows
+        if: runner.os == 'Windows'
+        run: cargo +stable check --locked
 
   frontend:
     name: Frontend
