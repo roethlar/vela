@@ -32,7 +32,7 @@ node scripts/check-js-toolchain.mjs >> "$out/tools.log" 2>&1 || fail "the JS too
 brew install ffmpeg >> "$out/tools.log" 2>&1 || fail "ffmpeg"
 
 # A debug Vela with the hook, its page embedded (as the end-to-end suite builds it).
-python3 "$here/hook.py" src-tauri/src/lib.rs >> "$out/tools.log" 2>&1 || fail "the hook"
+python3 "$here/hook.py" "$repo" >> "$out/tools.log" 2>&1 || fail "the hook"
 npm ci --no-audit --no-fund > "$out/npm-ci.log" 2>&1 || fail "npm ci"
 npx tauri build --debug --no-bundle > "$out/build.log" 2>&1 || { tail -60 "$out/build.log"; fail "the debug build"; }
 bin="$repo/src-tauri/target/debug/vela"
@@ -65,6 +65,7 @@ kill "$vela" 2>/dev/null; wait "$vela" 2>/dev/null
 kill "$shots" "$mock" 2>/dev/null
 cp "$home/Library/Application Support/com.vela.vela/"*.json "$out/" 2>/dev/null
 rm -f "$out/connections.json"   # the mock's token only, but it is not evidence
+cp "$root/mpv.log" "$out/mpv.log" 2>/dev/null
 find "$HOME/Library/Logs/DiagnosticReports" -name 'vela*' -newer "$out/system.txt" -exec cp {} "$out/" \; 2>/dev/null
 
 grep 'probe:' "$out/vela.log" > "$out/notes.txt"

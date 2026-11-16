@@ -25,7 +25,12 @@ const configDir = path.join(home, 'Library', 'Application Support', 'com.vela.ve
 fs.mkdirSync(configDir, { recursive: true, mode: 0o700 });
 fs.writeFileSync(
   path.join(configDir, 'config.json'),
-  JSON.stringify({ sources: [mockSource(mock)], player: 'embedded' }),
+  JSON.stringify({
+    sources: [mockSource(mock)],
+    player: 'embedded',
+    // mpv's own account of the plays, as the Advanced options would give it.
+    mpv_extra_args: `--log-file=${path.join(root, 'mpv.log')}\n--msg-level=all=v`,
+  }),
   { mode: 0o600 },
 );
 console.log(`mock Jellyfin on port ${mock.port}; configuration in ${configDir}`);

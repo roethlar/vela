@@ -30,6 +30,10 @@
     html: getComputedStyle(document.documentElement).backgroundColor,
     size: [innerWidth, innerHeight, devicePixelRatio],
     text: (document.querySelector('.player')?.innerText ?? '').replace(/\s+/g, ' ').slice(0, 160),
+    rect: (() => {
+      const r = document.querySelector('.player')?.getBoundingClientRect();
+      return r ? [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)] : null;
+    })(),
   });
   const playOnce = async (label, seconds) => {
     const play = await until(() => document.querySelector('.detail button.playwide'), `the Play button (${label})`);
