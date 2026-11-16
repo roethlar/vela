@@ -9,6 +9,7 @@ import { test } from 'node:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parse } from 'svelte/compiler';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (file) => fs.readFileSync(path.join(repoRoot, file), 'utf8').replace(/\r\n/g, '\n');
@@ -519,3 +520,29 @@ test('the player setting is validated and exposed through commands and Settings'
   }
   assert.match(read('src/lib/Settings.svelte'), /<select id="video-player"/);
 });
+
+function playerGuidance(file) {
+  const source = read(file);
+  if (!file.endsWith('.svelte')) return source.replace(/\s+/g, ' ');
+  // Read rendered text, so a sentence in a script or comment cannot stand
+  // in for the guidance that users see.
+  const texts = [];
+  const walk = (node) => {
+    if (!node || typeof node !== 'object') return;
+    if (node.type === 'Text') texts.push(node.data);
+    for (const [key, value] of Object.entries(node)) if (key !== 'parent' && key !== 'attributes') walk(value);
+  };
+  walk(parse(source, { modern: true }).fragment);
+  return texts.join(' ').replace(/\s+/g, ' ');
+}
+
+for (const file of ['src/lib/Settings.svelte', 'docs/usage.md', 'RELEASE_NOTES.md']) {
+  test(`${file}: switching to the external player is explained as a next-video change`, () => {
+    assert.ok(/Switching to mpv's own window applies to the next video\./.test(playerGuidance(file)), 'explain when an external choice applies');
+    assert.doesNotMatch(playerGuidance(file), /(?:a change|change of player) takes effect the next time Vela starts/i);
+  });
+
+  test(`${file}: embedded restart guidance is conditional on how this run started`, () => {
+    assert.ok(/To use Vela's window, restart Vela if this run started without embedded playback\./.test(playerGuidance(file)), 'explain when embedded playback needs a restart');
+  });
+}

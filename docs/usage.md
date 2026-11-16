@@ -79,10 +79,11 @@ Settings → Player → Video player (shown on Linux) chooses where videos play:
   player.
 
 The embedded player runs on Linux in a Wayland session, and not yet with the
-NVIDIA proprietary driver. A change of player takes effect the next time Vela
-starts. Whenever the embedded player cannot be used, the video plays in mpv's
-own window instead and one line on screen says why; Settings shows the reason
-under the choice.
+NVIDIA proprietary driver. Switching to mpv's own window applies to the next
+video. To use Vela's window, restart Vela if this run started without embedded
+playback. Whenever the embedded player cannot be used, the video plays in
+mpv's own window instead and one line on screen says why; Settings shows the
+reason under the choice.
 
 It has its own control bar over the picture (pause, seeking, volume, audio
 and subtitle tracks, cropping, full screen, close) and a skip button for

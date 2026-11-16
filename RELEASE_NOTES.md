@@ -71,11 +71,13 @@ Vela's own window on Linux with Wayland.
 - Add an experimental second player that shows the video inside Vela's own
   window: Settings → Player → Video player (shown on Linux). It has its own
   control bar, keys and mouse actions (click to pause, double-click for full
-  screen, the wheel for volume). It runs in a Wayland session, takes effect
-  after Vela is restarted, and is off by default. Whenever it cannot be used,
-  the video plays in mpv's own window and a line on screen says why. It uses
-  its own copy of mpv's library, which the Linux packages now carry; Settings
-  says so when it is missing. Details are in `docs/usage.md`.
+  screen, the wheel for volume). It runs in a Wayland session and is off by
+  default. Switching to mpv's own window applies to the next video. To use
+  Vela's window, restart Vela if this run started without embedded playback.
+  Whenever it cannot be used, the video plays in mpv's own window and a line
+  on screen says why. It uses its own copy of mpv's library, which the Linux
+  packages now carry; Settings says so when it is missing. Details are in
+  `docs/usage.md`.
 
 ## Fixes
 
