@@ -328,6 +328,17 @@ test('track highlights move within the live list without selecting a track', () 
   assert.deepEqual(ids, ['no', 4, 7]);
 });
 
+test('a missing highlighted track navigates from the first surviving entry', () => {
+  for (const missing of [null, 99]) {
+    const ids = ['no', 4, 7];
+    for (const [move, expected] of [['previous', 'no'], ['next', 4], ['first', 'no'], ['last', 7]]) {
+      assert.equal(nextTrackHighlight(ids, missing, move), expected, `${missing}: ${move}`);
+    }
+    assert.equal(nextTrackHighlight([7], missing, 'next'), 7);
+    assert.equal(nextTrackHighlight([], missing, 'next'), null);
+  }
+});
+
 // ---------------------------------------------------------------------------
 // The picture.
 
@@ -587,6 +598,18 @@ test('volume retains drag and timeout behavior while seeking keeps its arrival t
   assert.deepEqual(nextVolumeBar(pending, { kind: 'state', position: 72, now: 3100 }), SEEK_IDLE);
   assert.equal(seekBarValue(pending, 72, 3100), 72);
   assert.deepEqual(nextSeekBar(pending, { kind: 'state', position: 72, now: 101 }), SEEK_IDLE);
+});
+
+test('seek hover has no time when the track is no wider than its thumb', () => {
+  for (const thumbWidth of [16, 24]) {
+    for (const width of [thumbWidth / 2, thumbWidth - 0.1, thumbWidth, 0, -1]) {
+      for (const x of [100, 100 + width / 2, 100 + width]) {
+        assert.equal(seekTimeAtPointer(x, 100, width, 240, thumbWidth), null, `width=${width}, thumb=${thumbWidth}, x=${x}`);
+      }
+    }
+    const width = thumbWidth + 1;
+    assert.equal(seekTimeAtPointer(100 + width / 2, 100, width, 240, thumbWidth), 120);
+  }
 });
 
 test('seek hover time uses thumb centres at both ends and at the middle', () => {

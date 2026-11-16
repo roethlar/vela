@@ -360,6 +360,91 @@ test('a released volume slider keeps its exact target through stale state', asyn
   await h.reply();
 });
 
+test('fast native double-clicks toggle fullscreen both ways and cancel the pause timer', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
+  const h = viewHandlers();
+  for (const detail of [1, 3]) {
+    h.pointerdown(h.event(0, detail));
+    h.click(h.event(0, detail));
+    t.mock.timers.tick(100);
+    assert.deepEqual(h.commands, []);
+    h.pointerdown(h.event(0, detail + 1));
+    h.click(h.event(0, detail + 1));
+    h.dblclick(h.event(0, detail + 1));
+    assert.deepEqual(h.fullscreens, detail === 1 ? [true] : [true, false]);
+    t.mock.timers.tick(600);
+    assert.deepEqual(h.commands, [], 'neither click leaves a timer that pauses later');
+  }
+  // Cancelling a pair must not disable subsequent single clicks.
+  h.pointerdown(h.event());
+  h.click(h.event());
+  t.mock.timers.tick(249);
+  assert.deepEqual(h.commands, []);
+  t.mock.timers.tick(1);
+  assert.deepEqual(h.commands, [{ name: 'toggle-pause', args: [] }]);
+  await h.reply();
+});
+
+for (const paused of [false, true]) {
+  for (const timing of ['unanswered', 'answered']) {
+    test(`slow double-click restores ${paused ? 'paused' : 'playing'} playback with an ${timing} first reply`, async (t) => {
+      t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
+      const h = viewHandlers({ paused });
+      const toggle = { name: 'toggle-pause', args: [] };
+      h.pointerdown(h.event());
+      h.click(h.event());
+      t.mock.timers.tick(249);
+      assert.deepEqual(h.commands, []);
+      t.mock.timers.tick(1);
+      assert.deepEqual(h.commands, [toggle]);
+      h.state({ paused: !paused });
+      if (timing === 'answered') await h.reply(); else h.wheel(0, -40);
+      t.mock.timers.tick(70);
+      h.pointerdown(h.event(0, 2));
+      h.click(h.event(0, 2));
+      h.dblclick(h.event(0, 2));
+      assert.deepEqual(h.fullscreens, [true], 'fullscreen does not wait for a player command');
+      if (timing === 'unanswered') {
+        assert.deepEqual(h.commands, [toggle], 'restoration waits for the first reply');
+        await h.reply();
+      } else h.wheel(0, -40);
+      assert.deepEqual(h.commands, [toggle, toggle], 'restore before the queued wheel');
+      h.state({ paused });
+      await h.reply();
+      assert.deepEqual(h.commands, [toggle, toggle, { name: 'set-volume', args: [42] }]);
+      await h.reply();
+      t.mock.timers.tick(600);
+      assert.equal(h.commands.filter((c) => c.name === 'toggle-pause').length, 2, 'the pair preserves pause parity');
+      assert.deepEqual(h.fullscreens, [true]);
+    });
+  }
+}
+
+test('a slow double-click retains both toggles when the first pause is still queued', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1000 });
+  const h = viewHandlers();
+  h.wheel(0, -40);
+  h.pointerdown(h.event());
+  h.click(h.event());
+  t.mock.timers.tick(250);
+  h.wheel(0, -40);
+  t.mock.timers.tick(70);
+  h.pointerdown(h.event(0, 2));
+  h.click(h.event(0, 2));
+  h.dblclick(h.event(0, 2));
+  assert.deepEqual(h.fullscreens, [true]);
+  const expected = [
+    { name: 'set-volume', args: [42] }, { name: 'toggle-pause', args: [] },
+    { name: 'toggle-pause', args: [] }, { name: 'set-volume', args: [44] },
+  ];
+  for (let i = 1; i <= expected.length; i++) {
+    assert.deepEqual(h.commands, expected.slice(0, i));
+    await h.reply();
+  }
+  t.mock.timers.tick(600);
+  assert.deepEqual(h.commands, expected);
+});
+
 test('picture clicks without a primary press leave playback, fullscreen, and a running wait alone', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const picture = pictureHandlers();
