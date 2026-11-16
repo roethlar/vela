@@ -46,7 +46,7 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     48 of 48, embedded 51 of 51, at `a13be71`), the plan's red-proofs, a
     codex hunt over the whole change. `cargo audit` is not installed on
     `continuum`; CI runs it.
-  - HANDOFF, 2026-11-16 about 18:15 UTC (written in case the session
+  - HANDOFF, 2026-11-16 about 18:10 UTC (written in case the session
     stops; the session moved from Fable to Opus at 98% of Fable's weekly
     allowance). Where things are:
     1. APPLE IS FIXED. The release workflow's run by hand 43914914442 at
@@ -64,13 +64,23 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
        still 1280x753, the page rendering in both window modes, Vela's
        icon. Not seen: a video playing in the embedded player under the
        new bar (its position is measured at each play, `host.rs`).
-    3. Running when this was written: the release workflow by hand at
-       `b163241`, run 43921694491, whose artifacts are what the owner
-       verifies on the Mac and on Windows; and the final proofs of
-       `b163241` (both end-to-end suites with the parity verdict, the
-       full check, the 1.0.67 package for `continuum` run by its own
-       binary): `~/dev/vela-agent-keep/final-b163241/summary.log` on
-       `continuum`, which ends in FINALDONE.
+    3. The final proofs of `b163241` PASSED (18:05 UTC): both end-to-end
+       suites in full on a clean checkout, external 48 of 48 and embedded
+       51 of 51, parity verdict PASS; the full check (733 Rust tests, 737
+       Node tests; `cargo audit` not installed on `continuum`, CI runs
+       it); the 1.0.67 package for `continuum`, built with the library and
+       checked, its own binary passing in both players:
+       `~/dev/vela-agent-keep/pkg/vela-1.0.67-1-x86_64.pkg.tar.zst`,
+       sha256 `2c8e9580b5c6826dccfbf348552ad0ed2d18775d13fd1f724398b7cb44c1fa2f`. Logs: `~/dev/vela-agent-keep/final-b163241/`.
+       The release workflow by hand at `b163241`, run 43921694491: the
+       Windows, Linux and Arch builds passed. Its macOS job was cancelled
+       by GitHub, as the first attempt of 43914914442's had been: "The job
+       was not acquired by Runner of type hosted even after multiple
+       attempts", with GitHub's notice "Due to capacity constraints, jobs
+       targeting macOS arm64 runners may experience longer queue times".
+       Not Vela's fault; re-running the job is the remedy, and it was
+       re-run at 18:08 UTC (`gh run rerun 43921694491 --repo
+       roethlar/vela --failed`); its result is not recorded here.
     4. Then the owner: download the run's `vela-macos` and
        `vela-windows` artifacts (`gh run download 43921694491 --repo
        roethlar/vela`), check them, install the 1.0.67 package on

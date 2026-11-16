@@ -470,7 +470,12 @@ builds, which the owner corrected):
    that was verified, pushed to `github`. The tag
    builds again from that commit and makes a DRAFT release with every
    package and `SHA256SUMS`; the draft is not public, and can be looked over
-   once more. Paste `RELEASE_NOTES.md` as its text and publish it.
+   once more. Paste `RELEASE_NOTES.md` as its text and publish it. If
+   GitHub cancels the macOS job for want of a runner (it did twice on
+   2026-11-16: "The job was not acquired by Runner of type hosted even after
+   multiple attempts"), re-run the failed jobs of that run (`gh run rerun
+   <run> --failed`, or "Re-run failed jobs" on the run's page): the macOS
+   leg then adds its DMG to the same draft and the inventory job runs.
 5. **Not needed for the release:** whether the Windows installers are
    signed another way (open; the decisions entry lists what was offered),
    and removing the six `AZURE_*` repository secrets and the Azure
