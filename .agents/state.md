@@ -49,9 +49,12 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   - Linux unchanged through all of it: both end-to-end suites in full at
     `6b206ec`, `623ec17`, `c49be2a` and `49f2c3c` (48 of 48, 51 of 51,
     parity PASS).
-  - The end-to-end suite now runs on a hosted Windows runner too
-    (`9617815`, workflow `e2e-windows.yml`, by hand); its first full run
-    is in progress.
+  - The end-to-end suite has a Windows port (`9617815`, workflow
+    `e2e-windows.yml`, by hand), but its first full run (43964966316)
+    started no WebDriver session in any scenario: a harness fault on
+    Windows whose repair waits for the release's test pass (the plan's
+    Probe log). Probe W2 (`probes/w2-vela`) checks Vela on Windows
+    meanwhile.
   - Type-checking Windows and macOS Rust from Linux:
     `scripts/check-other-platforms.sh` (repo-guidance, Verification).
 - VELA 1.0.66 IS READY TO BE RELEASED, AS FAR AS THE AGENT CAN TAKE IT

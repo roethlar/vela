@@ -2362,6 +2362,16 @@ artifact keeps the probe's logs and screenshots.
   stuck.` every 250 ms. Probe M1 and mpv's own Cocoa layer drive their
   draws from mpv's render update callback; the macOS host installed none.
   Repair in progress (codex): the same, then M2 again.
+- **2026-11-16, the Windows end-to-end suite's first full run: no WebDriver
+  session.** `e2e-windows.yml`, run 43964966316 at `acf0a40`, both suites:
+  in all 110 scenarios Edge WebDriver (156.0.4314.58, matching the
+  runner's WebView2) waited for the app's WebView2 and `POST /session`
+  timed out after 60 s; no Vela window appeared on the runner's desktop,
+  and tauri-driver's log holds only the broken connection. A fault of the
+  suite's harness on Windows, not evidence about Vela; its repair is test
+  machinery and waits for the release's test pass (`.agents/decisions.md`,
+  2026-11-14). Meanwhile probe W2 (`probes/w2-vela`) runs M2's method on a
+  hosted Windows runner.
 
 ### Design that follows (2026-11-16)
 
