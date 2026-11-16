@@ -74,6 +74,13 @@ from the retired `.agents/repo-map.json`, 2026-07-08; verified against
   (drives the real debug app; needs tauri-driver, Xvfb, ffmpeg, mpv, bsdtar,
   curl — see `tests/e2e/README.md`). `-- --skip-build` reuses the existing
   debug binary; `-- <name>` runs one scenario.
+- `scripts/check-other-platforms.sh` (repo root) — for any change to Rust
+  that compiles on Windows or macOS: type-checks both targets from Linux
+  (`cargo check --all-targets`, no linking; needs the rustup targets
+  `x86_64-pc-windows-msvc` and `aarch64-apple-darwin`, clang and llvm-ar).
+  It finds type errors before a push; CI's "Rust compiles" jobs on macOS and
+  Windows remain the real compile. Added 2026-11-16, when Vela's embedded
+  player gained Windows and macOS code no local machine compiles.
 
 CI note: `.github/workflows/ci.yml` runs on the `github` remote
 (`https://github.com/roethlar/vela.git` — confirmed active 2026-07-04 via
