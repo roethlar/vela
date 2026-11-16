@@ -23,10 +23,16 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     signed another way is open and the owner's (alternatives were given:
     SignPath Foundation's free signing for open-source projects, a
     certificate authority's certificate, staying unsigned).
-  - The run by hand the owner asked for is 43906795908, at `fc991a8`. Its
-    result, and where its packages are, goes here when it ends. The
-    change that took Azure out was written by the agent, so a codex hunt
-    over it is out (the sixth of the final round).
+  - BLOCKED SINCE 2026-11-16, about 16:20 UTC, AT `npm audit` (Blockers,
+    first entry): the run by hand the owner asked for (43906795908, at
+    `fc991a8`) built nothing. Four SvelteKit advisories published that
+    afternoon make `npm audit --audit-level=moderate` fail, in the release
+    workflow and in CI's Frontend job alike, so every push to `github`
+    shows red until this is settled. The way out is the owner's choice
+    and was put to the owner that day.
+  - The change that took Azure out was written by the agent, so a codex
+    hunt over it is out (the sixth of the final round); its result is not
+    recorded yet.
   - The owner's word that day: "you have permission to update whatever
     you need to to get the release ready. then do a final round of
     reviews with codex, then come to me with actions you cannot do"
@@ -312,7 +318,47 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Blockers
 
-- No known product blocker.
+- THE RELEASE GATE `npm audit` FAILS (2026-11-16, first seen about 16:20
+  UTC; it passed at about 15:50 UTC the same day). npm reports
+  `@sveltejs/kit` as HIGH for four advisories published that afternoon:
+  GHSA-pfhg-q3qv-9q6r (a redirect to an untrusted site through enhanced
+  form submission), GHSA-27mw-82g8-phjj (XSS through an untrusted
+  cache-control header in a prerendered page), GHSA-3r8g-jcqq-3p5j (denial
+  of service parsing a remote function's form data) and GHSA-6cf5-gc4q-fm3x
+  (collisions between private `query.batch` functions). Vela has the last
+  2.x release (2.70.4); the fix is in 3.2.0 only. The gate fails closed at
+  moderate and above by the owner's decision of 2026-11-02, which also
+  bans `npm audit fix --force`, overrides and per-advisory suppression, so
+  the agent does not go round it.
+  - Exposure, checked by search: Vela uses none of what the advisories
+    are about. `src/` imports nothing from `$app/*` or `@sveltejs/kit`,
+    has no form actions, no server routes, no remote functions and no
+    prerendered page; its three route files are `+layout.svelte`,
+    `+layout.ts` and `+page.svelte`, built by adapter-static into a static
+    page that Tauri serves from disk.
+  - Way 1, SvelteKit 3.2.0. Tried in a scratch worktree: the install is
+    clean and the audit passes, but the build stops at
+    `config_file_unsupported`, and SvelteKit's migration guide lists more
+    (configuration moves into `vite.config.js`; `$lib` becomes `#lib`
+    with file extensions, in every import; TypeScript 6; Svelte 5.57.1 or
+    newer). A migration of a framework the owner has already decided to
+    remove.
+  - Way 2, land the SvelteKit removal (`.agents/plans/remove-sveltekit.md`,
+    approved 2026-10-23, the last entry of this section). Tried in a
+    scratch worktree: `main` merges into the branch with ten conflicted
+    files, all of them versions and records (none under `src/`); with
+    `main`'s side taken for those and the two packages dropped, the audit
+    passes and the build passes the branch's own check. Still to do
+    there: `npm run check` must list `main`'s test files (it ran 152
+    tests, and its guard for that failed), and three test files still
+    name `+page.svelte`. Then everything the plan asks before a merge,
+    which includes checks only the owner can make.
+  - Way 3, an exception by the owner for these four advisories, on the
+    ground of no exposure. It needs the owner to change the rule of
+    2026-11-02.
+  - Put to the owner on 2026-11-16 with the agent's recommendation (way
+    2). Until the owner rules, nothing can be built by the release
+    workflow.
 - E2E `completionhub` fails now and then in the embedded player. First seen
   2026-11-15: once in the full embedded run at `3505387` (which therefore
   failed the parity verdict: 48 of 50), then in 2 of 49 runs of the scenario
