@@ -14,7 +14,9 @@
   import { onMount, tick } from "svelte";
   import Icon from "$lib/Icon.svelte";
   import {
+    PICTURE_CLICK_MS,
     SEEK_IDLE,
+    WHEEL_IDLE,
     barHideAt,
     barShown,
     canSeek,
@@ -22,21 +24,30 @@
     focusKindOf,
     formatTime,
     keyAction,
+    mergeWheelCommand,
     nextPlayerState,
     nextSeekBar,
     nextTrackHighlight,
+    nextWheelSteps,
+    pictureClickAction,
     pictureDoubleClick,
+    queuePicturePause,
     seekBarValue,
+    seekTimeAtPointer,
     sendPlayerCommand,
     skipLabel,
     spokenTime,
+    takeMouseCommand,
+    wheelCommands,
     type FocusKind,
+    type MouseCommand,
     type PlayerCommand,
     type PlayerState,
     type PlayerTrack,
     type SeekBar,
     type TrackId,
     type TrackListAction,
+    type WheelTarget,
   } from "$lib/playerControls";
 
   // `sessionId`: the playback session this view belongs to; every command
@@ -81,8 +92,21 @@
   // Remember the list before pointerdown can dismiss it. Click's detail
   // identifies the first click of a pair using the browser's own timing.
   let pressedWithList = false;
+  let primaryPressOnPicture = false;
   let firstClickWithList = false;
   let firstClickTarget: EventTarget | null = null;
+  // Whether this pair's first click requested pause when its wait expired.
+  let firstClickPaused = false;
+  let clickTimer: ReturnType<typeof setTimeout> | undefined;
+  let disposed = false;
+  let commandsPending = 0;
+  let mousePending: readonly MouseCommand[] = [];
+  let wheelAccumulator = WHEEL_IDLE;
+  let wheelTarget: WheelTarget = "none";
+  let seekPointer = $state<{ x: number; y: number; left: number; width: number } | null>(null);
+  let hoverTime = $derived(seekPointer === null ? null : seekTimeAtPointer(
+    seekPointer.x, seekPointer.left, seekPointer.width, player?.duration ?? null,
+  ));
   let highlightedTrack = $state<TrackId | null>(null);
   let listLeft = $state(0);
   let listBottom = $state(0);
@@ -112,11 +136,14 @@
   }
 
   function send(command: PlayerCommand) {
-    if (stopped) return;
+    if (stopped || disposed) return;
     if (command.name === "stop") {
       stopped = true;
+      clearPictureClick();
+      mousePending = [];
       onstop();
     }
+    commandsPending++;
     sendPlayerCommand(sessionId, command.name, command.args).then(
       () => {
         if (!stopped) notice = "";
@@ -124,7 +151,18 @@
       (error) => {
         if (!stopped) notice = commandNotice(error);
       },
-    );
+    ).finally(() => {
+      commandsPending--;
+      flushMouse();
+    });
+  }
+
+  function flushMouse() {
+    const next = takeMouseCommand(mousePending, {
+      busy: commandsPending !== 0, stopped: stopped || disposed, hasState: player !== null,
+    });
+    mousePending = next.pending;
+    if (next.command) send(next.command);
   }
 
   function activity() {
@@ -171,22 +209,130 @@
   }
 
   function pictureClick(event: MouseEvent) {
+    if (event.button !== 0) return;
+    const context = {
+      primaryPressOnPicture,
+      listOpen: openList !== null,
+      pressedWithList: pressedWithList || (event.detail % 2 === 0 && firstClickWithList),
+      stopped: stopped || disposed, hasState: player !== null,
+    };
+    const action = pictureClickAction(event, context);
+    if (action === "ignore") return;
+    clearPictureClick();
     if (event.detail % 2 === 1) {
       firstClickWithList = pressedWithList;
       firstClickTarget = event.target;
+      firstClickPaused = false;
     }
-    if (event.target !== root || stopped) return;
     activity();
-    giveFocusBack();
+    if (event.target === root && openList === null) giveFocusBack();
+    if (action !== "wait") return;
+    // MouseEvent.currentTarget is cleared after dispatch; save the inputs.
+    const input = { button: event.button, detail: event.detail, target: event.target, currentTarget: root };
+    clickTimer = setTimeout(() => {
+      clickTimer = undefined;
+      if (pictureClickAction(input, {
+        ...context, stopped: stopped || disposed, hasState: player !== null, listOpen: openList !== null,
+      }) === "wait") {
+        firstClickPaused = true;
+        mousePending = queuePicturePause(mousePending);
+        flushMouse();
+      }
+    }, PICTURE_CLICK_MS);
+  }
+
+  function clearPictureClick() {
+    clearTimeout(clickTimer);
+    clickTimer = undefined;
   }
 
   function pictureDblClick(event: MouseEvent) {
-    if (pictureDoubleClick(event, {
+    const action = pictureDoubleClick(event, {
+      primaryPressOnPicture,
       firstClickTarget,
+      firstClickPaused,
       listOpen: openList !== null,
       pressedWithList: firstClickWithList || pressedWithList,
-      stopped,
-    })) onfullscreen(!fullscreen);
+      stopped: stopped || disposed,
+      hasState: player !== null,
+    });
+    if (action === "none") return;
+    clearPictureClick();
+    activity();
+    firstClickPaused = false;
+    if (action === "restore-pause") {
+      mousePending = queuePicturePause(mousePending);
+      flushMouse();
+    }
+    onfullscreen(!fullscreen);
+  }
+
+  function pictureContextMenu(event: MouseEvent) {
+    // WebKitGTK can follow this with a button-0 click, even when this
+    // contextmenu had no pointerdown of its own.
+    primaryPressOnPicture = false;
+    event.preventDefault();
+    event.stopPropagation();
+    activity();
+    if (openList === null) giveFocusBack();
+    if (pictureClickAction(event, {
+      primaryPressOnPicture,
+      listOpen: openList !== null, pressedWithList: false,
+      stopped: stopped || disposed, hasState: player !== null,
+    }) === "pause") send({ name: "toggle-pause", args: [] });
+  }
+
+  function pointerActivity(event: PointerEvent) {
+    primaryPressOnPicture = event.button === 0 && event.target === root;
+    // A control that disappears after its press cannot inherit an older
+    // picture click as the first click of a fullscreen pair.
+    if (!primaryPressOnPicture) firstClickTarget = null;
+    activity();
+    // Keep secondary presses from focusing a range or dismissing a list;
+    // middle/back/forward have no browser action in the player either.
+    if (event.button !== 0) {
+      event.preventDefault();
+      pointerRange = null;
+    }
+  }
+
+  function onwheel(event: WheelEvent) {
+    activity();
+    const target = event.target;
+    const area: WheelTarget = target === root ? "picture"
+      : target instanceof Element && target.closest(".track-list") ? "list"
+      : target instanceof Element && target.closest(".volume, .mute") ? "volume"
+      : target instanceof Element && target.closest(".seek") ? "seek" : "none";
+    if (area !== wheelTarget) wheelAccumulator = WHEEL_IDLE;
+    wheelTarget = area;
+    if (area === "list") return;
+    // Capture, non-passive: a native range must not also change itself.
+    event.preventDefault();
+    event.stopPropagation();
+    // Moving focus out of a list would dismiss it through focusout.
+    if (openList === null) giveFocusBack();
+    if (area === "none") return;
+    const next = nextWheelSteps(wheelAccumulator, event, now);
+    wheelAccumulator = next.accumulator;
+    const commands = wheelCommands(area, next.steps, seekBarValue(volumeBar, player?.volume ?? null, now), {
+      hasState: player !== null, stopped: stopped || disposed,
+    });
+    for (const command of commands) {
+      if (command.name === "set-volume") {
+        volumeBar = nextSeekBar(volumeBar, { kind: "change", value: command.args[0], now });
+      }
+      mousePending = mergeWheelCommand(mousePending, command);
+    }
+    flushMouse();
+  }
+
+  function seekHover(event: PointerEvent) {
+    const input = event.currentTarget as HTMLInputElement;
+    const rect = input.getBoundingClientRect();
+    const style = getComputedStyle(input);
+    const left = parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft);
+    const right = parseFloat(style.borderRightWidth) + parseFloat(style.paddingRight);
+    seekPointer = { x: event.clientX, y: event.clientY, left: rect.left + left, width: rect.width - left - right };
   }
 
   function seekInput(event: Event) {
@@ -266,6 +412,7 @@
   }
 
   function outsideTrackList(event: PointerEvent) {
+    if (event.button !== 0) return;
     pressedWithList = openList !== null;
     if (openList === null) return;
     const target = event.target;
@@ -346,6 +493,7 @@
     root.focus();
     window.addEventListener("keydown", onkey, true);
     window.addEventListener("pointerdown", outsideTrackList, true);
+    root.addEventListener("wheel", onwheel, { capture: true, passive: false });
     // The view may be gone before `listen` resolves; the listener is then
     // dropped as soon as it exists.
     let gone = false;
@@ -365,6 +513,10 @@
       document.documentElement.classList.remove("player-open");
       window.removeEventListener("keydown", onkey, true);
       window.removeEventListener("pointerdown", outsideTrackList, true);
+      root.removeEventListener("wheel", onwheel, true);
+      clearPictureClick();
+      disposed = true;
+      mousePending = [];
       gone = true;
       unlistenState?.();
     };
@@ -381,8 +533,11 @@
   role="region"
   aria-label="Video"
   onpointermove={activity}
+  onpointerdown={pointerActivity}
   onclick={pictureClick}
   ondblclick={pictureDblClick}
+  oncontextmenu={pictureContextMenu}
+  onauxclick={(event) => event.preventDefault()}
 >
   <div class="over">
     <p class="notice" role="status">{notice}</p>
@@ -430,6 +585,8 @@
       aria-valuetext={spokenTime(seekValue, player?.duration ?? null)}
       disabled={!canSeek(player?.duration ?? null)}
       onpointerdown={(e) => (pointerRange = e.currentTarget)}
+      onpointermove={seekHover}
+      onpointerleave={() => (seekPointer = null)}
       oninput={seekInput}
       onchange={seekChange}
     />
@@ -528,6 +685,14 @@
       <Icon name="close" />
     </button>
   </div>
+  {#if shown && seekPointer && hoverTime !== null}
+    <span
+      class="seek-preview"
+      aria-hidden="true"
+      style:left="{seekPointer.x}px"
+      style:top="{seekPointer.y - 12}px"
+    >{formatTime(hoverTime, player?.duration ?? null).split(" / ")[0]}</span>
+  {/if}
   {#if openList !== null}
     <div
       class="track-list"
@@ -665,6 +830,17 @@
   }
   .volume {
     width: 6rem;
+  }
+  .seek-preview {
+    position: fixed;
+    transform: translate(-50%, -100%);
+    pointer-events: none;
+    padding: 0.2rem 0.4rem;
+    border-radius: 0.25rem;
+    background: rgb(0 0 0 / 0.85);
+    color: #fff;
+    font-size: 0.85rem;
+    font-variant-numeric: tabular-nums;
   }
   .seek,
   .volume {

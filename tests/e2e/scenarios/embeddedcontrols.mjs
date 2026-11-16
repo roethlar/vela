@@ -365,6 +365,194 @@ export default {
         `time double-click leaves the window unchanged: saw ${JSON.stringify(afterTimeDoubleClick)}`,
       );
 
+      // 8b. Mouse playback, wheel bursts and the seek preview. All commands
+      //     are checked against mpv: fast double-clicks never change pause;
+      //     a slow native pair restores it. Wheels use synthetic WheelEvents
+      //     because WebKitGTK Actions cancels them (driver.wheel explains).
+      //     No test drives a real wheel.
+      //     Leave windowed, PLAYING, at volume 40 for the later legs.
+      const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const picturePoint = () => driver.exec(`
+        const r = document.querySelector('.player').getBoundingClientRect();
+        return [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 4)];
+      `);
+      const expectProperty = async (name, expected, what) => {
+        let seen;
+        try {
+          await pollUntil(async () => {
+            seen = await mpv.getProp(name);
+            return seen === expected;
+          }, what, { timeoutMs: 5000, intervalMs: 50 });
+        } catch (err) {
+          err.message += ` (${name}: expected ${JSON.stringify(expected)}, saw ${JSON.stringify(seen)})`;
+          throw err;
+        }
+      };
+      for (const paused of [true, false]) {
+        await driver.clickAt(...await picturePoint());
+        await expectProperty('pause', paused, `a picture click to ${paused ? 'pause' : 'resume'}`);
+        // Separate the two SINGLE clicks beyond the native double-click
+        // interval; the paired clicks below use the driver's 100 ms gap.
+        await delay(600);
+      }
+      for (const on of [true, false]) {
+        const before = await mpv.getProp('pause');
+        const samples = [];
+        let sampling = true;
+        const started = Date.now();
+        const sample = (async () => {
+          while (sampling) {
+            samples.push({ ms: Date.now() - started, pause: await mpv.getProp('pause') });
+            await delay(20);
+          }
+        })();
+        try {
+          await driver.doubleClick(...await picturePoint());
+          await delay(500);
+        } finally {
+          sampling = false;
+          await sample;
+        }
+        assert.ok(samples.length > 1 && samples.every((s) => s.pause === before),
+          `double-click fullscreen=${on} must keep pause=${before} throughout: ${JSON.stringify(samples)}`);
+        await waitForDoubleClick(on, `mouse leg double-click fullscreen=${on}`);
+      }
+
+      // Let the previous pair end, then use the desktop's own dblclick at
+      // 320 ms, beyond the view's 250 ms single-click wait. Record native
+      // delivery so a venue with a shorter interval fails explicitly.
+      await delay(600);
+      await driver.exec(`
+        window.__slowPictureClicks = [];
+        window.__slowPictureClickListener = (event) => {
+          window.__slowPictureClicks.push({
+            type: event.type, detail: event.detail, trusted: event.isTrusted,
+            picture: event.target === document.querySelector('.player'),
+            ms: performance.now(),
+          });
+        };
+        window.addEventListener('click', window.__slowPictureClickListener, true);
+        window.addEventListener('dblclick', window.__slowPictureClickListener, true);
+      `);
+      const beforeSlowPair = await mpv.getProp('pause');
+      const slowSamples = [];
+      let slowSampling = true;
+      const slowStarted = Date.now();
+      const sampleSlow = (async () => {
+        while (slowSampling) {
+          slowSamples.push({ ms: Date.now() - slowStarted, pause: await mpv.getProp('pause') });
+          await delay(20);
+        }
+      })();
+      try {
+        await driver.doubleClick(...await picturePoint(), 320);
+        await delay(500);
+        const clicks = await driver.exec('return window.__slowPictureClicks');
+        console.log(`slow double-click (320 ms): native events ${JSON.stringify(clicks)}`);
+        assert.ok(clicks.some((event) => event.type === 'dblclick' && event.trusted && event.picture),
+          `No native picture dblclick received for the 320 ms WebDriver pair; check this venue's desktop double-click interval. Events: ${JSON.stringify(clicks)}`);
+        await waitForDoubleClick(true, 'the 320 ms native pair to enter fullscreen');
+        await expectProperty('pause', beforeSlowPair, 'the slow double-click to restore its starting pause');
+      } finally {
+        slowSampling = false;
+        await sampleSlow;
+        console.log(`slow double-click (320 ms): pause before=${beforeSlowPair}, samples=${JSON.stringify(slowSamples)}`);
+        await driver.exec(`
+          window.removeEventListener('click', window.__slowPictureClickListener, true);
+          window.removeEventListener('dblclick', window.__slowPictureClickListener, true);
+          delete window.__slowPictureClickListener;
+          delete window.__slowPictureClicks;
+        `);
+      }
+      await driver.doubleClick(...await picturePoint());
+      await waitForDoubleClick(false, 'leaving fullscreen after the slow pair');
+      await expectProperty('pause', beforeSlowPair, 'leaving slow-pair fullscreen to preserve pause');
+
+      for (const paused of [true, false]) {
+        await driver.rightClick(...await picturePoint());
+        await expectProperty('pause', paused, `a picture right-click to ${paused ? 'pause' : 'resume'}`);
+        // A stray button-0 click after contextmenu must not undo the pause
+        // 250 ms later. Watch each right-click separately for the full hold.
+        const samples = [];
+        const started = Date.now();
+        do {
+          samples.push({ ms: Date.now() - started, pause: await mpv.getProp('pause') });
+          await delay(20);
+        } while (Date.now() - started < 600);
+        samples.push({ ms: Date.now() - started, pause: await mpv.getProp('pause') });
+        assert.ok(samples.every((sample) => sample.pause === paused),
+          `right-click must keep pause=${paused} for 600 ms: ${JSON.stringify(samples)}`);
+      }
+
+      await expectProperty('volume', 40, 'mouse leg to start at volume 40');
+      await driver.wheel(...await picturePoint(), 0, -40);
+      await expectProperty('volume', 42, 'one upward notch to add two volume points');
+      await driver.wheel(...await picturePoint(), 0, 40);
+      await expectProperty('volume', 40, 'one downward notch to remove two volume points');
+
+      // Observe even a refusal that a later success immediately clears.
+      await driver.exec(`
+        const notice = document.querySelector('.player .notice');
+        window.__mouseNotices = [notice.textContent.trim()];
+        window.__mouseNoticeObserver = new MutationObserver((records) => {
+          for (const record of records) {
+            if (record.oldValue) window.__mouseNotices.push(record.oldValue.trim());
+            for (const node of record.removedNodes) window.__mouseNotices.push(node.textContent.trim());
+          }
+          window.__mouseNotices.push(notice.textContent.trim());
+        });
+        window.__mouseNoticeObserver.observe(notice, { childList: true, subtree: true, characterData: true, characterDataOldValue: true });
+      `);
+      try {
+        await driver.wheel(...await picturePoint(), 0, -40, 5);
+        await expectProperty('volume', 50, 'five upward notches in one burst to add exactly ten');
+        await delay(500);
+        const volume = await mpv.getProp('volume');
+        const notices = await driver.exec(`return window.__mouseNotices.filter(Boolean)`);
+        assert.equal(volume, 50, `burst settled at volume ${volume}, expected 50; notices ${JSON.stringify(notices)}`);
+        assert.deepEqual(notices, [], `wheel burst showed a refusal: ${JSON.stringify(notices)}`);
+      } finally {
+        await driver.exec(`window.__mouseNoticeObserver.disconnect(); delete window.__mouseNoticeObserver; delete window.__mouseNotices;`);
+      }
+
+      const beforeHorizontal = await position(mpv);
+      let afterHorizontal;
+      await driver.wheel(...await picturePoint(), 40, 0);
+      try {
+        await pollUntil(async () => {
+          afterHorizontal = await position(mpv);
+          return afterHorizontal >= beforeHorizontal + 8.5 && afterHorizontal <= beforeHorizontal + 13;
+        }, 'one horizontal notch to seek ten seconds forward', { timeoutMs: 5000, intervalMs: 50 });
+      } catch (err) {
+        err.message += ` (time-pos before ${beforeHorizontal}, saw ${afterHorizontal}, expected about +10 s)`;
+        throw err;
+      }
+
+      await showPlayerBar(driver);
+      const middle = await driver.exec(`
+        const r = document.querySelector('.player input.seek').getBoundingClientRect();
+        return [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)];
+      `);
+      // movePointer finishes two pixels beyond its arguments.
+      await driver.movePointer(middle[0] - 2, middle[1] - 2);
+      const duration = await mpv.getProp('duration');
+      let preview;
+      try {
+        await pollUntil(async () => {
+          preview = await driver.exec(`return document.querySelector('.player .seek-preview')?.textContent.trim() ?? null`);
+          const seconds = preview === null ? NaN : preview.split(':').reduce((total, part) => total * 60 + Number(part), 0);
+          return Number.isFinite(seconds) && Math.abs(seconds - duration / 2) <= 2;
+        }, 'seek preview near half the duration at the middle', { timeoutMs: 5000, intervalMs: 50 });
+      } catch (err) {
+        err.message += ` (label ${JSON.stringify(preview)}, duration ${duration}, pointer ${JSON.stringify(middle)})`;
+        throw err;
+      }
+      await driver.wheel(...await picturePoint(), 0, 40, 5);
+      await expectProperty('volume', 40, 'mouse leg to restore volume 40');
+      await expectProperty('pause', false, 'mouse leg to finish PLAYING');
+      assert.deepEqual(await doubleClickState(), { size: beforeDoubleClick, pressed: 'false' },
+        'mouse leg must finish windowed');
+
       // 9. Space pauses as well as plays.
       await driver.pressKeys(KEY.Space);
       await pollUntil(() => mpv.getProp('pause'), 'Space to pause', { timeoutMs: 5000 });

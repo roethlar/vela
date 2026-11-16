@@ -6,8 +6,10 @@ import { test } from 'node:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { stripTypeScriptTypes } from 'node:module';
 
 import { endLeavesPlayerFullscreen, nextPlayerSession, showingPlayEnded } from '../src/lib/playerView.ts';
+import * as playerControls from '../src/lib/playerControls.ts';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (file) => fs.readFileSync(path.join(repoRoot, file), 'utf8').replace(/\r\n/g, '\n');
@@ -46,6 +48,108 @@ function shape(text) {
   const words = text.trim().split(/\s+/).map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
   return new RegExp(words.join('\\s+'));
 }
+
+// Run the view's actual picture handlers with its actual click state and
+// pure decisions. Only the DOM work and command delivery are stand-ins.
+function pictureHandlers() {
+  const state = view.slice(view.indexOf('  let pressedWithList ='), view.indexOf('  let disposed ='));
+  const handlers = view.slice(view.indexOf('  function pictureClick('), view.indexOf('  function onwheel('));
+  return new Function('controls', `
+    const { PICTURE_CLICK_MS, pictureClickAction, pictureDoubleClick, queuePicturePause } = controls;
+    ${stripTypeScriptTypes(state)}
+    const root = {};
+    const player = {};
+    const openList = null;
+    const stopped = false;
+    const disposed = false;
+    let pointerRange = null;
+    let mousePending = [];
+    let fullscreen = false;
+    const commands = [];
+    const fullscreens = [];
+    const activity = () => {};
+    const giveFocusBack = () => {};
+    const send = (command) => commands.push(command);
+    const flushMouse = () => { commands.push(...mousePending); mousePending = []; };
+    const onfullscreen = (on) => { fullscreen = on; fullscreens.push(on); };
+    ${stripTypeScriptTypes(handlers)}
+    return {
+      commands, fullscreens,
+      pointerdown: pointerActivity, click: pictureClick, dblclick: pictureDblClick, contextmenu: pictureContextMenu,
+      event: (button = 0, detail = 1, target = root) => ({
+        button, detail, target, currentTarget: root, preventDefault() {}, stopPropagation() {},
+      }),
+    };
+  `)(playerControls);
+}
+
+test('picture clicks without a primary press leave playback, fullscreen, and a running wait alone', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const picture = pictureHandlers();
+  picture.click(picture.event());
+  picture.dblclick(picture.event(0, 2));
+  t.mock.timers.tick(600);
+  assert.deepEqual(picture.commands, []);
+  assert.deepEqual(picture.fullscreens, []);
+
+  for (const press of [picture.event(1), picture.event(2), picture.event(3), picture.event(4), picture.event(0, 1, {})]) {
+    const before = picture.commands.length;
+    picture.pointerdown(picture.event());
+    picture.click(picture.event());
+    t.mock.timers.tick(100);
+    picture.pointerdown(press);
+    picture.click(picture.event(0, 2));
+    picture.dblclick(picture.event(0, 2));
+    t.mock.timers.tick(149);
+    assert.equal(picture.commands.length, before);
+    t.mock.timers.tick(1);
+    assert.equal(picture.commands.length, before + 1, 'the original wait still expires at 250 ms');
+    t.mock.timers.tick(600);
+    assert.equal(picture.commands.length, before + 1, 'no extra pause is scheduled');
+    assert.deepEqual(picture.fullscreens, []);
+  }
+});
+
+test('contextmenu clears the primary press even without a new pointerdown', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const picture = pictureHandlers();
+  picture.pointerdown(picture.event());
+  picture.click(picture.event());
+  t.mock.timers.tick(100);
+  picture.contextmenu(picture.event(2));
+  assert.equal(picture.commands.length, 1, 'right-click pauses immediately');
+  picture.click(picture.event());
+  picture.dblclick(picture.event(0, 2));
+  t.mock.timers.tick(149);
+  assert.equal(picture.commands.length, 1);
+  t.mock.timers.tick(1);
+  assert.equal(picture.commands.length, 2, 'the earlier real click keeps its original wait');
+  t.mock.timers.tick(600);
+  assert.equal(picture.commands.length, 2);
+  picture.contextmenu(picture.event(2));
+  picture.click(picture.event());
+  t.mock.timers.tick(600);
+  assert.equal(picture.commands.length, 3, 'a second contextmenu without pointerdown pauses just once');
+  assert.deepEqual(picture.fullscreens, []);
+  assert.ok(picture.commands.every((command) => command.name === 'toggle-pause'));
+});
+
+test('a primary picture press after a right-click starts normal clicking again', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const picture = pictureHandlers();
+  picture.pointerdown(picture.event(2));
+  picture.contextmenu(picture.event(2));
+  picture.click(picture.event());
+  t.mock.timers.tick(600);
+  assert.equal(picture.commands.length, 1);
+  picture.pointerdown(picture.event());
+  picture.click(picture.event());
+  t.mock.timers.tick(249);
+  assert.equal(picture.commands.length, 1);
+  t.mock.timers.tick(1);
+  assert.deepEqual(picture.commands, [{ name: 'toggle-pause', args: [] }, { name: 'toggle-pause', args: [] }]);
+  assert.deepEqual(picture.fullscreens, []);
+});
 
 const opened = (sessionId) => ({ kind: 'opened', sessionId });
 const closed = (sessionId) => ({ kind: 'closed', sessionId });
@@ -118,7 +222,7 @@ test('the player view tells the backend where it is, and drives the play only th
 test('every key reaches the key map first, and the view acts on what it says', () => {
   // Capture phase on the window while the view is mounted, removed with it.
   assert.match(view, /onMount\(\(\) => \{[\s\S]*?window\.addEventListener\("keydown", onkey, true\);[\s\S]*?return \(\) => \{[\s\S]*?window\.removeEventListener\("keydown", onkey, true\);/);
-  assert.equal(view.split('addEventListener(').length - 1, 2, 'keys and outside pointer presses');
+  assert.equal(view.split('addEventListener(').length - 1, 3, 'keys, outside pointer presses, and non-passive wheel capture');
   assert.match(
     view,
     /function onkey\(event: KeyboardEvent\) \{\s+activity\(\);\s+const action = keyAction\(event, \{\s+focus: focusKind\(document\.activeElement\),\s+listOpen: openList !== null,\s+hasState: player !== null,\s+stopped,\s+skip: player\?\.skip != null,\s+crop: player\?\.crop \?\? null,\s+fullscreen,\s+\}\);\s+if \(action\.kind === "pass"\) return;\s+event\.preventDefault\(\);\s+event\.stopPropagation\(\);\s+if \(action\.kind === "command"\) send\(action\.command\);\s+else if \(action\.kind === "fullscreen"\) onfullscreen\(action\.on\);\s+else if \(action\.kind === "track-list"\) actOnTrackList\(action\.action\);\s+\}/,
@@ -126,7 +230,7 @@ test('every key reaches the key map first, and the view acts on what it says', (
   // Nothing is sent after stop, and stopping tells the page.
   assert.match(
     view,
-    /function send\(command: PlayerCommand\) \{\s+if \(stopped\) return;\s+if \(command\.name === "stop"\) \{\s+stopped = true;\s+onstop\(\);\s+\}/,
+    /function send\(command: PlayerCommand\) \{\s+if \(stopped \|\| disposed\) return;\s+if \(command\.name === "stop"\) \{\s+stopped = true;\s+clearPictureClick\(\);\s+mousePending = \[\];\s+onstop\(\);\s+\}/,
   );
   assert.equal([...view.matchAll(/stopped = true/g)].length, 1);
 });
@@ -283,7 +387,10 @@ test('each control is wired to what it shows and what it sends', () => {
       (error) => {
         if (!stopped) notice = commandNotice(error);
       },
-    );`),
+    ).finally(() => {
+      commandsPending--;
+      flushMouse();
+    });`),
   );
   // Each state feeds both ranges.
   assert.match(

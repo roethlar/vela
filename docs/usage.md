@@ -92,6 +92,14 @@ cropping, `q` to close, and `Escape`, which leaves full screen and otherwise
 closes the player. Full screen is Vela's own window going full screen, and it
 stays that way from one video to the next.
 
+With the mouse, on the picture: a click pauses and resumes (after a quarter of
+a second, so that a double-click does not also pause); a double-click toggles
+full screen; a right-click pauses and resumes at once, as in mpv's own window;
+the wheel changes the volume, two points a notch, and a sideways wheel or
+two-finger swipe seeks ten seconds. Over the seek bar the wheel seeks, and
+pointing at it shows the time at that spot; over the volume slider the wheel
+changes the volume. The middle, back and forward buttons do nothing.
+
 What is different from mpv's own window, and why it is marked experimental:
 
 - The picture is drawn by a different mpv renderer (`gpu`, where mpv's own

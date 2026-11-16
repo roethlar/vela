@@ -342,18 +342,142 @@ export function keyAction(input: KeyInput, ctx: KeyContext): KeyAction {
 // ---------------------------------------------------------------------------
 // The picture.
 
+export const PICTURE_CLICK_MS = 250;
+
+type PictureInput = { button: number; target: unknown; currentTarget: unknown };
+type PictureContext = {
+  primaryPressOnPicture: boolean;
+  listOpen: boolean;
+  pressedWithList: boolean;
+  stopped: boolean;
+  hasState: boolean;
+};
+
+/** A primary click must begin with a primary press on the picture.
+ * Otherwise ignore it completely, leaving any earlier click's wait alone.
+ * Odd primary clicks wait 250 ms; even clicks belong to the native pair
+ * and never pause. A right-click pauses immediately.
+ * Right-click never dismisses a list. A primary press that dismissed one
+ * belongs to that list, including the second click of a pair.
+ */
+export function pictureClickAction(
+  input: PictureInput & { detail: number },
+  ctx: PictureContext,
+): "ignore" | "none" | "wait" | "pause" {
+  if (input.button === 0 && !ctx.primaryPressOnPicture) return "ignore";
+  if (input.target !== input.currentTarget || ctx.stopped || !ctx.hasState) return "none";
+  if (input.button === 2) return "pause";
+  if (input.button !== 0 || input.detail % 2 === 0 || ctx.listOpen || ctx.pressedWithList) return "none";
+  return "wait";
+}
+
 /**
- * A primary double-click on the view itself toggles fullscreen, unless a
- * track list is open, a press in the pair met an open list, or stop was sent.
+ * A native primary double-click on the picture always toggles fullscreen,
+ * however far apart its clicks were. If the first click already requested
+ * pause, restore playback with another toggle, queued ahead of wheel input.
+ * Do nothing if a track list is open, a press in the pair met an open list,
+ * stop was sent, or no player state has arrived.
  * Both clicks must target the view, including when a control (such as Skip)
  * disappears after the first click.
  */
 export function pictureDoubleClick(
-  input: { button: number; target: unknown; currentTarget: unknown },
-  ctx: { firstClickTarget: unknown; listOpen: boolean; pressedWithList: boolean; stopped: boolean },
-): boolean {
-  return input.button === 0 && input.target === input.currentTarget && ctx.firstClickTarget === input.currentTarget &&
-    !ctx.listOpen && !ctx.pressedWithList && !ctx.stopped;
+  input: PictureInput,
+  ctx: PictureContext & { firstClickTarget: unknown; firstClickPaused: boolean },
+): "none" | "fullscreen" | "restore-pause" {
+  if (!ctx.primaryPressOnPicture || input.button !== 0 || input.target !== input.currentTarget || ctx.firstClickTarget !== input.currentTarget ||
+    ctx.listOpen || ctx.pressedWithList || ctx.stopped || !ctx.hasState) return "none";
+  return ctx.firstClickPaused ? "restore-pause" : "fullscreen";
+}
+
+// ---------------------------------------------------------------------------
+// Wheel input. Positive x is right; positive y is down.
+
+export const WHEEL_STEP_PIXELS = 40;
+export const WHEEL_RESET_MS = 500;
+type WheelAxis = { remainder: number; direction: number; at: number };
+export type WheelAccumulator = { x: WheelAxis; y: WheelAxis };
+export const WHEEL_IDLE: WheelAccumulator = {
+  x: { remainder: 0, direction: 0, at: 0 },
+  y: { remainder: 0, direction: 0, at: 0 },
+};
+export type WheelSteps = { x: number; y: number };
+export type WheelTarget = "picture" | "volume" | "seek" | "list" | "none";
+export type WheelCommand = Extract<PlayerCommand, { name: "set-volume" | "seek-relative" }>;
+export type MouseCommand = WheelCommand | Extract<PlayerCommand, { name: "toggle-pause" }>;
+
+/** Picture pause and its reversal go before queued wheel input. Both wait
+ * for the current command's answer, so a slow pair cannot be refused as busy.
+ */
+export function queuePicturePause(pending: readonly MouseCommand[]): MouseCommand[] {
+  return [{ name: "toggle-pause", args: [] }, ...pending];
+}
+
+function wheelAxis(previous: WheelAxis, delta: number, now: number) {
+  if (delta === 0) return { axis: previous, steps: 0 };
+  const direction = Math.sign(delta);
+  const remainder = now - previous.at >= WHEEL_RESET_MS || direction !== previous.direction
+    ? 0 : previous.remainder;
+  const total = remainder + delta;
+  const steps = Math.trunc(total / WHEEL_STEP_PIXELS);
+  return { axis: { remainder: total - steps * WHEEL_STEP_PIXELS, direction, at: now }, steps };
+}
+
+/** 40 pixels, 3 lines, or 1 page is one step. Each axis keeps its remainder
+ * until 500 ms without input on that axis, or a reversal on that axis.
+ */
+export function nextWheelSteps(
+  previous: WheelAccumulator,
+  input: { deltaX: number; deltaY: number; deltaMode: number },
+  now: number,
+): { accumulator: WheelAccumulator; steps: WheelSteps } {
+  const scale = input.deltaMode === 1 ? WHEEL_STEP_PIXELS / 3 : input.deltaMode === 2 ? WHEEL_STEP_PIXELS : 1;
+  const x = wheelAxis(previous.x, input.deltaX * scale, now);
+  const y = wheelAxis(previous.y, input.deltaY * scale, now);
+  return { accumulator: { x: x.axis, y: y.axis }, steps: { x: x.steps, y: y.steps } };
+}
+
+/** The picture uses vertical volume and horizontal seek. On either slider,
+ * up/right increases its value and down/left decreases it. Other bar targets
+ * do nothing; a track list keeps its native scrolling.
+ */
+export function wheelCommands(
+  target: WheelTarget,
+  steps: WheelSteps,
+  shownVolume: number,
+  ctx: { hasState: boolean; stopped: boolean },
+): WheelCommand[] {
+  if (!ctx.hasState || ctx.stopped) return [];
+  const volume = target === "picture" ? -steps.y : target === "volume" ? steps.x - steps.y : 0;
+  const seek = target === "picture" ? steps.x : target === "seek" ? steps.x - steps.y : 0;
+  const commands: WheelCommand[] = [];
+  if (volume !== 0) commands.push({ name: "set-volume", args: [Math.min(100, Math.max(0, shownVolume + volume * 2))] });
+  if (seek !== 0) commands.push({ name: "seek-relative", args: [seek * 10] });
+  return commands;
+}
+
+/** While a command is unanswered, keep the latest absolute volume target
+ * and the sum of relative seek seconds. Keep the two kinds in arrival order.
+ */
+export function mergeWheelCommand(pending: readonly MouseCommand[], command: WheelCommand): MouseCommand[] {
+  const index = pending.findIndex((p) => p.name === command.name);
+  if (index < 0) return [...pending, command];
+  const merged = [...pending];
+  const previous = pending[index];
+  const value = command.name === "seek-relative" && previous.name === "seek-relative"
+    ? previous.args[0] + command.args[0] : command.args[0];
+  if (command.name === "seek-relative" && value === 0) merged.splice(index, 1);
+  else merged[index] = { name: command.name, args: [value] };
+  return merged;
+}
+
+/** Take at most one command, only once the previous answer has arrived. */
+export function takeMouseCommand(
+  pending: readonly MouseCommand[],
+  ctx: { busy: boolean; stopped: boolean; hasState: boolean },
+): { pending: readonly MouseCommand[]; command: MouseCommand | null } {
+  if (ctx.stopped || !ctx.hasState) return { pending: [], command: null };
+  if (ctx.busy || pending.length === 0) return { pending, command: null };
+  return { pending: pending.slice(1), command: pending[0] };
 }
 
 // ---------------------------------------------------------------------------
@@ -396,6 +520,21 @@ export function spokenTime(position: number | null, duration: number | null): st
 /** Whether the seek bar can seek: only with a known, non-zero duration. */
 export function canSeek(duration: number | null): boolean {
   return knownDuration(duration) !== null;
+}
+
+/** Native WebKit range thumbs are assumed to be 16 CSS pixels wide. The
+ * centre travels from half a thumb inside each end of the content box.
+ */
+export function seekTimeAtPointer(
+  x: number,
+  left: number,
+  width: number,
+  duration: number | null,
+  thumbWidth = 16,
+): number | null {
+  const total = knownDuration(duration);
+  if (total === null || width <= thumbWidth) return null;
+  return total * Math.min(1, Math.max(0, (x - left - thumbWidth / 2) / (width - thumbWidth)));
 }
 
 // ---------------------------------------------------------------------------

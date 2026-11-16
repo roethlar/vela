@@ -9,7 +9,9 @@ import { fileURLToPath } from 'node:url';
 
 import {
   PLAYER_COMMANDS,
+  PICTURE_CLICK_MS,
   SEEK_IDLE,
+  WHEEL_IDLE,
   barHideAt,
   barShown,
   canSeek,
@@ -18,13 +20,20 @@ import {
   formatTime,
   fullscreenRequests,
   keyAction,
+  mergeWheelCommand,
   nextPlayerState,
   nextSeekBar,
   nextTrackHighlight,
+  nextWheelSteps,
+  pictureClickAction,
   pictureDoubleClick,
+  queuePicturePause,
   seekBarValue,
+  seekTimeAtPointer,
   skipLabel,
   spokenTime,
+  takeMouseCommand,
+  wheelCommands,
 } from '../src/lib/playerControls.ts';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -101,7 +110,7 @@ test('the player view calls invoke only to report where it is', () => {
   assert.equal(view.split('sendPlayerCommand(').length - 1, 1);
   assert.match(
     view,
-    /function send\(command: PlayerCommand\) \{\s+if \(stopped\) return;\s+if \(command\.name === "stop"\) \{\s+stopped = true;\s+onstop\(\);\s+\}\s+sendPlayerCommand\(sessionId, command\.name, command\.args\)/,
+    /function send\(command: PlayerCommand\) \{\s+if \(stopped \|\| disposed\) return;\s+if \(command\.name === "stop"\) \{\s+stopped = true;\s+clearPictureClick\(\);\s+mousePending = \[\];\s+onstop\(\);\s+\}\s+commandsPending\+\+;\s+sendPlayerCommand\(sessionId, command\.name, command\.args\)/,
   );
 });
 
@@ -321,28 +330,232 @@ test('track highlights move within the live list without selecting a track', () 
 // ---------------------------------------------------------------------------
 // The picture.
 
+test('picture clicks wait 250 ms, right-clicks pause immediately, and other targets/buttons do nothing', () => {
+  const picture = {};
+  const input = { button: 0, detail: 1, target: picture, currentTarget: picture };
+  const context = { primaryPressOnPicture: true, listOpen: false, pressedWithList: false, stopped: false, hasState: true };
+  assert.equal(PICTURE_CLICK_MS, 250);
+  assert.equal(pictureClickAction(input, context), 'wait');
+  assert.equal(pictureClickAction({ ...input, detail: 2 }, context), 'none', 'second click cancels the wait');
+  assert.equal(pictureClickAction({ ...input, detail: 3 }, context), 'wait', 'third click is a first click again');
+  assert.equal(pictureClickAction({ ...input, detail: 4 }, context), 'none', 'the next pair also ignores its even click');
+  assert.equal(pictureClickAction({ ...input, button: 2 }, context), 'pause');
+  for (const button of [1, 3, 4]) {
+    assert.equal(pictureClickAction({ ...input, button }, context), 'none');
+  }
+  for (const control of ['bar', 'button', 'seek', 'volume', 'time', 'skip', 'track-list', 'track-option']) {
+    for (const button of [0, 2]) {
+      assert.equal(pictureClickAction({ ...input, target: { control }, button }, context), 'none', `${control}, ${button}`);
+    }
+  }
+  for (const extra of [{ listOpen: true }, { pressedWithList: true }]) {
+    assert.equal(pictureClickAction(input, { ...context, ...extra }), 'none', 'a list dismissal owns the click');
+  }
+  assert.equal(pictureClickAction({ ...input, button: 2 }, { ...context, listOpen: true }), 'pause',
+    'right-click on the picture pauses without dismissing the list');
+  for (const extra of [{ stopped: true }, { hasState: false }]) {
+    for (const button of [0, 2]) {
+      assert.equal(pictureClickAction({ ...input, button }, { ...context, ...extra }), 'none');
+    }
+  }
+});
+
+test('picture clicks without a primary picture press are ignored, including even clicks', () => {
+  const picture = {};
+  const context = { primaryPressOnPicture: false, listOpen: false, pressedWithList: false, stopped: false, hasState: true };
+  for (const detail of [1, 2, 3, 4]) {
+    assert.equal(pictureClickAction({ button: 0, detail, target: picture, currentTarget: picture }, context), 'ignore');
+  }
+  assert.equal(pictureClickAction({ button: 2, detail: 1, target: picture, currentTarget: picture }, context), 'pause',
+    'contextmenu still pauses without a primary press');
+});
+
 test('only a primary double-click on the picture toggles fullscreen, without a list press or stop', () => {
   const picture = {};
   const input = { button: 0, target: picture, currentTarget: picture };
-  const context = { firstClickTarget: picture, listOpen: false, pressedWithList: false, stopped: false };
-  assert.equal(pictureDoubleClick(input, context), true, 'the picture toggles');
+  const context = { primaryPressOnPicture: true, firstClickTarget: picture, firstClickPaused: false, listOpen: false, pressedWithList: false, stopped: false, hasState: true };
+  assert.equal(pictureDoubleClick(input, context), 'fullscreen', 'the picture toggles');
+  assert.equal(pictureDoubleClick(input, { ...context, firstClickPaused: true }), 'restore-pause',
+    'a slow native pair restores pause and toggles fullscreen regardless of elapsed time');
   for (const control of ['bar', 'button', 'seek', 'volume', 'time', 'audio', 'subtitles', 'skip', 'track-list', 'track-option']) {
     assert.equal(
       pictureDoubleClick({ ...input, target: { control } }, context),
-      false,
+      'none',
       `${control} does not toggle`,
     );
     assert.equal(
       pictureDoubleClick(input, { ...context, firstClickTarget: { control } }),
-      false,
+      'none',
       `${control} disappearing after the first click does not turn the pair into a picture double-click`,
     );
   }
-  assert.equal(pictureDoubleClick(input, { ...context, listOpen: true }), false, 'an open list owns the press');
-  assert.equal(pictureDoubleClick(input, { ...context, pressedWithList: true }), false, 'a dismissed list still owns the pair');
-  assert.equal(pictureDoubleClick(input, { ...context, stopped: true }), false, 'nothing after stop');
-  for (const button of [1, 2]) {
-    assert.equal(pictureDoubleClick({ ...input, button }, context), false, `button ${button} does not toggle`);
+  for (const firstClickPaused of [false, true]) {
+    for (const extra of [{ primaryPressOnPicture: false }, { listOpen: true }, { pressedWithList: true }, { stopped: true }, { hasState: false }]) {
+      assert.equal(pictureDoubleClick(input, { ...context, firstClickPaused, ...extra }), 'none',
+        `the same gates apply before and after the first pause: ${JSON.stringify(extra)}`);
+    }
+  }
+  for (const button of [1, 2, 3, 4]) {
+    assert.equal(pictureDoubleClick({ ...input, button }, context), 'none', `button ${button} does not toggle`);
+  }
+});
+
+test('a slow native pair reverses the 250 ms pause before queued wheels once the answer arrives', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const picture = {};
+  const input = { button: 0, detail: 1, target: picture, currentTarget: picture };
+  const context = {
+    primaryPressOnPicture: true,
+    listOpen: false, pressedWithList: false, stopped: false, hasState: true,
+    firstClickTarget: picture, firstClickPaused: false,
+  };
+  const ready = { busy: false, stopped: false, hasState: true };
+  const pause = { name: 'toggle-pause', args: [] };
+  let paused = false;
+  let fullscreen = false;
+  assert.equal(pictureClickAction(input, context), 'wait');
+  setTimeout(() => {
+    const first = takeMouseCommand(queuePicturePause([]), ready);
+    assert.deepEqual(first.command, pause);
+    paused = !paused;
+    context.firstClickPaused = true;
+  }, PICTURE_CLICK_MS);
+  t.mock.timers.tick(249);
+  assert.equal(paused, false, 'the first click still waits at 249 ms');
+  t.mock.timers.tick(1);
+  assert.equal(paused, true, 'the first click pauses at 250 ms');
+  t.mock.timers.tick(70);
+  assert.equal(pictureClickAction({ ...input, detail: 2 }, context), 'none', 'the slow second click never pauses');
+  const action = pictureDoubleClick(input, context);
+  assert.equal(action, 'restore-pause');
+  const wheel = { name: 'set-volume', args: [42] };
+  const pending = queuePicturePause([wheel]);
+  fullscreen = !fullscreen;
+  assert.equal(fullscreen, true, 'the native dblclick toggles fullscreen even while pause awaits its answer');
+  const waiting = takeMouseCommand(pending, { ...ready, busy: true });
+  assert.equal(waiting.command, null, 'the first toggle may still be unanswered');
+  assert.deepEqual(waiting.pending, [pause, wheel], 'restoration is retained ahead of wheel input');
+  const answer = takeMouseCommand(waiting.pending, ready);
+  assert.deepEqual(answer.command, pause, 'the next answer releases the restoration');
+  paused = !paused;
+  assert.equal(paused, false, 'the double-click leaves playback as it was');
+  assert.deepEqual(takeMouseCommand(answer.pending, ready).command, wheel, 'only then can the wheel run');
+  assert.deepEqual(takeMouseCommand(pending, { ...ready, busy: true, stopped: true }),
+    { pending: [], command: null }, 'a stopped or disposed view drops the restoration and wheels');
+});
+
+// ---------------------------------------------------------------------------
+// Wheel steps and unanswered commands.
+
+const wheel = (previous, deltaX, deltaY, now, deltaMode = 0) =>
+  nextWheelSteps(previous, { deltaX, deltaY, deltaMode }, now);
+
+test('wheel notches are 40 pixels; small deltas accumulate and keep their remainder', () => {
+  assert.deepEqual(wheel(WHEEL_IDLE, 0, -40, 0).steps, { x: 0, y: -1 });
+  let next = wheel(WHEEL_IDLE, 0, 15, 0);
+  assert.equal(next.steps.y, 0);
+  next = wheel(next.accumulator, 0, 15, 100);
+  assert.equal(next.steps.y, 0);
+  next = wheel(next.accumulator, 0, 15, 200);
+  assert.equal(next.steps.y, 1);
+  assert.equal(next.accumulator.y.remainder, 5);
+  next = wheel(next.accumulator, 0, 115, 300);
+  assert.equal(next.steps.y, 3, 'all steps in a large event count');
+  assert.equal(next.accumulator.y.remainder, 0);
+});
+
+test('wheel remainders expire after 500 ms or reversal, independently on each axis', () => {
+  const start = wheel(WHEEL_IDLE, 20, 30, 100).accumulator;
+  assert.equal(wheel(start, 0, 10, 599).steps.y, 1);
+  const expired = wheel(start, 0, 10, 600);
+  assert.equal(expired.steps.y, 0);
+  assert.equal(expired.accumulator.y.remainder, 10);
+  const reversed = wheel(start, 0, -20, 200);
+  assert.equal(reversed.accumulator.y.remainder, -20);
+  const done = wheel(reversed.accumulator, 20, -20, 300);
+  assert.deepEqual(done.steps, { x: 1, y: -1 }, 'vertical reversal did not discard horizontal remainder');
+  const otherAxis = wheel(start, 0, 10, 550).accumulator;
+  assert.equal(wheel(otherAxis, 20, 0, 600).steps.x, 0, 'vertical activity did not extend horizontal lifetime');
+});
+
+test('three wheel lines or one page make one step', () => {
+  assert.deepEqual(wheel(WHEEL_IDLE, 3, -3, 100, 1).steps, { x: 1, y: -1 });
+  let next = wheel(WHEEL_IDLE, 0, 1, 100, 1);
+  next = wheel(next.accumulator, 0, 1, 200, 1);
+  assert.equal(next.steps.y, 0);
+  next = wheel(next.accumulator, 0, 1, 300, 1);
+  assert.equal(next.steps.y, 1);
+  assert.deepEqual(wheel(WHEEL_IDLE, -1, 1, 100, 2).steps, { x: -1, y: 1 });
+});
+
+test('wheel targets map to absolute volume or relative seek, with state and stop gates', () => {
+  const context = { hasState: true, stopped: false };
+  const volume = (value) => ({ name: 'set-volume', args: [value] });
+  const seek = (value) => ({ name: 'seek-relative', args: [value] });
+  assert.deepEqual(wheelCommands('picture', { x: 1, y: -1 }, 40, context), [volume(42), seek(10)]);
+  assert.deepEqual(wheelCommands('picture', { x: -1, y: 1 }, 40, context), [volume(38), seek(-10)]);
+  for (const steps of [{ x: 0, y: -1 }, { x: 1, y: 0 }]) {
+    assert.deepEqual(wheelCommands('seek', steps, 40, context), [seek(10)]);
+    assert.deepEqual(wheelCommands('volume', steps, 40, context), [volume(42)]);
+  }
+  for (const steps of [{ x: 0, y: 1 }, { x: -1, y: 0 }]) {
+    assert.deepEqual(wheelCommands('seek', steps, 40, context), [seek(-10)]);
+    assert.deepEqual(wheelCommands('volume', steps, 40, context), [volume(38)]);
+  }
+  assert.deepEqual(wheelCommands('volume', { x: 0, y: -10 }, 95, context), [volume(100)]);
+  assert.deepEqual(wheelCommands('volume', { x: 0, y: 10 }, 5, context), [volume(0)]);
+  for (const target of ['none', 'list']) {
+    assert.deepEqual(wheelCommands(target, { x: 1, y: -1 }, 40, context), []);
+  }
+  for (const extra of [{ hasState: false }, { stopped: true }]) {
+    assert.deepEqual(wheelCommands('picture', { x: 1, y: -1 }, 40, { ...context, ...extra }), []);
+  }
+});
+
+test('wheel bursts wait for the answer, merge volume targets and seek seconds, and stop drains nothing', () => {
+  const ready = { busy: false, stopped: false, hasState: true };
+  let pending = [];
+  let bar = SEEK_IDLE;
+  const enqueueVolume = () => {
+    const [command] = wheelCommands('picture', { x: 0, y: -1 }, seekBarValue(bar, 40, 100), ready);
+    bar = nextSeekBar(bar, { kind: 'change', value: command.args[0], now: 100 });
+    pending = mergeWheelCommand(pending, command);
+  };
+  enqueueVolume();
+  const first = takeMouseCommand(pending, ready);
+  assert.deepEqual(first.command, { name: 'set-volume', args: [42] });
+  pending = first.pending;
+  for (let i = 0; i < 4; i++) {
+    enqueueVolume();
+    const busy = takeMouseCommand(pending, { ...ready, busy: true });
+    assert.equal(busy.command, null, 'no second unanswered command');
+    pending = busy.pending;
+  }
+  assert.equal(seekBarValue(bar, 40, 100), 50, 'all five notches show before any state reports them');
+  assert.deepEqual(pending, [{ name: 'set-volume', args: [50] }]);
+  for (const seconds of [10, 10, -10, 20]) {
+    pending = mergeWheelCommand(pending, { name: 'seek-relative', args: [seconds] });
+  }
+  const volumeAnswer = takeMouseCommand(pending, ready);
+  assert.deepEqual(volumeAnswer.command, { name: 'set-volume', args: [50] });
+  const seekAnswer = takeMouseCommand(volumeAnswer.pending, ready);
+  assert.deepEqual(seekAnswer.command, { name: 'seek-relative', args: [30] });
+  assert.deepEqual(seekAnswer.pending, []);
+  assert.deepEqual(mergeWheelCommand(volumeAnswer.pending, { name: 'seek-relative', args: [-30] }), []);
+  for (const extra of [{ stopped: true }, { hasState: false }]) {
+    assert.deepEqual(takeMouseCommand(pending, { ...ready, ...extra }), { pending: [], command: null });
+  }
+});
+
+test('seek hover time uses thumb centres at both ends and at the middle', () => {
+  assert.equal(seekTimeAtPointer(100, 100, 216, 180), 0);
+  assert.equal(seekTimeAtPointer(108, 100, 216, 180), 0);
+  assert.equal(seekTimeAtPointer(208, 100, 216, 180), 90);
+  assert.equal(seekTimeAtPointer(308, 100, 216, 180), 180);
+  assert.equal(seekTimeAtPointer(316, 100, 216, 180), 180);
+  assert.equal(seekTimeAtPointer(158, 100, 216, 180), 45, 'a quarter of thumb travel');
+  for (const duration of [null, 0, Number.NaN, -1]) {
+    assert.equal(seekTimeAtPointer(208, 100, 216, duration), null);
   }
 });
 
