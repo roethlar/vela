@@ -18,22 +18,25 @@
 # which the workflow prints when the build step has failed. (What the signing
 # service says can name the endpoint, the account or the profile; they are
 # repository secrets, and GitHub masks secrets in what a step prints.)
+#
+# The signing itself runs in a child process of this script (`-Sign`). The
+# module starts SignTool so that it writes straight to the console, past
+# PowerShell's streams, and what SignTool says is the reason when it fails;
+# only a pipe around the whole process catches it.
 
 [CmdletBinding()]
 param(
   # Tauri substitutes its "%1" placeholder with the real path before invoking.
   [Parameter(Mandatory = $true, Position = 0)]
-  [string] $Path
+  [string] $Path,
+
+  # Given only by this script itself, to the child process that signs.
+  [switch] $Sign
 )
 
 $ErrorActionPreference = 'Stop'
 
-# Everything the signing module wrote, kept line by line as it comes: an
-# assignment from a command that then throws would keep none of it, and what
-# SignTool printed before it failed is the reason.
-$said = [System.Collections.Generic.List[string]]::new()
-
-try {
+if ($Sign) {
   if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
     throw "Nothing to sign at $Path."
   }
@@ -47,6 +50,7 @@ try {
   }
 
   Import-Module TrustedSigning
+  Write-Output "TrustedSigning module: $((Get-Module TrustedSigning | Select-Object -First 1).Version)"
 
   Invoke-TrustedSigning `
     -Endpoint $env:AZURE_SIGNING_ENDPOINT `
@@ -55,7 +59,7 @@ try {
     -TimestampRfc3161 'http://timestamp.acs.microsoft.com' `
     -TimestampDigest 'SHA256' `
     -FileDigest 'SHA256' `
-    -Files $Path *>&1 | ForEach-Object { $said.Add("$_"); Write-Output "$_" }
+    -Files $Path
 
   # A signing tool that quietly does nothing still exits 0, so prove the signature
   # landed on this file before the bundler moves on to the next one.
@@ -65,14 +69,27 @@ try {
   }
 
   Write-Output "Signed $Path ($($signature.SignerCertificate.Subject))"
-} catch {
-  $reason = "Signing $(Split-Path -Leaf $Path) failed: $($_.Exception.Message)"
-  $module = (Get-Module TrustedSigning | Select-Object -First 1).Version
-  $lines = @($reason, "TrustedSigning module: $module")
-  $lines += $said | Select-Object -Last 80 | ForEach-Object { "  $_" }
+  exit 0
+}
+
+# Everything the child process and the programs it starts write, kept line by
+# line as it comes.
+$said = [System.Collections.Generic.List[string]]::new()
+$pwsh = (Get-Process -Id $PID).Path
+# What the child writes to its standard error is output here, not an error of
+# this script: only the child's exit code says whether signing worked.
+$ErrorActionPreference = 'Continue'
+& $pwsh -NoProfile -NonInteractive -File $PSCommandPath $Path -Sign 2>&1 |
+  ForEach-Object { $said.Add("$_"); Write-Output "$_" }
+$code = $LASTEXITCODE
+
+if ($code -ne 0) {
+  $reason = "Signing $(Split-Path -Leaf $Path) failed (the signing process ended with exit code $code)."
+  $lines = @($reason)
+  $lines += $said | Select-Object -Last 120 | ForEach-Object { "  $_" }
   if (-not [string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)) {
     Add-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'vela-signing-failure.txt') -Value $lines
   }
-  Write-Error $reason -ErrorAction Continue
+  [Console]::Error.WriteLine($reason)
   exit 1
 }
