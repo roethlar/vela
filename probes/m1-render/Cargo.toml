@@ -1,0 +1,26 @@
+[package]
+name = "m1-render"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+# Match m0-embed, including the patch versions whose bindings were inspected.
+tao = "=0.35.3"
+wry = { version = "=0.55.1", default-features = false, features = ["os-webview", "transparent"] }
+libloading = "0.8"
+objc2 = { version = "=0.6.4", default-features = false, features = ["std"] }
+# NSView insertion, NSWindow/NSColor, and their geometry/layer accessors.
+objc2-app-kit = { version = "=0.3.2", default-features = false, features = ["std", "NSColor", "NSGraphics", "NSResponder", "NSView", "NSWindow", "objc2-core-foundation", "objc2-core-graphics", "objc2-quartz-core"] }
+objc2-foundation = { version = "=0.3.2", default-features = false, features = ["std", "NSArray", "NSEnumerator", "NSGeometry", "NSObject", "objc2-core-foundation"] }
+# Geometry, CFTimeInterval, and CVTimeStamp in the layer methods/signatures.
+objc2-core-foundation = { version = "=0.3.2", default-features = false, features = ["std", "CFCGTypes", "CFDate", "objc2"] }
+objc2-core-video = { version = "=0.3.2", default-features = false, features = ["std", "CVBase", "objc2"] }
+# CALayer geometry needs core-foundation; drawing overrides need all three
+# core-foundation/core-video/open-gl features, in addition to CAOpenGLLayer.
+objc2-quartz-core = { version = "=0.3.2", default-features = false, features = ["std", "CALayer", "CAOpenGLLayer", "objc2-core-foundation", "objc2-core-graphics", "objc2-core-video", "objc2-open-gl"] }
+# CGL ownership/locking/pixel formats, current context, and software renderer ID.
+objc2-open-gl = { version = "=0.3.2", default-features = false, features = ["std", "CGLTypes", "CGLCurrent", "CGLRenderers"] }
+
+# Standalone probe, never part of Vela's build.
+[workspace]
