@@ -407,7 +407,11 @@ async fn named_monitor(app: &tauri::AppHandle, monitor: MonitorDescriptor) -> Na
 
 /// What the system lists of its outputs besides Tauri's monitors
 /// (`platform_outputs`), and whether that list is complete.
+///
+/// Only a Wayland session lists any, so off Linux nothing builds the last two
+/// variants (the code that reads them is shared).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub(crate) enum PlatformOutputs {
     /// Not a Wayland session: the system names no output otherwise than
     /// Tauri does, and there is nothing to add.
