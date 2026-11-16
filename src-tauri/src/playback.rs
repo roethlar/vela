@@ -1794,7 +1794,7 @@ fn spawn_end_watcher(
 
 /// What the command layer's tests use of this module's test stand-ins.
 #[cfg(test)]
-pub(crate) use tests::embedded_spec;
+pub(crate) use tests::{embedded_spec, with_test_watchdog};
 #[cfg(all(test, unix))]
 pub(crate) use tests::{mpv_is, stand_in_for_mpv, FailingLauncher};
 
@@ -3361,12 +3361,55 @@ mod tests {
     // reader to finish. The reader says so through the observation, on
     // every way out of its thread.
 
+    /// Keep a broken blocking wait from hanging the test runner. Do not use
+    /// a scoped thread or join on timeout: either would wait for the very
+    /// operation the watchdog found stuck. Preserve panics from the worker.
+    #[track_caller]
+    pub(crate) fn with_test_watchdog<T: Send + 'static>(
+        limit: Duration,
+        description: &str,
+        work: impl FnOnce() -> T + Send + 'static,
+    ) -> T {
+        let (done, finished) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(work));
+            let _ = done.send(result);
+        });
+        match finished.recv_timeout(limit) {
+            Ok(Ok(value)) => value,
+            Ok(Err(panic)) => std::panic::resume_unwind(panic),
+            Err(error) => panic!("{description} did not return within {limit:?}: {error}"),
+        }
+    }
+
+    /// These unit waits return immediately or after 100 ms. Five seconds is
+    /// only a watchdog, well outside their existing one/two-second checks.
+    /// Measure inside the worker so thread startup and result delivery do
+    /// not count against those checks. The caller keeps the reader's guard,
+    /// so a timeout unwinds it and wakes a reader wait that is still stuck.
+    #[track_caller]
+    fn reader_wait_in_test(
+        observation: &WindowStateObservation,
+        limit: Duration,
+    ) -> (ReaderWait, Duration) {
+        let observation = observation.clone();
+        with_test_watchdog(
+            Duration::from_secs(5),
+            "wait_for_reader (finish or give up)",
+            move || {
+                let started = Instant::now();
+                let result = observation.wait_for_reader(limit);
+                (result, started.elapsed())
+            },
+        )
+    }
+
     #[test]
     fn an_observation_with_no_reader_is_not_waited_for() {
         let observation = WindowStateObservation::default();
-        let started = Instant::now();
-        assert_eq!(observation.wait_for_reader(Duration::from_secs(10)), ReaderWait::NoReader);
-        assert!(started.elapsed() < Duration::from_secs(1));
+        let (result, waited) = reader_wait_in_test(&observation, Duration::from_secs(10));
+        assert_eq!(result, ReaderWait::NoReader);
+        assert!(waited < Duration::from_secs(1));
     }
 
     #[test]
@@ -3374,12 +3417,17 @@ mod tests {
         let observation = WindowStateObservation::default();
         let reading = observation.reader_started();
         let limit = Duration::from_millis(100);
-        let started = Instant::now();
-        assert_eq!(observation.wait_for_reader(limit), ReaderWait::GaveUp);
-        let waited = started.elapsed();
-        assert!(waited >= limit && waited < Duration::from_secs(2), "waited {waited:?}");
+        let (result, waited) = reader_wait_in_test(&observation, limit);
+        assert_eq!(result, ReaderWait::GaveUp);
+        assert!(
+            waited >= limit && waited < Duration::from_secs(2),
+            "waited {waited:?}"
+        );
         drop(reading);
-        assert_eq!(observation.wait_for_reader(limit), ReaderWait::AlreadyFinished);
+        assert_eq!(
+            reader_wait_in_test(&observation, limit).0,
+            ReaderWait::AlreadyFinished
+        );
     }
 
     #[test]
@@ -3388,49 +3436,58 @@ mod tests {
         // wait gave up on must not cost the exit a second limit.
         let observation = WindowStateObservation::default();
         let reading = observation.reader_started();
-        assert_eq!(observation.wait_for_reader(Duration::from_millis(100)), ReaderWait::GaveUp);
-        let started = Instant::now();
-        assert_eq!(observation.wait_for_reader(Duration::from_secs(10)), ReaderWait::GaveUp);
-        let waited = started.elapsed();
-        assert!(waited < Duration::from_secs(1), "waited {waited:?} for a reader given up on");
+        assert_eq!(
+            reader_wait_in_test(&observation, Duration::from_millis(100)).0,
+            ReaderWait::GaveUp
+        );
+        let (result, waited) = reader_wait_in_test(&observation, Duration::from_secs(10));
+        assert_eq!(result, ReaderWait::GaveUp);
+        assert!(
+            waited < Duration::from_secs(1),
+            "waited {waited:?} for a reader given up on"
+        );
         // It still says when it finishes.
         drop(reading);
         assert_eq!(
-            observation.wait_for_reader(Duration::from_secs(10)),
+            reader_wait_in_test(&observation, Duration::from_secs(10)).0,
             ReaderWait::AlreadyFinished
         );
     }
 
     #[test]
     fn a_reader_that_finishes_during_the_wait_ends_it() {
-        let observation = WindowStateObservation::default();
-        let reading = observation.reader_started();
-        let reader = std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(100));
-            drop(reading);
+        with_test_watchdog(Duration::from_secs(10), "a finishing reader's wait", || {
+            let observation = WindowStateObservation::default();
+            let reading = observation.reader_started();
+            let reader = std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(100));
+                drop(reading);
+            });
+            let started = Instant::now();
+            assert_eq!(
+                observation.wait_for_reader(Duration::from_secs(10)),
+                ReaderWait::FinishedWithin
+            );
+            assert!(started.elapsed() < Duration::from_secs(5));
+            reader.join().unwrap();
         });
-        let started = Instant::now();
-        assert_eq!(
-            observation.wait_for_reader(Duration::from_secs(10)),
-            ReaderWait::FinishedWithin
-        );
-        assert!(started.elapsed() < Duration::from_secs(5));
-        reader.join().unwrap();
     }
 
     #[test]
     fn a_reader_that_panics_is_finished() {
-        let observation = WindowStateObservation::default();
-        let reading = observation.reader_started();
-        let reader = std::thread::spawn(move || {
-            let _reading = reading;
-            panic!("a reader that panics");
+        with_test_watchdog(Duration::from_secs(5), "a panicked reader's wait", || {
+            let observation = WindowStateObservation::default();
+            let reading = observation.reader_started();
+            let reader = std::thread::spawn(move || {
+                let _reading = reading;
+                panic!("a reader that panics");
+            });
+            assert!(reader.join().is_err());
+            assert_eq!(
+                observation.wait_for_reader(Duration::from_secs(10)),
+                ReaderWait::AlreadyFinished
+            );
         });
-        assert!(reader.join().is_err());
-        assert_eq!(
-            observation.wait_for_reader(Duration::from_secs(10)),
-            ReaderWait::AlreadyFinished
-        );
     }
 
     #[cfg(unix)]
@@ -3713,8 +3770,13 @@ mod tests {
     /// observation reports it, never `NoReader` (it was started) and never
     /// `GaveUp`.
     fn reader_finished(observation: &WindowStateObservation, limit: Duration) -> bool {
+        let observation = observation.clone();
         matches!(
-            observation.wait_for_reader(limit),
+            with_test_watchdog(
+                limit + Duration::from_secs(5),
+                "the real reader's wait",
+                move || { observation.wait_for_reader(limit) }
+            ),
             ReaderWait::AlreadyFinished | ReaderWait::FinishedWithin
         )
     }
@@ -4061,40 +4123,48 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn the_real_reader_is_finished_at_the_end_of_its_connection_after_what_it_read() {
-        use std::io::Write as _;
-        let Some((listener, path)) = listen("reader-end") else { return };
-        let observation = WindowStateObservation::opened_at(PlaybackWindowState {
-            fullscreen: Some(false),
-            ..Default::default()
-        });
-        let stop = Arc::new(AtomicBool::new(false));
-        spawn_position_reader(
-            path.clone(),
-            0,
-            stop.clone(),
-            observation.clone(),
-            PlayerExit::default(),
-        )
-        .expect("reader");
-        let mut mpv = accept_reader(&listener);
-        assert!(reader_running(&observation), "still reading");
-        // mpv sends the change and goes, a moment after the wait has begun.
-        let player = std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(100));
-            writeln!(mpv, "{}", event("fullscreen", serde_json::json!(true))).expect("write");
-            drop(mpv);
-        });
-        assert_eq!(
-            observation.wait_for_reader(Duration::from_secs(5)),
-            ReaderWait::FinishedWithin
+        with_test_watchdog(
+            Duration::from_secs(10),
+            "the disconnected reader's wait",
+            || {
+                use std::io::Write as _;
+                let Some((listener, path)) = listen("reader-end") else {
+                    return;
+                };
+                let observation = WindowStateObservation::opened_at(PlaybackWindowState {
+                    fullscreen: Some(false),
+                    ..Default::default()
+                });
+                let stop = Arc::new(AtomicBool::new(false));
+                spawn_position_reader(
+                    path.clone(),
+                    0,
+                    stop.clone(),
+                    observation.clone(),
+                    PlayerExit::default(),
+                )
+                .expect("reader");
+                let mut mpv = accept_reader(&listener);
+                assert!(reader_running(&observation), "still reading");
+                // mpv sends the change and goes, a moment after the wait has begun.
+                let player = std::thread::spawn(move || {
+                    std::thread::sleep(Duration::from_millis(100));
+                    writeln!(mpv, "{}", event("fullscreen", serde_json::json!(true))).expect("write");
+                    drop(mpv);
+                });
+                assert_eq!(
+                    observation.wait_for_reader(Duration::from_secs(5)),
+                    ReaderWait::FinishedWithin
+                );
+                assert_eq!(
+                    observation.snapshot().fullscreen,
+                    Some(true),
+                    "the reader is finished only after applying what it read"
+                );
+                player.join().unwrap();
+                let _ = std::fs::remove_file(&path);
+            },
         );
-        assert_eq!(
-            observation.snapshot().fullscreen,
-            Some(true),
-            "the reader is finished only after applying what it read"
-        );
-        player.join().unwrap();
-        let _ = std::fs::remove_file(&path);
     }
 
     #[cfg(unix)]

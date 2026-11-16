@@ -9181,7 +9181,11 @@ mod tests {
 
     #[test]
     fn a_hand_over_that_finishes_in_time_is_waited_for() {
-        assert!(hand_over_within(Duration::from_secs(10), || {}));
+        assert!(playback::with_test_watchdog(
+            Duration::from_secs(5),
+            "the completed hand-over",
+            || { hand_over_within(Duration::from_secs(10), || {}) }
+        ));
     }
 
     /// An external play opened windowed, its observation shared with the
@@ -9213,16 +9217,25 @@ mod tests {
         limit: Duration,
         reader_limit: Duration,
     ) -> (bool, Duration) {
-        let started = Instant::now();
         let (read, write) = (settings.clone(), settings.clone());
-        let finished = hand_over_window_on_exit(
-            record,
-            limit,
-            reader_limit,
-            move || read.read(),
-            move |change| write.update(change),
-        );
-        (finished, started.elapsed())
+        // Every caller expects at most the two-second hand-over limit (or
+        // an immediate return). Keep the five-second watchdog independent
+        // of that limit, and measure only the operation on its own thread.
+        playback::with_test_watchdog(
+            Duration::from_secs(5),
+            "the exit window hand-over",
+            move || {
+                let started = Instant::now();
+                let finished = hand_over_window_on_exit(
+                    record,
+                    limit,
+                    reader_limit,
+                    move || read.read(),
+                    move |change| write.update(change),
+                );
+                (finished, started.elapsed())
+            },
+        )
     }
 
     #[test]
@@ -9275,22 +9288,29 @@ mod tests {
     fn quitting_waits_at_most_the_hand_over_limit_in_all() {
         // Review finding pw-4's limit holds with the reader's wait inside it:
         // a reader that never finishes and a settings write that never ends.
-        let (observation, record) = windowed_play_in_record("play", crate::player::PlayerKind::External);
+        let (observation, record) =
+            windowed_play_in_record("play", crate::player::PlayerKind::External);
         let reading = observation.reader_started();
         let (_release, stuck) = std::sync::mpsc::channel::<()>();
         let limit = EXIT_WINDOW_HANDOVER_LIMIT;
-        let started = Instant::now();
-        let finished = hand_over_window_on_exit(
-            record,
-            limit,
-            EXIT_READER_DRAIN_LIMIT,
-            || Ok(config::AppConfig::default()),
-            move |_| {
-                let _ = stuck.recv();
-                Ok(())
+        let (finished, waited) = playback::with_test_watchdog(
+            Duration::from_secs(5),
+            "the exit hand-over with a stuck settings write",
+            move || {
+                let started = Instant::now();
+                let finished = hand_over_window_on_exit(
+                    record,
+                    limit,
+                    EXIT_READER_DRAIN_LIMIT,
+                    || Ok(config::AppConfig::default()),
+                    move |_| {
+                        let _ = stuck.recv();
+                        Ok(())
+                    },
+                );
+                (finished, started.elapsed())
             },
         );
-        let waited = started.elapsed();
         assert!(!finished, "the write cannot have finished");
         assert!(
             waited >= limit && waited < limit + Duration::from_millis(300),
@@ -9326,7 +9346,8 @@ mod tests {
     fn quitting_leaves_the_record_free_while_it_waits_for_the_reader() {
         // The record's lock is taken only to find the play: an end callback
         // writing during the exit's wait is not held up by it.
-        let (observation, record) = windowed_play_in_record("play", crate::player::PlayerKind::External);
+        let (observation, record) =
+            windowed_play_in_record("play", crate::player::PlayerKind::External);
         let reading = observation.reader_started();
         let waiting = {
             let record = record.clone();
@@ -9339,7 +9360,26 @@ mod tests {
             "the record must be free while quitting waits for the reader"
         );
         drop(reading);
-        assert_eq!(waiting.join().unwrap(), playback::ReaderWait::FinishedWithin);
+        assert_eq!(
+            playback::with_test_watchdog(
+                Duration::from_secs(5),
+                "the reader wait after releasing the record",
+                move || { waiting.join().unwrap() }
+            ),
+            playback::ReaderWait::FinishedWithin
+        );
+    }
+
+    fn last_reader_wait_in_test(
+        record: &std::sync::Arc<std::sync::Mutex<PlaybackWindowRecord>>,
+        limit: Duration,
+    ) -> playback::ReaderWait {
+        let record = record.clone();
+        playback::with_test_watchdog(
+            Duration::from_secs(5),
+            "the last external reader's wait",
+            move || wait_for_last_external_reader(&record, limit),
+        )
     }
 
     #[test]
@@ -9347,7 +9387,7 @@ mod tests {
         let (observation, record) = windowed_play_in_record("play", crate::player::PlayerKind::External);
         drop(observation.reader_started());
         assert_eq!(
-            wait_for_last_external_reader(&record, Duration::from_secs(10)),
+            last_reader_wait_in_test(&record, Duration::from_secs(10)),
             playback::ReaderWait::AlreadyFinished
         );
         let settings = std::sync::Arc::new(HeldSettings::default());
@@ -9363,7 +9403,7 @@ mod tests {
         // No play at all.
         let empty = std::sync::Arc::new(std::sync::Mutex::new(PlaybackWindowRecord::default()));
         assert_eq!(
-            wait_for_last_external_reader(&empty, Duration::from_secs(10)),
+            last_reader_wait_in_test(&empty, Duration::from_secs(10)),
             playback::ReaderWait::NoReader
         );
         let settings = std::sync::Arc::new(HeldSettings::default());
@@ -9376,7 +9416,7 @@ mod tests {
         let (observation, record) = windowed_play_in_record("embedded", crate::player::PlayerKind::Embedded);
         let reading = observation.reader_started();
         assert_eq!(
-            wait_for_last_external_reader(&record, Duration::from_secs(10)),
+            last_reader_wait_in_test(&record, Duration::from_secs(10)),
             playback::ReaderWait::NoReader
         );
         let (finished, waited) =
