@@ -2384,6 +2384,11 @@ artifact keeps the probe's logs and screenshots.
 - **Landed (2026-11-16).** The Windows set from the pins, cross-built in
   a container and checked in CI (`3dad7a8`, `8c40ff8`); the Windows host
   (`6b206ec`: startup, library loading, the play, the page's controls and
-  reports over mpv's named pipe, Settings). Probe M1 answered (above).
+  reports over mpv's named pipe, Settings). Linux unchanged by it: both
+  end-to-end suites in full at `6b206ec`, external 48 of 48, embedded 51
+  of 51, parity verdict PASS. The Windows set on a real Windows runner
+  (CI run 43954255770, `libmpv-windows-check`): client API 2.6, mpv
+  0.42.0, the test pattern played to its end, every DLL of the set mapped
+  from the set's own directory. Probe M1 answered (above).
   In progress: the macOS set; next, the macOS host, then packaging of
   both sets into the Windows and macOS bundles.
