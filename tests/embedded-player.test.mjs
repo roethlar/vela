@@ -1066,6 +1066,51 @@ test('a macOS draw begun under a colour hold stays black if the hold is released
   // readings decide the clear.
   assert.match(
     code(read('src-tauri/src/player/embedded/macos_gl.rs')),
-    /let held_at_start = self\.held\.load\(Ordering::Acquire\);\s+renderer\s+\.0\s+\.draw_into\([^;]*\)\?;\s+let held = self\.held\.load\(Ordering::Acquire\);\s+if draws_black\(held_at_start, held\) \{/,
+    /let held_at_start = self\.signals\.held\.load\(Ordering::Acquire\);\s+renderer\s+\.0\s+\.draw_into\([^;]*\)\?;\s+let held = self\.signals\.held\.load\(Ordering::Acquire\);\s+if draws_black\(held_at_start, held\) \{/,
   );
+});
+
+test('the macOS renderer installs its update callback and removes it before freeing the render context', () => {
+  const gl = code(read('src-tauri/src/player/embedded/macos_gl.rs'));
+  const start = methodBody(gl, '    pub(super) fn start(', 'macOS renderer start');
+  assert.match(start, /let target = self\s*\.display\s*\.get\(\)/);
+  assert.match(start, /let renderer = unsafe \{ Renderer::create\(player, get_proc_address\) \}\?;/);
+  assert.match(start, /renderer\.set_update\(\s*render_update,\s*\(target as \*const PlacementTarget\)\.cast_mut\(\)\.cast\(\),?\s*\);/);
+  assert.ok(start.indexOf('renderer.set_update(') < start.indexOf('drawing.renderer = Some(MacRenderer(renderer));'));
+  // The method is shared by Linux and macOS, without a Linux-only cfg.
+  assert.match(code(libmpv), /#\[cfg\(any\(target_os = "linux", target_os = "macos"\)\)\]\s+impl Renderer \{/);
+  assert.match(code(libmpv), /Ok\(Renderer \{ lib, raw \}\)\s+\}\s+pub\(crate\) unsafe fn set_update\(/);
+  assert.match(code(libmpv), /#\[cfg\(any\(target_os = "linux", target_os = "macos"\)\)\]\s+render_context_set_update_callback:\s+unsafe extern "C" fn\(\*mut RawRenderContext, Callback, \*mut c_void\),/);
+  assert.match(code(libmpv), /#\[cfg\(any\(target_os = "linux", target_os = "macos"\)\)\]\s+render_context_set_update_callback: symbol!\("mpv_render_context_set_update_callback"\),/);
+  const drop = methodBody(code(libmpv).slice(code(libmpv).indexOf('impl Drop for Renderer {')), '    fn drop(', 'renderer drop');
+  assert.match(drop, /\(self\.lib\.render_context_set_update_callback\)\(self\.raw, None, std::ptr::null_mut\(\)\);\s+\(self\.lib\.render_context_free\)\(self\.raw\);/);
+  const shutdown = methodBody(gl, '    pub(super) fn shutdown(', 'macOS renderer shutdown');
+  assert.match(shutdown, /self\.stop_drawing\(\);\s+let _current = self\.gl\.enter\(\)\?;\s+let mut drawing = self\.drawing\.lock\(\)\.unwrap_or_else\(\|e\| e\.into_inner\(\)\);\s+drop\(drawing\.renderer\.take\(\)\);/);
+});
+
+test('mpv display signals only enqueue coalesced main-thread work addressed to that play', () => {
+  const gl = code(read('src-tauri/src/player/embedded/macos_gl.rs'));
+  const macHost = code(read('src-tauri/src/player/embedded/macos_host.rs'));
+  const callback = functionBody(gl, 'unsafe extern "C" fn render_update(', 'render update callback');
+  assert.match(callback, /\{\s+let target = unsafe \{ &\*context\.cast::<PlacementTarget>\(\) \};\s+target\.request_display\(\);$/);
+  const request = methodBody(macHost, '    pub(super) fn request_display(', 'display request');
+  assert.match(request, /if !self\.display_queue\.request\(\) \{\s+return;\s+\}\s+let id = self\.id;\s+let queue = self\.display_queue\.clone\(\);\s+DispatchQueue::main\(\)\.exec_async\(move \|\| \{\s+queue\.begin\(\);\s+VIEWS\.with_borrow\(\|views\| \{\s+if let Some\(view\) = views\.get\(&id\) \{\s+view\.layer\.setNeedsDisplay\(\);/);
+  const create = methodBody(macHost.slice(macHost.indexOf('impl Surface {')), '    pub(super) fn create(', 'surface creation');
+  assert.match(create, /let id = NEXT_VIEW\.fetch_add\(1, Ordering::Relaxed\);/);
+  assert.match(create, /views\.insert\(id, native\);/);
+  assert.match(create, /let target = PlacementTarget \{\s+app,\s+id,\s+display_queue: Arc::new\(DisplayQueue::default\(\)\),\s+\};\s+drawing\.set_display_target\(target\.clone\(\)\);/);
+});
+
+test('macOS redraw, hold, release, resize and range changes request a display through the tested rules', () => {
+  const gl = code(read('src-tauri/src/player/embedded/macos_gl.rs'));
+  const macHost = code(read('src-tauri/src/player/embedded/macos_host.rs'));
+  assert.match(embeddedMod, /#\[cfg\(any\(target_os = "macos", test\)\)\]\s+mod macos_display;/);
+  assert.match(methodBody(gl, '    pub(super) fn redraw(', 'drawing redraw'), /self\.signals\.redraw\(\|\| self\.request_display\(\)\);/);
+  assert.match(methodBody(gl, '    pub(super) fn hold(', 'drawing hold'), /self\.signals\.hold\(generation, \|\| self\.request_display\(\)\);/);
+  assert.match(methodBody(gl, '    pub(super) fn release(', 'drawing release'), /self\.signals\.release\(generation, \|\| layer\.setNeedsDisplay\(\)\);/);
+  assert.match(methodBody(macHost, '    fn resize(', 'video resize'), /self\.layer\.redraw\(self\.video\.mtm\(\)\);/);
+  const layer = gl.slice(gl.indexOf('impl VideoLayer {', gl.indexOf('define_class!')));
+  assert.match(methodBody(layer, '    pub(super) fn redraw(', 'layer redraw'), /self\.ivars\(\)\.signals\.redraw\(\|\| self\.setNeedsDisplay\(\)\);/);
+  assert.match(methodBody(layer, '    pub(super) fn set_range(', 'layer range'), /self\.redraw\(mtm\);/);
+  assert.match(macHost, /view\.drawing\.release\(generation, &view\.layer, mtm\);/);
 });

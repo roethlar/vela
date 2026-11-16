@@ -64,11 +64,11 @@ patch("src-tauri/src/player/embedded/macos_gl.rs", [
 ("""        // Latch update: CA may ask more than once before draw consumes it.
         let frame = renderer.0.has_new_frame();
         drawing.pending |= frame;
-        Ok(drawing.pending || self.redraw.load(Ordering::Acquire))""",
+        Ok(drawing.pending || self.signals.redraw.load(Ordering::Acquire))""",
 """        // Latch update: CA may ask more than once before draw consumes it.
         let frame = renderer.0.has_new_frame();
         drawing.pending |= frame;
-        let ready = drawing.pending || self.redraw.load(Ordering::Acquire);
+        let ready = drawing.pending || self.signals.redraw.load(Ordering::Acquire);
         {
             """ + COUNTER.format("CAN") + """
             let n = PROBE_CAN.fetch_add(1, Ordering::Relaxed) + 1;
@@ -77,11 +77,11 @@ patch("src-tauri/src/player/embedded/macos_gl.rs", [
             }
         }
         Ok(ready)"""),
-("""        let redraw = self.redraw.swap(false, Ordering::AcqRel);
+("""        let redraw = self.signals.redraw.swap(false, Ordering::AcqRel);
         if !drawing.pending && !redraw {
             return Ok(());
         }""",
-"""        let redraw = self.redraw.swap(false, Ordering::AcqRel);
+"""        let redraw = self.signals.redraw.swap(false, Ordering::AcqRel);
         {
             """ + COUNTER.format("DRAW") + """
             let n = PROBE_DRAW.fetch_add(1, Ordering::Relaxed) + 1;
@@ -102,7 +102,7 @@ patch("src-tauri/src/player/embedded/macos_gl.rs", [
             if n <= 6 || n % 60 == 0 {
                 eprintln!(
                     "probe-gl: render #{n} fbo={fbo} last_fbo={} viewport={viewport:?} bounds={}x{} scale={scale} -> {width}x{height} held={}",
-                    drawing.last_fbo, bounds.size.width, bounds.size.height, self.held.load(Ordering::Acquire)
+                    drawing.last_fbo, bounds.size.width, bounds.size.height, self.signals.held.load(Ordering::Acquire)
                 );
             }
         }

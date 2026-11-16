@@ -320,7 +320,7 @@ pub(crate) struct LibMpv {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     render_context_create:
         unsafe extern "C" fn(*mut *mut RawRenderContext, *mut RawHandle, *mut RenderParam) -> c_int,
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     render_context_set_update_callback:
         unsafe extern "C" fn(*mut RawRenderContext, Callback, *mut c_void),
     #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -633,7 +633,7 @@ impl LibMpv {
             free: symbol!("mpv_free"),
             #[cfg(any(target_os = "linux", target_os = "macos"))]
             render_context_create: symbol!("mpv_render_context_create"),
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
             render_context_set_update_callback: symbol!("mpv_render_context_set_update_callback"),
             #[cfg(any(target_os = "linux", target_os = "macos"))]
             render_context_update: symbol!("mpv_render_context_update"),
@@ -1070,8 +1070,8 @@ impl Renderer {
     /// Have mpv call `callback(context)` when there is a new frame to draw.
     ///
     /// # Safety
-    /// As for [`Player::set_wakeup`].
-    #[cfg(target_os = "linux")]
+    /// As for [`Player::set_wakeup`]. The context must live until this
+    /// renderer is dropped, which unregisters and waits out the callback.
     pub(crate) unsafe fn set_update(
         &self,
         callback: unsafe extern "C" fn(*mut c_void),
@@ -1174,7 +1174,12 @@ impl Drop for Renderer {
     fn drop(&mut self) {
         // SAFETY: live, never used again, and the OpenGL context it was
         // created with is current on this thread (the type's contract).
-        unsafe { (self.lib.render_context_free)(self.raw) };
+        // Unregister first: mpv serializes this with any in-flight callback,
+        // so its context may be released after the renderer is gone.
+        unsafe {
+            (self.lib.render_context_set_update_callback)(self.raw, None, std::ptr::null_mut());
+            (self.lib.render_context_free)(self.raw);
+        }
     }
 }
 

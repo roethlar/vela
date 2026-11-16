@@ -5,10 +5,12 @@
 #![allow(deprecated)] // The approved CAOpenGLLayer host.
 
 use super::{
+    macos_display::DisplayQueue,
     macos_geometry::placement,
     macos_gl::{DrawingState, VideoLayer},
     session::{macos_hdr::Range, Rect},
 };
+use dispatch2::DispatchQueue;
 use objc2::{rc::Retained, runtime::AnyClass, MainThreadMarker, MainThreadOnly, Message};
 use objc2_app_kit::{NSAutoresizingMaskOptions, NSView, NSWindow, NSWindowOrderingMode};
 use objc2_foundation::{NSObjectProtocol, NSPoint, NSRect, NSSize};
@@ -148,8 +150,7 @@ impl NativeVideo {
             .setHidden(frame.backing_width <= 0 || frame.backing_height <= 0);
         self.layer.setFrame(self.video.bounds());
         self.layer.setContentsScale(scale);
-        self.drawing.redraw();
-        self.layer.setNeedsDisplay();
+        self.layer.redraw(self.video.mtm());
     }
 
     fn sample_screen(&self) {
@@ -190,9 +191,29 @@ impl Drop for NativeVideo {
 pub(super) struct PlacementTarget {
     app: tauri::AppHandle,
     id: u64,
+    display_queue: Arc<DisplayQueue>,
 }
 
 impl PlacementTarget {
+    pub(super) fn request_display(&self) {
+        if !self.display_queue.request() {
+            return;
+        }
+        let id = self.id;
+        let queue = self.display_queue.clone();
+        // Tauri's run_on_main_thread can execute inline on main. mpv can
+        // signal during a render API call, so always enqueue asynchronously.
+        // Capture only this play's id and queue, never an owning layer pointer.
+        DispatchQueue::main().exec_async(move || {
+            queue.begin();
+            VIEWS.with_borrow(|views| {
+                if let Some(view) = views.get(&id) {
+                    view.layer.setNeedsDisplay();
+                }
+            });
+        });
+    }
+
     pub(super) fn place(&self, reported: Rect) {
         let id = self.id;
         let _ = self.app.run_on_main_thread(move || {
@@ -225,8 +246,14 @@ impl Surface {
         VIEWS.with_borrow_mut(|views| {
             views.insert(id, native);
         });
+        let target = PlacementTarget {
+            app,
+            id,
+            display_queue: Arc::new(DisplayQueue::default()),
+        };
+        drawing.set_display_target(target.clone());
         Ok(Self {
-            target: PlacementTarget { app, id },
+            target,
             drawing,
             screen,
         })
@@ -291,8 +318,7 @@ impl Surface {
                     CATransaction::flush();
                     match result {
                         Ok(()) => {
-                            view.drawing.release(generation, mtm);
-                            view.layer.setNeedsDisplay();
+                            view.drawing.release(generation, &view.layer, mtm);
                         }
                         Err(error) => view.drawing.fail(&error),
                     }

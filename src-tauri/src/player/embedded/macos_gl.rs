@@ -5,6 +5,8 @@
 #![allow(deprecated)] // CAOpenGLLayer is the intentionally selected render API.
 
 use super::libmpv::{Player, Renderer};
+use super::macos_display::DrawingSignals;
+use super::macos_host::PlacementTarget;
 use super::session::macos_hdr::{choose_surface, draws_black, Range, SurfaceFormat};
 use objc2::{
     define_class, msg_send,
@@ -317,18 +319,25 @@ struct Drawing {
     last_fbo: i32,
 }
 
+unsafe extern "C" fn render_update(context: *mut c_void) {
+    // SAFETY: DrawingState's Arc holds this OnceLock allocation until after
+    // Renderer::drop unregisters and waits out callbacks. Only signal here:
+    // no AppKit, GL, mpv calls or drawing locks, even on a render thread.
+    let target = unsafe { &*context.cast::<PlacementTarget>() };
+    target.request_display();
+}
+
 /// Shared only as an Arc. CA's presentation copies share the exact context.
 pub(super) struct DrawingState {
     gl: GlContext,
     drawing: Mutex<Drawing>,
     stopping: AtomicBool,
     failed: AtomicBool,
-    redraw: AtomicBool,
+    display: OnceLock<PlacementTarget>,
     // A nonzero generation means draw/consume mpv frames, but present black.
-    // No client API or main-thread dispatch is made while drawing is locked.
-    held: AtomicU64,
+    // No client API or synchronous main-thread work while drawing is locked.
+    signals: DrawingSignals,
     black: AtomicU64,
-    applied: AtomicU64,
 }
 
 impl DrawingState {
@@ -342,25 +351,53 @@ impl DrawingState {
             }),
             stopping: AtomicBool::new(false),
             failed: AtomicBool::new(false),
-            redraw: AtomicBool::new(true),
-            held: AtomicU64::new(0),
+            display: OnceLock::new(),
+            signals: DrawingSignals::new(),
             black: AtomicU64::new(0),
-            applied: AtomicU64::new(0),
         }))
     }
 
+    pub(super) fn set_display_target(&self, target: PlacementTarget) {
+        assert!(
+            self.display.set(target).is_ok(),
+            "display target already set"
+        );
+    }
+
     pub(super) fn start(&self, player: &Player) -> Result<(), String> {
-        let _current = self.gl.enter()?;
-        let mut drawing = self.drawing.lock().unwrap_or_else(|e| e.into_inner());
-        // SAFETY: same locked/current CGL context for creation, use and free.
-        drawing.renderer = Some(MacRenderer(unsafe {
-            Renderer::create(player, get_proc_address)
-        }?));
+        let target = self
+            .display
+            .get()
+            .ok_or("the video layer has no display target")?;
+        {
+            let _current = self.gl.enter()?;
+            let mut drawing = self.drawing.lock().unwrap_or_else(|e| e.into_inner());
+            // SAFETY: same locked/current CGL context for creation, use and free.
+            let renderer = unsafe { Renderer::create(player, get_proc_address) }?;
+            // SAFETY: the target is fixed in this Arc-owned DrawingState. It
+            // outlives the renderer, whose drop unregisters the callback before
+            // freeing the render context. Registration immediately signals;
+            // request_display always queues, never enters AppKit inline.
+            unsafe {
+                renderer.set_update(
+                    render_update,
+                    (target as *const PlacementTarget).cast_mut().cast(),
+                );
+            }
+            drawing.renderer = Some(MacRenderer(renderer));
+        }
+        self.redraw();
         Ok(())
     }
 
     pub(super) fn redraw(&self) {
-        self.redraw.store(true, Ordering::Release);
+        self.signals.redraw(|| self.request_display());
+    }
+
+    fn request_display(&self) {
+        if let Some(target) = self.display.get() {
+            target.request_display();
+        }
     }
 
     pub(super) fn float_surface(&self) -> bool {
@@ -368,8 +405,7 @@ impl DrawingState {
     }
 
     pub(super) fn hold(&self, generation: u64) {
-        self.held.store(generation, Ordering::Release);
-        self.redraw();
+        self.signals.hold(generation, || self.request_display());
     }
 
     pub(super) fn black_ready(&self, generation: u64) -> bool {
@@ -377,24 +413,18 @@ impl DrawingState {
     }
 
     pub(super) fn still_holding(&self, generation: u64) -> bool {
-        !self.stopping.load(Ordering::Acquire) && self.held.load(Ordering::Acquire) == generation
+        !self.stopping.load(Ordering::Acquire)
+            && self.signals.held.load(Ordering::Acquire) == generation
     }
 
     /// Main only, after the colour transaction was submitted. An obsolete
     /// queued change cannot release a newer hold or touch its completion.
-    pub(super) fn release(&self, generation: u64, _mtm: MainThreadMarker) {
-        if self
-            .held
-            .compare_exchange(generation, 0, Ordering::AcqRel, Ordering::Acquire)
-            .is_ok()
-        {
-            self.applied.store(generation, Ordering::Release);
-            self.redraw();
-        }
+    pub(super) fn release(&self, generation: u64, layer: &VideoLayer, _mtm: MainThreadMarker) {
+        self.signals.release(generation, || layer.setNeedsDisplay());
     }
 
     pub(super) fn applied(&self, generation: u64) -> bool {
-        self.applied.load(Ordering::Acquire) == generation
+        self.signals.applied(generation)
     }
 
     pub(super) fn failed(&self) -> bool {
@@ -407,8 +437,10 @@ impl DrawingState {
 
     pub(super) fn shutdown(&self) -> Result<(), String> {
         self.stop_drawing();
-        // Acquiring CGL waits out any CA draw. No AppKit operation or main-thread
-        // dispatch while either lock is held. Free BEFORE Player is destroyed.
+        // Acquiring CGL waits out any CA draw. No AppKit operation or wait for
+        // main while either lock is held. Renderer::drop unregisters the
+        // callback before freeing, with its target still alive in self.display.
+        // Free BEFORE Player is destroyed.
         let _current = self.gl.enter()?;
         let mut drawing = self.drawing.lock().unwrap_or_else(|e| e.into_inner());
         drop(drawing.renderer.take());
@@ -430,7 +462,7 @@ impl DrawingState {
         // Latch update: CA may ask more than once before draw consumes it.
         let frame = renderer.0.has_new_frame();
         drawing.pending |= frame;
-        Ok(drawing.pending || self.redraw.load(Ordering::Acquire))
+        Ok(drawing.pending || self.signals.redraw.load(Ordering::Acquire))
     }
 
     fn draw(&self, layer: &VideoLayer, context: CGLContextObj) -> Result<(), String> {
@@ -447,7 +479,7 @@ impl DrawingState {
         };
         let frame = renderer.0.has_new_frame();
         drawing.pending |= frame;
-        let redraw = self.redraw.swap(false, Ordering::AcqRel);
+        let redraw = self.signals.redraw.swap(false, Ordering::AcqRel);
         if !drawing.pending && !redraw {
             return Ok(());
         }
@@ -478,11 +510,11 @@ impl DrawingState {
         let renderer = drawing.renderer.as_ref().unwrap();
         // Before mpv renders: a release during the render must not show a
         // frame encoded for the previous range (draws_black).
-        let held_at_start = self.held.load(Ordering::Acquire);
+        let held_at_start = self.signals.held.load(Ordering::Acquire);
         renderer
             .0
             .draw_into(drawing.last_fbo, width, height, self.gl.format.depth())?;
-        let held = self.held.load(Ordering::Acquire);
+        let held = self.signals.held.load(Ordering::Acquire);
         if draws_black(held_at_start, held) {
             // mpv may leave FBO zero bound. Its documented post-render state
             // has colour writes enabled; disable scissor and clear the whole
@@ -584,15 +616,19 @@ impl VideoLayer {
             }
         });
         layer.set_range(Range::Sdr, mtm)?;
-        // Core Animation calls canDraw on its display cadence; update returns
-        // frames, so idle/paused playback does not render continuously. Resize
-        // forces one draw even when mpv has no fresh frame. No mpv callback
-        // crosses into AppKit or acquires the drawing mutex.
+        // As in M1, allow CA to draw asynchronously, but explicitly invalidate
+        // from mpv updates and redraw requests; CA need not poll at display rate.
+        // canDraw/draw consume the frame/redraw latches, so paused playback
+        // stays idle after a requested redraw (including resize).
         layer.setAsynchronous(true);
         Ok(layer)
     }
 
-    pub(super) fn set_range(&self, range: Range, _mtm: MainThreadMarker) -> Result<(), String> {
+    pub(super) fn redraw(&self, _mtm: MainThreadMarker) {
+        self.ivars().signals.redraw(|| self.setNeedsDisplay());
+    }
+
+    pub(super) fn set_range(&self, range: Range, mtm: MainThreadMarker) -> Result<(), String> {
         let name = unsafe {
             match range {
                 Range::Sdr => kCGColorSpaceSRGB,
@@ -604,6 +640,7 @@ impl VideoLayer {
             CGColorSpace::with_name(Some(name)).ok_or("the layer colour space is unavailable")?;
         self.setColorspace(Some(&space));
         self.setWantsExtendedDynamicRangeContent(range != Range::Sdr);
+        self.redraw(mtm);
         Ok(())
     }
 }

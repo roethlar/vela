@@ -49,3 +49,5 @@ mod macos_host;
 mod macos_gl;
 #[cfg(any(target_os = "macos", test))]
 mod macos_geometry;
+#[cfg(any(target_os = "macos", test))]
+mod macos_display;

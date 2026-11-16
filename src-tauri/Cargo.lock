@@ -4174,6 +4174,7 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "directories",
+ "dispatch2",
  "gtk",
  "if-addrs",
  "libc",
