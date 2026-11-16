@@ -819,7 +819,8 @@ and removes nothing from it.
 
 How to try it (since 2026-11-15): install a package that carries the
 library, choose Settings, Player, Video player, "Vela's window
-(experimental)", save, and restart Vela. On `continuum` such a package,
+(experimental)" (it is saved at once), and restart Vela. On `continuum`
+such a package,
 built from `013cee3` by `scripts/build.sh --with-libmpv` and checked (the
 log's last entries say how), is
 `~/dev/vela-agent-keep/pkg/vela-1.0.64-1-x86_64.pkg.tar.zst`; installing

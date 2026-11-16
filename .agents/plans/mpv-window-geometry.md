@@ -28,7 +28,9 @@ Owner rulings already given (2026-11-12), verbatim:
   ("Manual plays retain their configured defaults; window size and position
   remain untouched").
 
-Open, not yet ruled (each is asked in chat, one at a time):
+The decisions, each asked in chat one at a time, as ruled (the durable
+record is `.agents/decisions.md`, 2026-11-14, "The player window carries
+over from every play to the next"):
 
 - **D2 (across app restarts): RULED IN PART 2026-11-12.** Offered an
   on/off setting that would remember size and position only, the owner
@@ -505,10 +507,10 @@ On `continuum` (KDE Wayland; note the display's scale factor first):
    it opens there (a Wayland compositor may place it elsewhere). Then
    unplug that screen, start Vela, play: it opens on another screen and
    plays.
-5. Settings, Player, Player window, "Full screen", Save; restart; the
-   first play opens full screen whatever the last one did. Then "Default",
-   Save, restart: the first play opens as mpv and the Advanced options
-   say.
+5. Settings, Player, Player window, "Full screen" (it is saved at once);
+   restart; the first play opens full screen whatever the last one did.
+   Then "Default", restart: the first play opens as mpv and the Advanced
+   options say.
 6. Read the wording of the control ("Player window"; "After Vela starts,
    the first video opens"; the three choices; the line under them) and say
    whether it reads right.

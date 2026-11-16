@@ -50,7 +50,7 @@ admitted, none declined. Record:
 | pk-5 | MEDIUM   | Licence copies of an Arch package may be links out of it, or unreadable, and pass | `[x]`  | `8876601` (and `547726c`) | codex/default/standard |
 | pk-6 | MEDIUM   | A temporary directory with a space in its name fails a good package    | `[x]`  | `25fb666`, `a60f802`, `b26f6b6` (and `3e008bf`) | codex/default/standard esc:T5(ceiling) |
 
-**Embedded player Slice 5 review, 2026-11-14 (open):** codereview codex
+**Embedded player Slice 5 review, 2026-11-14 (closed 2026-11-14):** codereview codex
 (called plainly; the host's codex config resolves to gpt-6-astra @ max;
 standard) over `0aeeff0..3d2fef6`: `findings`. Two candidates, two
 admitted, none declined. Record:
@@ -73,7 +73,7 @@ admitted, none declined. Record:
 | hd-2 | MEDIUM   | A profile mpv applies by itself when a file loads can undo the HDR target | `[x]`  | `7639c0a` | codex/default/standard |
 | hd-3 | MEDIUM   | The drawing thread waits for mpv each time it sets the HDR target      | `[x]`  | `0e7adca` | codex/default/standard |
 
-**Embedded player Slice 3 review, 2026-11-13 (open):** codereview codex
+**Embedded player Slice 3 review, 2026-11-13 (closed 2026-11-13):** codereview codex
 (called plainly; the host's codex config resolves to gpt-6-astra @ max;
 standard) over `053cb36..0a63799` with `a02db80`: `findings`. Nine
 candidates, nine admitted, none declined. Record:
@@ -105,7 +105,7 @@ after two reopens, sel-4 after one). Record:
 | sel-3 | LOW      | A play replaced within 1.5 s uses up the fallback explanation unseen    | `[x]`  | `50e57e4`, `db0b8b6` | codex/default/standard |
 | sel-4 | LOW      | The test for play's refusal passes with the refusal removed             | `[x]`  | `47eec9a`, `29445f2` | codex/default/standard esc:T5(ceiling) |
 
-**Embedded player Slice 1 review, 2026-11-13 (one finding with the owner):** codereview codex
+**Embedded player Slice 1 review, 2026-11-13 (closed):** codereview codex
 (called plainly; the host's codex config resolves to gpt-6-astra @ max;
 standard) over `b19d7d1..b719a65`, Slice 1 paths only: `findings`. Two
 candidates, two admitted, none declined; both are about tests, neither

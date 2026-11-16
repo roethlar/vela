@@ -646,7 +646,7 @@ older expectations changed with the behaviour: an expired choice is now
 silent.
 
 The coordinating agent read the change, merged it onto `main` and ran the
-full check there (green: 690 Rust tests, 549 Node tests). End to end on that content: \mbeddedfullscreenend\, \playlistplay\, \sourcepolicy\, \continuetv\, \continueon\ and \mbeddedplay\ in the embedded player (6 of 6), and \sourcepolicy\, \playlistplay\ and \continuetv\ in the external one (3 of 3). It made
+full check there (green: 690 Rust tests, 549 Node tests). End to end on that content: `embeddedfullscreenend`, `playlistplay`, `sourcepolicy`, `continuetv`, `continueon` and `embeddedplay` in the embedded player (6 of 6), and `sourcepolicy`, `playlistplay` and `continuetv` in the external one (3 of 3). It made
 no red-proofs of its own: the owner set work on tests aside that day.
 Under the owner's decision of 2026-11-14 ("Coding tasks may go to codex")
 this review closes the finding.
