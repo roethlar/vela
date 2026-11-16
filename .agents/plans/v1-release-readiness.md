@@ -355,7 +355,21 @@ svelte-check (0/0), production build, `cargo +1.89.0 check --locked`,
 `cargo +stable test --locked`, and `cargo audit` (only the standing allowed
 RUSTSEC-2024-0429 notice) — all green.
 
-## Release candidate: Vela 1.0.65 (prepared 2026-11-16; NOT tagged, NOT published)
+## Release candidate: Vela 1.0.66 (prepared 2026-11-16 as 1.0.65; NOT tagged, NOT published)
+
+**Since this section was written the candidate became 1.0.66.** The same
+day the release stopped at `npm audit` on advisories against SvelteKit,
+and the owner had the SvelteKit removal landed (`dee0f8b`;
+`.agents/plans/remove-sveltekit.md`, "Implementation log, 2026-11-16:
+landed", has its verification: the full check, both end-to-end suites
+with the parity verdict PASS, the plan's red-proofs, a codex hunt). The
+Windows installers are no longer signed (`fc991a8`, the owner's decision).
+Where this section says 1.0.65, 1.0.66 is what would be tagged, unless the
+title-bar change in flight lands first and makes it 1.0.67
+(`.agents/state.md`, the handoff of 2026-11-16). The package for
+`continuum` is `~/dev/vela-agent-keep/pkg/vela-1.0.66-1-x86_64.pkg.tar.zst`
+(sha256 `be81c99f348508ccdaed1c2e7e196f241826561cd92550215f6ce828ebf00e94`), and the run by hand for the owner's macOS and Windows
+builds is 43914914442, at `dee0f8b`.
 
 Prepared by the working agent on the owner's word of 2026-11-16
 (`.agents/decisions.md`): "you have permission to update whatever you need
@@ -436,7 +450,8 @@ builds, which the owner corrected):
    packages are on the run's page under Artifacts (`vela-macos`,
    `vela-windows`, `vela-linux`, `vela-arch`), or `gh run download <run>
    --repo roethlar/vela`. The agent started run 43906795908 at `fc991a8` on the
-   owner's word ("run it"); its result is in `.agents/state.md`.
+   owner's word ("run it"); it stopped at `npm audit` and built nothing. The
+   run to use is 43914914442, at `dee0f8b` (`.agents/state.md` has its state).
 3. **Verify the builds**, which only the owner can: on the Mac, the DMG
    opens without a Gatekeeper prompt and plays; on Windows, the installer
    runs (unsigned now: SmartScreen says "Windows protected your PC", "More
@@ -444,12 +459,13 @@ builds, which the owner corrected):
    self-signed one is refused with the notice that says where the setting
    is (the certificate check is new, and each platform's mpv has its own TLS
    backend). On `continuum`: `sudo pacman -U
-   ~/dev/vela-agent-keep/pkg/vela-1.0.65-1-x86_64.pkg.tar.zst`, then the
+   ~/dev/vela-agent-keep/pkg/vela-1.0.66-1-x86_64.pkg.tar.zst`, then the
    by-eye checks of the embedded player (its plan, "Owner checks
    outstanding" and "For the owner") and the player-window plan's
    acceptance steps.
 4. **Tag and publish**, once the builds are good: an annotated tag
-   `v1.0.65` on the commit that was verified, pushed to `github`. The tag
+   `v1.0.66` (or whatever version the verified commit carries) on the commit
+   that was verified, pushed to `github`. The tag
    builds again from that commit and makes a DRAFT release with every
    package and `SHA256SUMS`; the draft is not public, and can be looked over
    once more. Paste `RELEASE_NOTES.md` as its text and publish it.

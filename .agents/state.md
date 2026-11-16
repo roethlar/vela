@@ -46,19 +46,56 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     48 of 48, embedded 51 of 51, at `a13be71`), the plan's red-proofs, a
     codex hunt over the whole change. `cargo audit` is not installed on
     `continuum`; CI runs it.
-  - Running when this was written: the release workflow by hand at
-    `dee0f8b` (run 43914914442), which is where the owner's macOS and Windows
-    builds come from, and the build of the 1.0.66 package for `continuum`.
-    Their results are not recorded yet.
+  - HANDOFF, 2026-11-16 about 17:25 UTC (the session doing this work was
+    at 98% of its weekly allowance and may have stopped here). In flight:
+    1. The release workflow by hand, run 43914914442 at `dee0f8b`, for
+       the owner's macOS and Windows builds. When last looked at: both
+       audits and the libmpv job passed; the Linux, Windows and Arch
+       builds were running; the macOS build was waiting for a runner. To
+       read it: `gh run view 43914914442 --repo roethlar/vela --json jobs`.
+       Its packages are the run's artifacts (`vela-macos`, `vela-windows`,
+       `vela-linux`, `vela-arch`): `gh run download 43914914442 --repo
+       roethlar/vela`. Whether Apple's notarization now passes is NOT
+       known yet (the owner said the agreement "should be done"). Tell
+       the owner the result and where the builds are; the owner verifies
+       them before any tag.
+    2. The 1.0.66 package for `continuum` is built from `dee0f8b` and
+       checked: `~/dev/vela-agent-keep/pkg/vela-1.0.66-1-x86_64.pkg.tar.zst`,
+       sha256 `be81c99f348508ccdaed1c2e7e196f241826561cd92550215f6ce828ebf00e94`. Its package check passed and its own binary passed
+       five scenarios in the external player and seven in the embedded
+       one. The owner installs it with `sudo pacman -U`.
+    3. The title bar (the owner asked on 2026-11-16 why it is so tall and
+       cannot be hidden with KDE's rule, and was told it would be fixed
+       after the SvelteKit removal). Cause: on Wayland the windowing
+       library under Tauri (tao 0.35.3, `WlHeader::setup`) gives the
+       window a GTK header bar as its titlebar, so the window is
+       client-side decorated. Measured on `continuum`'s KWin 6.8.2 with a
+       GTK 3 window built the same way: as tao leaves it, the bar is
+       48 px inside the window and KWin draws none; with
+       `set_titlebar(None)` before the window is first shown, or after
+       `hide(); unrealize()`, KWin draws its own 28 px bar, cleanly;
+       taking it off a realized window resizes the window and makes GTK
+       warn. A coding task for the change is with codex: worktree
+       `~/dev/vela-agent-keep/wt/cx-titlebar` (branch `cx-titlebar`, cut
+       from `545467c`), started 17:16 UTC; its report will be
+       `cx/titlebar-report.md` in that session's scratchpad, or read the
+       worktree's `git diff`. Wanted: only on Wayland where the
+       compositor prefers server-side decorations
+       (`gdk_wayland_display_prefers_ssd`), nothing changed elsewhere, so
+       the end-to-end suite under weston sees the window it sees today.
+       Still to do: review the diff; build it and look at it on the real
+       desktop (how KWin sees a window can be read with a KWin script
+       through `qdbus6 org.kde.KWin /Scripting`: frame size, client size,
+       and their difference in height is KWin's own bar) with the
+       config and data directories pointed at a scratch place, never the
+       owner's; check that the embedded player's video still lines up;
+       both end-to-end suites; land it with a bump to 1.0.67 (packages
+       and artifacts named 1.0.66 exist); a new package and a new run by
+       hand for the owner. NOT landed, NOT verified.
+    4. CI on `main` should be green again from `dee0f8b` on (the audit
+       passes); not looked at since the merge.
   - NOT verified by anyone: this version running on macOS or Windows (CI
     compiles it there, nothing more), and everything that takes eyes.
-  - Next for the agent, by the owner's word: the window's title bar. On
-    Wayland the windowing library Tauri uses (tao) gives the window a GTK
-    header bar of its own (`WlHeader::setup`), which is taller than KDE's
-    and which KDE's "no titlebar" rule cannot remove; the owner asked why
-    on 2026-11-16 and was told the agent would make Vela leave the title
-    bar to KWin, as its own change, with a check that the embedded
-    player's video still lines up. Not started.
 - THE FRONT END IS PLAIN SVELTE 5 AND VITE SINCE 2026-11-16 (`dee0f8b`;
   plan `.agents/plans/remove-sveltekit.md`, whose last log entry has the
   landing; decisions of 2026-10-23 and 2026-11-16). SvelteKit and
