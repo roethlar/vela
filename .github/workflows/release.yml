@@ -16,10 +16,12 @@ name: Release
 # made. macOS and Windows packages carry none of it: there is no embedded
 # player there yet.
 #
-# Code signing is secrets-gated per platform: macOS via a Developer ID
-# certificate plus App Store Connect notarization, Windows via Azure Trusted
-# Signing. Each platform falls back to an unsigned build when its secrets are
-# absent, so a run from a fork or a clone without secrets still goes green.
+# Code signing: the macOS app is signed with a Developer ID certificate and
+# notarized through App Store Connect when the secrets for it are set, and
+# built unsigned when they are absent, so a run from a fork or a clone without
+# secrets still goes green. The Windows installers are NOT signed: they were,
+# for 1.0.60, with Azure Trusted Signing, which the owner dropped on
+# 2026-11-16 (.agents/decisions.md); no other way of signing them is set up.
 # Linux and Arch artifacts are never signed.
 
 on:
@@ -236,85 +238,11 @@ jobs:
 
           echo 'signing=true' >> "$GITHUB_OUTPUT"
 
-      # Windows has to be signed DURING bundling, because the tauri-action step
-      # below both builds and uploads to the draft release — signing afterwards
-      # would leave unsigned assets published. Tauri's
-      # `bundle > windows > signCommand` hook runs once per binary, installer and
-      # WiX extension, so it covers everything the release carries. The override
-      # goes into src-tauri/tauri.windows.conf.json, which tauri merges
-      # automatically for Windows targets; it is written only here, so the
-      # committed tauri.conf.json keeps building unsigned locally. Without the
-      # full non-empty secret set no hook is injected at all.
-      - name: Prepare Windows code signing
-        id: windows_signing
-        if: runner.os == 'Windows'
-        shell: pwsh
-        env:
-          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-          AZURE_SIGNING_ENDPOINT: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
-          AZURE_SIGNING_ACCOUNT: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
-          AZURE_CERT_PROFILE: ${{ secrets.AZURE_CERT_PROFILE }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-
-          $names = @(
-            'AZURE_TENANT_ID', 'AZURE_CLIENT_ID', 'AZURE_CLIENT_SECRET',
-            'AZURE_SIGNING_ENDPOINT', 'AZURE_SIGNING_ACCOUNT', 'AZURE_CERT_PROFILE'
-          )
-          $missing = @($names | Where-Object {
-            [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($_))
-          })
-
-          if ($missing.Count -eq $names.Count) {
-            'signing=false' | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-            Write-Output '::notice title=Unsigned Windows build::No Azure Trusted Signing secrets are set; the installers stay unsigned.'
-            exit 0
-          }
-          if ($missing.Count -gt 0) {
-            throw "Incomplete Azure Trusted Signing secrets; set all of them or none. Missing: $($missing -join ', ')"
-          }
-
-          # Runners normally ship NuGet already, so a failure here is only fatal
-          # if Install-Module then cannot reach the gallery.
-          try {
-            Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope CurrentUser | Out-Null
-          } catch {
-            Write-Output "::debug::Install-PackageProvider NuGet failed: $($_.Exception.Message)"
-          }
-          Install-Module -Name TrustedSigning -MinimumVersion 0.5.0 -Force -Repository PSGallery -Scope CurrentUser
-
-          # Absolute, because the bundler's working directory is its own business.
-          # Forward slashes and plain concatenation on purpose: NSIS embeds this
-          # command verbatim to sign the uninstaller and a backslash path survives
-          # that round trip escaped, and Join-Path would resolve the drive through
-          # the PowerShell provider.
-          $sign = ($env:GITHUB_WORKSPACE -replace '\\', '/').TrimEnd('/') + '/.github/scripts/azure-sign.ps1'
-          if (-not (Test-Path -LiteralPath $sign -PathType Leaf)) {
-            throw "The signing script is missing at $sign."
-          }
-
-          @{
-            bundle = @{
-              windows = @{
-                signCommand = @{
-                  cmd  = 'pwsh'
-                  args = @('-NoProfile', '-NonInteractive', '-File', $sign, '%1')
-                }
-              }
-            }
-          } | ConvertTo-Json -Depth 8 |
-            Set-Content -Path 'src-tauri/tauri.windows.conf.json' -Encoding utf8
-
-          'signing=true' | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-
       # Builds the frontend (beforeBuildCommand) + the Rust release binary and
-      # produces the native installers, signed on macOS and Windows whenever the
-      # steps above found their secrets. The Apple variables arrive through
-      # GITHUB_ENV so they are absent rather than empty on a secretless run; the
-      # Azure ones are safe to declare unconditionally because they are only read
-      # by azure-sign.ps1, which no signCommand invokes unless it was injected.
+      # produces the native installers, signed on macOS whenever the step above
+      # found its secrets. The Apple variables arrive through GITHUB_ENV so they
+      # are absent rather than empty on a secretless run. Nothing signs the
+      # Windows installers.
       #
       # The Linux leg builds and does NOT attach: its bundles go to the draft
       # release from the inventory job, after the libmpv check below has
@@ -331,12 +259,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NO_STRIP: '1'
           APPIMAGE_EXTRACT_AND_RUN: '1'
-          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-          AZURE_SIGNING_ENDPOINT: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
-          AZURE_SIGNING_ACCOUNT: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
-          AZURE_CERT_PROFILE: ${{ secrets.AZURE_CERT_PROFILE }}
         with:
           # Linux: the overlay that adds the libmpv set to the bundles'
           # resources (what `scripts/build.sh --with-libmpv` passes).
@@ -346,20 +268,6 @@ jobs:
           tagName: ${{ startsWith(github.ref, 'refs/tags/') && matrix.os != 'ubuntu-22.04' && github.ref_name || '' }}
           releaseName: ${{ startsWith(github.ref, 'refs/tags/') && matrix.os != 'ubuntu-22.04' && format('Vela {0}', github.ref_name) || '' }}
           releaseDraft: true
-
-      # Tauri reports a failed signing command as "failed to run pwsh" and shows
-      # nothing the command said; azure-sign.ps1 leaves its reason in a file.
-      - name: Say why Windows signing failed
-        if: failure() && runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $note = Join-Path $env:RUNNER_TEMP 'vela-signing-failure.txt'
-          if (Test-Path -LiteralPath $note) {
-            Get-Content -LiteralPath $note
-            Write-Output "::error title=Windows signing failed::$(Get-Content -LiteralPath $note -TotalCount 1)"
-          } else {
-            Write-Output 'The signing script recorded no failure, so the build failed elsewhere.'
-          }
 
       - name: Require the universal macOS DMG
         if: runner.os == 'macOS'
@@ -430,27 +338,6 @@ jobs:
             $pattern = Join-Path '${{ matrix.bundle_dir }}' $_
             if (-not (Get-ChildItem -Path $pattern -ErrorAction SilentlyContinue)) {
               throw "Required Windows artifact is missing: $pattern"
-            }
-          }
-
-      # azure-sign.ps1 already asserts per file, but that only proves the hook ran
-      # on the files it was handed; this proves the two installers the release
-      # actually ships came out signed. Get-AuthenticodeSignature is built in, so
-      # no signtool is needed.
-      - name: Require signed Windows installers
-        if: runner.os == 'Windows' && steps.windows_signing.outputs.signing == 'true'
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-
-          @('msi/*.msi', 'nsis/*-setup.exe') | ForEach-Object {
-            $pattern = Join-Path '${{ matrix.bundle_dir }}' $_
-            Get-ChildItem -Path $pattern | ForEach-Object {
-              $signature = Get-AuthenticodeSignature -LiteralPath $_.FullName
-              if ($signature.Status -ne 'Valid') {
-                throw "Authenticode status for $($_.Name) is '$($signature.Status)', expected 'Valid'."
-              }
-              Write-Output "$($_.Name): $($signature.Status) — $($signature.SignerCertificate.Subject)"
             }
           }
 

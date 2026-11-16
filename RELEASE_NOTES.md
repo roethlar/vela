@@ -117,9 +117,13 @@ Native packages are attached for macOS, Windows, Debian/Ubuntu, RPM-based
 Linux, Arch Linux, and AppImage users. `SHA256SUMS` covers every promised
 package.
 
-The macOS and Windows artifacts are signed; the Linux packages and the Arch
-package are unsigned, as before. mpv 0.38 or newer remains a separate required
-installation: it is the default player on every system.
+The macOS app is signed and notarized. The Windows installers are not signed
+in this release (those of 1.0.60 were): Windows SmartScreen shows "Windows
+protected your PC" before running one; choose "More info", then "Run anyway",
+and check the file against `SHA256SUMS` if you want to be sure of it. The Linux
+packages and the Arch package are unsigned, as before. mpv 0.38 or newer
+remains a separate required installation: it is the default player on every
+system.
 
 The Linux packages are about 15 MB larger than before. They now carry the
 library the experimental embedded player uses: an LGPL build of mpv and of the

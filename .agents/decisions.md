@@ -2387,3 +2387,49 @@ repeat it). Those statements record what was believed then.
 Also superseded: "tests are not a priority until the app is done and a
 release is in view" (2026-11-14) has reached its own condition. A release
 is in view; test findings are no longer set aside on that ground.
+
+## 2026-11-16 - Windows installers are no longer signed with Azure Trusted Signing; builds are verified before a tag
+
+Status: OWNER RULING (2026-11-16).
+
+Decision:
+Told that the release workflow's Windows leg fails because Azure's signing
+service refuses to sign (HTTP 403 when a file is submitted), and what to
+look at in the Azure portal, the owner ruled: "no more azure signing. I'm
+not paying monthly for that. is there an alternate way to sign windows
+apps?"
+
+Azure Trusted Signing is dropped. The release workflow no longer signs the
+Windows installers: its Azure steps and `.github/scripts/azure-sign.ps1`
+are removed. From 1.0.65 the Windows MSI and NSIS installer are unsigned,
+as they were before 1.0.60, and Windows SmartScreen warns before running
+them; `README.md` and `RELEASE_NOTES.md` say so. macOS signing and
+notarization are unchanged.
+
+In the same message, on the order of the release steps the agent had
+listed (tag and publish before the look at the macOS and Windows builds):
+"I need to verify the windows and mac builds first. shouldn't this come
+after 5 and 6?" It should. Builds are verified BEFORE any tag: a run of the
+release workflow by hand builds, signs and checks everything, publishes
+nothing, and its artifacts can be downloaded from the run.
+
+Open, the owner's to choose:
+- Whether the Windows installers are signed another way. The owner asked
+  for the alternatives and was given them on 2026-11-16 (free signing for
+  open-source projects by SignPath Foundation, which then appears as the
+  publisher; a certificate from a certificate authority, the cheapest
+  known being Certum's for open-source developers; staying unsigned).
+  Nothing is chosen. Until the owner chooses, add no signing method.
+
+Why:
+The owner does not want a monthly fee for signing. The service had also
+stopped signing: the workflow's Windows leg failed in four runs by hand.
+
+How to apply:
+- Do not restore Azure signing, and do not describe the Windows installers
+  as signed anywhere.
+- The six `AZURE_*` repository secrets and the Azure subscription are the
+  owner's to remove and cancel; the agent has not touched them.
+- Before proposing a tag, point the owner at the artifacts of a green run
+  by hand of the commit to be tagged.
+- A release whose Windows installers are unsigned says so in its notes.
