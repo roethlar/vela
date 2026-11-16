@@ -2249,7 +2249,7 @@ passed, and its own binary passed `playback`, `multiplex`,
 and the unruled assumptions of "For the owner" (the cropping script
 against the rule of 2026-07-05; cropping HDR video).
 
-## Amendment, 2026-11-16: macOS and Windows (owner ruling; not started)
+## Amendment, 2026-11-16: macOS and Windows (owner ruling; in progress)
 
 The owner ruled that Vela works the same on every platform and that a
 feature missing on one platform is a defect (`.agents/decisions.md`,
@@ -2287,3 +2287,72 @@ Machines: the owner's Mac (reachable over SSH; its console may be locked,
 `.agents/machines.md`) and the Windows host `netwatch-01`. What only eyes
 can judge is listed for the owner once, at the end, with what to expect on
 each platform.
+
+The probes run on GitHub's hosted runners through the manual workflow
+`.github/workflows/platform-probe.yml` (`probes/README.md`); each run's
+artifact keeps the probe's logs and screenshots.
+
+### Probe log (macOS and Windows)
+
+- **2026-11-16, screenshots.** Hosted runners show windows and take
+  pictures of the screen: `windows-latest` (Windows Server 2025, an
+  interactive desktop, 1024×768), `macos-latest` (arm64, 1024×768) and
+  `macos-15-intel` (1920×1080). Both macOS runners are virtual machines
+  with Apple's paravirtualized GPU. Runs 43940117841, 43941683438.
+- **2026-11-16, W0(b) drawing: answered, mpv in a window of its own inside
+  Vela's.** `probes/w0-embed`, run 43943823793 (D3D11 on WARP, the
+  software adapter; a prebuilt libmpv, for the probe only). A tao 0.35
+  window with a transparent wry 0.55 WebView2 page: transparent, with a
+  translucent band carrying white text at the top and an opaque bar at the
+  bottom. Given the window's own HWND as `wid` (as tauri-plugin-libmpv
+  does), mpv (`vo=gpu-next`, `gpu-api=d3d11`) creates a child window of
+  its own (class `mpv`) under WebView2's in z-order, and the picture is
+  right: video through the transparent page, darkened under the band with
+  the text readable, hidden by the opaque bar. Given instead a black child
+  window of the probe's own placed under WebView2's, the page showed white
+  where the video should be: not usable. Still open on Windows: pointer
+  and keys (which reach WebView2, above mpv's window), resizing and
+  fullscreen, W0(c) HDR10 (an HDR display: the owner's), W0(a) the pinned
+  build (in progress, a Windows cross build of the same pins).
+- **2026-11-16, M0(b) drawing: mpv cannot be embedded by `wid` on macOS.**
+  mpv 0.42.0 documents `--wid` for X11, win32 and Android only
+  (`DOCS/man/options.rst`), and its macOS output (`video/out/mac_common.swift`,
+  `config`) always creates a window of its own when it has none: there is
+  no code that takes a view to draw into. So mpv's own macOS drawing path
+  (Vulkan on MoltenVK into a Metal layer, the one that can show HDR/EDR)
+  cannot be put inside Vela's window. `probes/m0-embed` (a black view
+  under a transparent WKWebView, given as `wid`; Homebrew's mpv, for the
+  probe only) confirmed nothing usable, and found that the hosted macOS
+  runners cannot judge mpv's Vulkan path at all: on `macos-latest` mpv's
+  render thread dies of EXC_BAD_ACCESS inside the virtual GPU's Metal
+  driver (`AppleParavirtGPUMetalIOGPUFamily`, backtrace under lldb, run
+  43945347756) at the first texture upload; on `macos-15-intel`,
+  `vkCreateInstance` aborts (run 43943291022). Runs 43943295116,
+  43944005401 likewise.
+
+### Design that follows (2026-11-16)
+
+- **Windows: mpv's own window inside Vela's.** Vela's main window is
+  created transparent in embedded mode (as on Linux); a play gives mpv the
+  window's HWND as `wid`, and mpv draws with its own Direct3D 11 swap chain
+  (`vo=gpu-next`) in its child window under WebView2's, which keeps the
+  page above the video and every pointer and key on the page, as on Linux.
+  mpv paces its own frames; the HDR path is mpv's own (`target-colorspace-
+  hint`), to be measured on an HDR display (W0(c)). The rest of a play
+  (commands, observed properties, stop, the page's controls, fullscreen
+  following Vela's window) is the Linux session's.
+- **macOS: the render API, as on Linux.** mpv 0.42's render API offers
+  OpenGL, Direct3D 11 and software drawing (`include/mpv/render.h`); Vela's
+  Linux player already drives the OpenGL one. On macOS a play draws through
+  it into an OpenGL layer (CAOpenGLLayer, as mpv's own `gl_layer.swift`)
+  in a view under the WKWebView, in a window made transparent
+  (`macOSPrivateApi`). Whether the page draws over that layer on a hosted
+  runner is probe M1 (next). HDR/EDR: mpv's OpenGL path does not set up
+  EDR itself; whether Vela can get it (a float OpenGL surface with extended
+  dynamic range, mpv told the target) is M0(c), to be measured on the
+  owner's Mac. Until it is, the embedded player on macOS shows HDR video
+  tone-mapped to SDR, and the owner is told so before testing; the
+  external player keeps mpv's own HDR path on macOS.
+- **Order.** Windows set (building) → Windows host → macOS probe M1 →
+  macOS set → macOS host → packaging and Settings on both → the owner's
+  checks, listed once with what each platform has and lacks.
