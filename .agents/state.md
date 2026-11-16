@@ -19,19 +19,31 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   - Landed: the macOS app declares why it reaches the local network
     (`d6a8033`, the August failure's likely cause; checked in the release
     workflow); the player window finds its remembered screen on a Mac,
-    Retina included (`b3635db`); version 1.0.68 (`be1a98e`).
-  - Found: mpv's Windows output ignores `--screen-name` (it takes only
-    `--screen=<number>`), so the remembered screen never worked on
-    Windows. Fix in progress.
-  - The embedded player on macOS and Windows: probes run on hosted
-    runners (`probes/`, workflow `platform-probe.yml`); results and the
-    design that follows are in `.agents/plans/embedded-player.md`, the
-    amendment of 2026-11-16 ("Probe log", "Design that follows"). Windows:
-    mpv's own window inside Vela's (proven by probe W0). macOS: mpv cannot
-    be embedded by `wid`, so the render API (OpenGL) into a layer under
-    the page; HDR there is open (to be measured on the owner's Mac).
-    In progress: the Windows library build from the pins, the Windows
-    host, the macOS drawing probe M1.
+    Retina included (`b3635db`), and on Windows, where mpv ignored
+    `--screen-name` and takes only `--screen=<number>` (`3cc0667`); a Mac
+    with two screens of one model names them as mpv does (`e54b302`);
+    version 1.0.68 (`be1a98e`).
+  - The embedded player on macOS and Windows: probes on hosted runners
+    (`probes/`, workflow `platform-probe.yml`); results, design and what
+    has landed are in `.agents/plans/embedded-player.md`, the amendment of
+    2026-11-16 ("Probe log", "Design that follows", "Landed"). Windows:
+    mpv's own window inside Vela's; the set from the pins (`3dad7a8`,
+    `8c40ff8`) and the host (`6b206ec`) have landed. macOS: the render API
+    (OpenGL) into a layer under the page, proven by probe M1; HDR is not
+    available there (no EDR on that path; to be measured on the owner's
+    Mac), and the owner is told before testing.
+  - In progress (codex, one worktree each under
+    `~/dev/vela-agent-keep/wt/cx-<tag>`): the macOS set (`maclib`), the
+    macOS host (`mhost`), the Windows set in the Windows installers
+    (`wpack`), the end-to-end suite on a hosted Windows runner
+    (`e2ewin`). Then: the macOS set in the app bundle, and the owner's
+    checks, listed once per platform.
+  - Type-checking Windows and macOS code from Linux works (`cargo check
+    --target x86_64-pc-windows-msvc` / `aarch64-apple-darwin`; for macOS
+    a stand-in C compiler for one build script's Objective-C file, since
+    check never links). The scripts live in the session's scratchpad
+    (`xcheck.sh`); CI's macOS and Windows compile jobs remain the real
+    compile.
 - VELA 1.0.66 IS READY TO BE RELEASED, AS FAR AS THE AGENT CAN TAKE IT
   (2026-11-16). It is NOT tagged and NOT published; the owner verifies the
   macOS and Windows builds first. The whole account, with what was
