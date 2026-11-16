@@ -416,36 +416,39 @@ version exists yet, and the inventory job has not run.
 The final review (`.agents/review/codereview-2026-11-16-release.md`): five
 codex hunts, fourteen findings, all repaired and closed.
 
-What only the owner can do, in order:
+What only the owner can do, in order, as it stands after the owner's answers
+of 2026-11-16 (`.agents/decisions.md`, that date, the last entry: Azure
+signing is dropped, and the builds are verified before any tag; the first
+form of this list had the tag before the look at the macOS and Windows
+builds, which the owner corrected):
 
-1. **Apple, before any tag.** Notarization is refused: "A required
-   agreement is missing or has expired" (HTTP 403). Sign in to the Apple
-   Developer account and accept the pending agreement. Nothing in the
-   repository can change this.
-2. **Azure, before any tag.** The signing service answers 403 (Forbidden)
-   when a file is submitted for signing; the sign-in itself succeeds. In the
-   Azure portal, for the Trusted Signing account the repository's secrets
-   name, look at: whether the app registration (`AZURE_CLIENT_ID`) still
-   holds the role "Trusted Signing Certificate Profile Signer" on the
-   certificate profile; whether the certificate profile is active and its
-   identity validation has not expired; whether the subscription is active;
-   and whether `AZURE_SIGNING_ENDPOINT` is the account's region.
-3. **Confirm both** by running the Release workflow by hand on `main`
-   (Actions, Release, "Run workflow"; or ask the agent to). A run by hand
-   builds, signs and checks everything and publishes nothing.
-4. **Tag and publish.** With that run green: an annotated tag `v1.0.65` on
-   the commit to release, pushed to `github`. The tag makes a DRAFT release
-   with every package and `SHA256SUMS`. Look the draft over, paste
-   `RELEASE_NOTES.md` as its text, publish it.
-5. **Install and look**, on `continuum`: `sudo pacman -U
+1. **Apple.** Notarization was refused: "A required agreement is missing or
+   has expired" (HTTP 403). The owner said on 2026-11-16 that this "should
+   be done". Whether it is shows in the macOS leg of the next run by hand.
+2. **Get the builds without a tag.** A run of the Release workflow by hand
+   on `main` (Actions, Release, "Run workflow") builds and checks
+   everything, signs and notarizes the macOS app, and publishes nothing. Its
+   packages are on the run's page under Artifacts (`vela-macos`,
+   `vela-windows`, `vela-linux`, `vela-arch`), or `gh run download <run>
+   --repo roethlar/vela`. The agent started run 43906795908 at `fc991a8` on the
+   owner's word ("run it"); its result is in `.agents/state.md`.
+3. **Verify the builds**, which only the owner can: on the Mac, the DMG
+   opens without a Gatekeeper prompt and plays; on Windows, the installer
+   runs (unsigned now: SmartScreen says "Windows protected your PC", "More
+   info", "Run anyway") and plays; on both, an HTTPS server plays and a
+   self-signed one is refused with the notice that says where the setting
+   is (the certificate check is new, and each platform's mpv has its own TLS
+   backend). On `continuum`: `sudo pacman -U
    ~/dev/vela-agent-keep/pkg/vela-1.0.65-1-x86_64.pkg.tar.zst`, then the
    by-eye checks of the embedded player (its plan, "Owner checks
-   outstanding" and "For the owner": HDR beside mpv's own window, a real
-   mouse wheel and right-click, the quarter-second click wait, long track
-   lists) and the player-window plan's acceptance steps on real desktops.
-6. **macOS and Windows were compiled, never run.** CI compiles the backend
-   for both (both macOS architectures); no build of this version has been
-   started on either. Worth one look before or just after publishing: an
-   HTTPS server plays (the certificate check is new, and each platform's
-   mpv has its own TLS backend), and a self-signed server is refused with
-   the notice that says where the setting is.
+   outstanding" and "For the owner") and the player-window plan's
+   acceptance steps.
+4. **Tag and publish**, once the builds are good: an annotated tag
+   `v1.0.65` on the commit that was verified, pushed to `github`. The tag
+   builds again from that commit and makes a DRAFT release with every
+   package and `SHA256SUMS`; the draft is not public, and can be looked over
+   once more. Paste `RELEASE_NOTES.md` as its text and publish it.
+5. **Not needed for the release:** whether the Windows installers are
+   signed another way (open; the decisions entry lists what was offered),
+   and removing the six `AZURE_*` repository secrets and the Azure
+   subscription, which are the owner's.

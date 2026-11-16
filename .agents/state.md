@@ -10,14 +10,23 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 ## Now
 
 - VELA 1.0.65 IS READY TO BE RELEASED, AS FAR AS THE AGENT CAN TAKE IT
-  (2026-11-16). It is NOT tagged and NOT published, and it cannot be until
-  the owner has dealt with two things in the owner's own accounts: Apple
-  refuses notarization ("A required agreement is missing or has
-  expired") and Azure's signing service refuses to sign (403 when a file
-  is submitted). The whole account, with what was verified and the
-  owner's steps in order, is `.agents/plans/v1-release-readiness.md`,
-  "Release candidate: Vela 1.0.65"; read that before doing anything about
-  the release. In short:
+  (2026-11-16). It is NOT tagged and NOT published. The whole account,
+  with what was verified and the owner's steps in order, is
+  `.agents/plans/v1-release-readiness.md`, "Release candidate: Vela
+  1.0.65"; read that before doing anything about the release. In short:
+  - The owner's answers to the list, the same day (`.agents/decisions.md`,
+    last entry): the Apple agreement "should be done"; "no more azure
+    signing. I'm not paying monthly for that", so the release workflow no
+    longer signs the Windows installers (`fc991a8`) and they ship
+    unsigned, as before 1.0.60; "run it"; and the macOS and Windows builds
+    are to be verified by the owner BEFORE any tag. Whether Windows is
+    signed another way is open and the owner's (alternatives were given:
+    SignPath Foundation's free signing for open-source projects, a
+    certificate authority's certificate, staying unsigned).
+  - The run by hand the owner asked for is 43906795908, at `fc991a8`. Its
+    result, and where its packages are, goes here when it ends. The
+    change that took Azure out was written by the agent, so a codex hunt
+    over it is out (the sixth of the final round).
   - The owner's word that day: "you have permission to update whatever
     you need to to get the release ready. then do a final round of
     reviews with codex, then come to me with actions you cannot do"
