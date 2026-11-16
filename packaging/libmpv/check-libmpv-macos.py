@@ -39,15 +39,21 @@ def parse_vmmap(text):
     return paths
 
 
-def check_loaded(directory, listed, modules, executable, require_mpv=True):
+def check_loaded(directory, listed, modules, executable, require_mpv=True, interpreter=None):
     root = Path(directory).resolve()
     files = {name for name in listed if name.endswith(".dylib")}
     seen, problems = set(), []
     for module in modules:
         path = Path(module).resolve()
-        # The executable is not a library. All other images, including
-        # Python extensions/frameworks, obey the same rule as libmpv.
+        # The executable is not a library, and the check's own interpreter
+        # (its framework, its extension modules: sys.base_prefix) is not the
+        # set's business: on a hosted runner /usr/bin/python3 is Xcode's
+        # Python3.framework under /Applications. Every other image, a
+        # Homebrew library the harness might have pulled in included, obeys
+        # the same rule as libmpv.
         if str(path) == str(Path(executable).resolve()) or macho.system_path(str(path)):
+            continue
+        if interpreter is not None and path.is_relative_to(Path(interpreter).resolve()):
             continue
         if path.parent != root:
             problems.append(f"library loaded from outside set/system: {path}")
@@ -110,7 +116,8 @@ def play(directory, arch, log_dir):
             if require_mpv and str(directory / "libmpv.2.dylib") not in {os.path.realpath(p) for p in mapped}:
                 raise RuntimeError("vmmap did not see libmpv.2.dylib")
             snapshots.update(mapped)
-        problems = check_loaded(directory, files, snapshots, executable, require_mpv)
+        problems = check_loaded(directory, files, snapshots, executable, require_mpv,
+                                interpreter=sys.base_prefix)
         if log_dir:
             (log_dir / f"{arch}-loaded-images.txt").write_text("\n".join(sorted(snapshots)) + "\n")
         if problems:

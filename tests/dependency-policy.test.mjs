@@ -1239,7 +1239,7 @@ macRequired('checker wiring', macChecker, [
   'environment = clean_environment(os.environ)', 'timeout=90, check=False',
   'ctypes.CDLL(str(directory / "libmpv.2.dylib"), mode=os.RTLD_NOW | os.RTLD_LOCAL)',
   '["/usr/bin/vmmap", "-w", str(os.getpid())]', 'snapshots.update(loaded_images())',
-  'check_loaded(directory, files, snapshots, executable, require_mpv)',
+  'check_loaded(directory, files, snapshots, executable, require_mpv,\n                                interpreter=sys.base_prefix)',
   'lib.mpv_client_api_version()', '("vo", "null"), ("ao", "null")',
   'b"av://lavfi:testsrc2=duration=2"', 'end.reason != 0 or end.error != 0 or not loaded',
   'time.monotonic() + 25', 'lib.mpv_terminate_destroy(handle)',
