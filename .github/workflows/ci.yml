@@ -4,7 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
-  # By hand too: one job runs only so until its first build passes (see its condition).
+  # By hand too, for a fresh run on demand (e2e-windows.yml downloads an
+  # artifact of this workflow's newest successful run on main).
   workflow_dispatch:
 
 jobs:
@@ -191,9 +192,6 @@ jobs:
 
   libmpv-macos:
     name: Shipped libmpv set (macOS universal)
-    # Held to runs by hand (gh workflow run ci.yml) until its first cold build
-    # and check pass on a hosted Mac; then this condition goes.
-    if: github.event_name == 'workflow_dispatch'
     runs-on: macos-latest
     timeout-minutes: 150
     defaults:

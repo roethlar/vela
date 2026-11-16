@@ -1,11 +1,12 @@
 # Codereview 2026-11-16 — the embedded player on Windows and macOS
 
-Outcome: two codereview codex hunts, one per slice, each over one landed
-commit: the Windows host (`8c40ff8..6b206ec`) and the macOS host
-(`4fe60b8..623ec17`). **findings** in both: four candidates, four admitted
-(all MEDIUM), none declined. pl-1, pl-2 and pl-3 are repaired and closed (codex
-wrote each repair as a coding task; the working agent's review closed
-it); pl-4 is open.
+Outcome: three codereview codex hunts: one per slice over the Windows
+host (`8c40ff8..6b206ec`) and the macOS host (`4fe60b8..623ec17`), and a
+third over the fixes `c49be2a` and `ca07bfa` (below). **findings** in all
+three: six candidates, six admitted (all MEDIUM), none declined. pl-1,
+pl-2 and pl-3 are repaired and closed (codex wrote each repair as a coding
+task; the working agent's review closed it); pl-4, pl-5 and pl-6 are open,
+their repair one codex task.
 
 ## Dispatch record
 

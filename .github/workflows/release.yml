@@ -125,8 +125,7 @@ jobs:
 
   libmpv-macos:
     name: Shipped libmpv set (macOS universal)
-    # CI's job is still held to manual runs pending its first cold proof.
-    # Releases always require it; use the identical toolchain/cache key.
+    # Releases always require it, with CI's toolchain record and cache key.
     needs: [npm-audit, cargo-audit]
     runs-on: macos-latest
     timeout-minutes: 150

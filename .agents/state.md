@@ -32,18 +32,20 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
       (`4fe60b8`; a release run by hand proved both installers and the
       set unpacked from each).
     - macOS: the host (`623ec17`: the render API into a CAOpenGLLayer
-      under the page; standard range for now); the set's build
-      (`ba677b7`, `c60a6d3`, and the check's fix after it) is on its third
-      run on a hosted Mac (the second built everything; its check stopped
-      on the interpreter's own images); its CI job is held to runs by hand
-      until a run passes (ci.yml, condition on `libmpv-macos`).
-    - In progress (codex, worktrees `~/dev/vela-agent-keep/wt/cx-<tag>`):
-      `mhdr` (HDR on macOS through the layer's EDR, the technique in the
-      plan), `mpack` (the set in Vela.app, signed and checked in the
-      release workflow). Open review findings pl-3, pl-4 (macOS host;
-      `.agents/review/codereview-2026-11-16-platforms.md`) go with `mhdr`.
+      under the page) with HDR through the layer's EDR (`49f2c3c`); the
+      set from the pins (`ba677b7`, fixes `c60a6d3`, `485628c`,
+      `ad65c4d`) built and played on a hosted Mac, natively and under
+      Rosetta (probe run 43969988737); its CI job runs on every push.
+      Vela.app carries the set (`2181dcb`); no release run has proved it
+      yet.
+    - In progress: a release run by hand to prove the Mac app; codex
+      defect hunts over the HDR slice and over the Windows and macOS
+      packaging; the repair of review findings pl-4, pl-5, pl-6 (codex,
+      worktree `~/dev/vela-agent-keep/wt/cx-fixes3`;
+      `.agents/review/codereview-2026-11-16-platforms.md`).
   - Linux unchanged through all of it: both end-to-end suites in full at
-    `6b206ec`, `623ec17` and `c49be2a` (48 of 48, 51 of 51, parity PASS).
+    `6b206ec`, `623ec17`, `c49be2a` and `49f2c3c` (48 of 48, 51 of 51,
+    parity PASS).
   - The end-to-end suite now runs on a hosted Windows runner too
     (`9617815`, workflow `e2e-windows.yml`, by hand); its first full run
     is in progress.

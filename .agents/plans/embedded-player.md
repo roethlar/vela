@@ -2398,5 +2398,19 @@ artifact keeps the probe's logs and screenshots.
   ID") with the local-network sentence in its Info.plist. The macOS host
   landed after it (`623ec17`; Linux's suites in full at that commit:
   48 of 48, 51 of 51, parity PASS).
-  In progress: the macOS set; next, the macOS host, then packaging of
-  both sets into the Windows and macOS bundles.
+  The macOS set from the pins (`ba677b7`; its fixes `c60a6d3`, libplacebo's
+  fast_float; `485628c`, the check allows its own interpreter; `ad65c4d`,
+  mpv's `osdep/utils-mac.c` for the Apple audio outputs, and AVFoundation
+  built): its fourth run on a hosted Mac (probe `libmpv-macos`, run
+  43969988737, 19 minutes cold) built the universal set (16 dylibs, macOS
+  11.0), and the check passed natively and under Rosetta: client API 2.6,
+  mpv 0.42.0, the test pattern played to its end, every loaded image in
+  the set's MANIFEST, `/usr/lib` or `/System`. CI's `libmpv-macos` job,
+  held to runs by hand until then, runs on every push from the commit that
+  recorded this. HDR in the macOS embedded player through the layer's EDR
+  (`49f2c3c`, closing review finding pl-3; Linux's suites in full at that
+  commit: 48 of 48, 51 of 51, parity PASS). Vela.app carries the set
+  (`2181dcb`: Contents/Frameworks, signed with the app; the release
+  workflow proves it from the finished DMG); not yet run in a release.
+  Next: a release run by hand proves the Mac app; then the owner's checks,
+  listed once with what each platform has and lacks.
