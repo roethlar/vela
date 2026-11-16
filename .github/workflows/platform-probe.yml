@@ -4,8 +4,10 @@ name: Platform probe
 # and keeps what it writes to probe-out/ (screenshots, logs) as an artifact.
 # The probes answer the open questions of the macOS and Windows slices of
 # .agents/plans/embedded-player.md (amendment of 2026-11-16) before any product
-# code is written for them. Nothing here builds, signs or ships Vela, and no
-# secret is given to a probe.
+# code is written for them, or check product code on a platform no test runs
+# on. Nothing here signs or ships Vela, and no secret is given to a probe: only
+# the job's own token, which can read this repository and its workflow runs'
+# artifacts (a probe may take CI's libmpv set instead of building one).
 
 on:
   workflow_dispatch:
@@ -20,6 +22,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   probe:
@@ -28,11 +31,22 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # A probe that builds Vela needs the repository's Node (and installs
+      # its npm itself).
+      - uses: actions/setup-node@v7
+        if: inputs.probe == 'm2-vela'
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+
       - name: Run the probe
         shell: bash
         env:
           PROBE: ${{ inputs.probe }}
           PROBE_OUT: ${{ github.workspace }}/probe-out
+          GH_TOKEN: ${{ github.token }}
+          HOMEBREW_NO_AUTO_UPDATE: '1'
+          HOMEBREW_NO_INSTALL_CLEANUP: '1'
         run: |
           set -euo pipefail
           case "$PROBE" in
