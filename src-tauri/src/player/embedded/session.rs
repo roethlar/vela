@@ -12,23 +12,37 @@
 //! needs the surface), and Rust drops fields in declaration order.
 
 use std::ffi::c_void;
+#[cfg(target_os = "linux")]
 use std::os::fd::{AsFd, AsRawFd, FromRawFd, OwnedFd};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+#[cfg(target_os = "linux")]
 use wayland_client::protocol::wl_subsurface::WlSubsurface;
 
+#[cfg(target_os = "linux")]
 use super::egl;
+#[cfg(target_os = "linux")]
 use super::hdr::{self, Capabilities, Frame, Tagging};
-use super::libmpv::{Event, LibMpv, Player, Renderer};
+#[cfg(target_os = "linux")]
+use super::libmpv::Renderer;
+use super::libmpv::{Event, LibMpv, Player};
 use super::options::Step;
+#[cfg(target_os = "linux")]
 use super::surface::{Guest, VideoSurface};
 use crate::player::control::Channel;
 use crate::player::launch::HeaderInclude;
 
+#[cfg(target_os = "windows")]
+#[path = "windows_session.rs"]
+mod windows;
+#[cfg(target_os = "windows")]
+use windows::{set_up, Live};
+
 /// Where the video is, in the window's own units, relative to the window.
+#[cfg(target_os = "linux")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Rect {
     pub(crate) x: i32,
@@ -71,6 +85,7 @@ impl Drop for MarkerPayload {
 pub(crate) struct Start {
     pub(crate) lib: Arc<LibMpv>,
     /// Vela's place on the window's connection to the compositor.
+    #[cfg(target_os = "linux")]
     pub(crate) guest: Arc<Guest>,
     /// The playback session this play belongs to.
     pub(crate) session_id: String,
@@ -341,20 +356,72 @@ pub(crate) fn wait_for_unfinished_plays(limit: Duration) -> bool {
     LEFTOVERS.wait(limit)
 }
 
+#[cfg(target_os = "linux")]
+pub(crate) type VideoTarget = VideoSurface;
+#[cfg(target_os = "windows")]
+pub(crate) type VideoTarget = usize;
+
 struct Shared {
+    #[cfg(target_os = "windows")]
+    wake: (Mutex<bool>, std::sync::Condvar),
     /// Written to wake the thread: by mpv (a frame or an event is waiting)
     /// and by Vela (stop, or the rectangle changed).
+    #[cfg(target_os = "linux")]
     wake: OwnedFd,
     stop: AtomicBool,
     /// Whether the play started, or its caller stopped waiting first.
     race: StartRace,
     /// The size the page last reported, when the thread has not applied it.
+    #[cfg(target_os = "linux")]
     resize_to: Mutex<Option<(i32, i32)>>,
     /// Set once the surface exists. Used from the window's thread only.
+    #[cfg(target_os = "linux")]
     subsurface: Mutex<Option<WlSubsurface>>,
 }
 
 impl Shared {
+    #[cfg(target_os = "windows")]
+    fn new() -> Result<Arc<Self>, String> {
+        Ok(Arc::new(Self {
+            wake: (Mutex::new(false), std::sync::Condvar::new()),
+            stop: AtomicBool::new(false),
+            race: StartRace::new(),
+        }))
+    }
+
+    #[cfg(target_os = "windows")]
+    fn wake(&self) {
+        *self.wake.0.lock().unwrap_or_else(|e| e.into_inner()) = true;
+        self.wake.1.notify_one();
+    }
+
+    #[cfg(target_os = "windows")]
+    fn wait(&self, timeout_ms: i32) {
+        let pending = self.wake.0.lock().unwrap_or_else(|e| e.into_inner());
+        let (mut pending, _) = self
+            .wake
+            .1
+            .wait_timeout_while(
+                pending,
+                Duration::from_millis(timeout_ms.max(0) as u64),
+                |pending| !*pending,
+            )
+            .unwrap_or_else(|e| e.into_inner());
+        *pending = false;
+    }
+
+    #[cfg(target_os = "windows")]
+    fn drain_wake(&self) {}
+
+    fn forget_surface(&self) {
+        #[cfg(target_os = "linux")]
+        self.subsurface
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
+    }
+
+    #[cfg(target_os = "linux")]
     fn new() -> Result<Arc<Self>, String> {
         // SAFETY: plain flags; a negative result is an error.
         let wake = unsafe { libc::eventfd(0, libc::EFD_NONBLOCK | libc::EFD_CLOEXEC) };
@@ -371,6 +438,7 @@ impl Shared {
         }))
     }
 
+    #[cfg(target_os = "linux")]
     fn wake(&self) {
         let one: u64 = 1;
         // SAFETY: a valid eventfd and eight readable bytes. A full counter
@@ -378,6 +446,7 @@ impl Shared {
         unsafe { libc::write(self.wake.as_raw_fd(), (&one as *const u64).cast(), 8) };
     }
 
+    #[cfg(target_os = "linux")]
     fn drain_wake(&self) {
         let mut count: u64 = 0;
         // SAFETY: a valid non-blocking eventfd and eight writable bytes.
@@ -393,6 +462,7 @@ unsafe extern "C" fn wake_from_mpv(context: *mut c_void) {
 }
 
 /// What exists while a play is running. Field order is teardown order.
+#[cfg(target_os = "linux")]
 struct Live {
     renderer: Renderer,
     player: Player,
@@ -410,20 +480,23 @@ struct Live {
 /// the description is announced, its contents arrive, the answer arrives.
 /// If they take longer the play starts in standard range and switches when
 /// they arrive.
+#[cfg(target_os = "linux")]
 const COLOUR_EXCHANGES_AT_START: usize = 6;
 
 /// How long, at most, a play's start waits for the compositor and for mpv's
 /// answers about colour. A change still in flight then carries on in the
 /// running play, which holds presentation until mpv has answered.
+#[cfg(target_os = "linux")]
 const COLOUR_LIMIT_AT_START: Duration = Duration::from_secs(1);
 
 /// Act on whatever the compositor has said about colour since the last call:
 /// the one way, at the start of a play and during it, by which mpv and the
 /// surface are told what the display can do (see `hdr`).
+#[cfg(target_os = "linux")]
 fn follow_colour(
     player: &Player,
     surface: &mut VideoSurface,
-    capabilities: Capabilities,
+    #[cfg(target_os = "linux")] capabilities: Capabilities,
     tagging: &mut Tagging,
     now: Instant,
 ) {
@@ -448,6 +521,7 @@ fn follow_colour(
 }
 
 /// One line on standard error for a change of the picture that has finished.
+#[cfg(target_os = "linux")]
 fn say(change: hdr::Change) {
     match change {
         hdr::Change::Nothing => {}
@@ -466,16 +540,24 @@ fn private_options_file(text: &str) -> Result<PathBuf, String> {
         std::process::id(),
         uuid::Uuid::new_v4().simple()
     );
+    #[cfg(target_os = "linux")]
     let path = crate::player::launch::private_runtime_dir()?.join(name);
+    #[cfg(target_os = "windows")]
+    let path = crate::storage::config_dir_file(&name)
+        .map_err(|_| "couldn't prepare the player's options".to_string())?;
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create_new(true);
+    #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
         options.mode(0o600);
     }
-    let written = options
-        .open(&path)
-        .and_then(|mut file| file.write_all(text.as_bytes()));
+    let written = options.open(&path).and_then(|mut file| {
+        #[cfg(target_os = "windows")]
+        crate::storage::harden_existing_regular(&path)
+            .map_err(|_| std::io::Error::other("couldn't protect the player's options"))?;
+        file.write_all(text.as_bytes())
+    });
     if written.is_err() {
         let _ = std::fs::remove_file(&path);
         return Err("couldn't write the player's options".to_string());
@@ -514,6 +596,7 @@ fn configure(player: &Player, start: &Start) -> Result<(), String> {
 
 /// Build a play around `surface`, which the window's thread made for it
 /// (`VideoSurface::create`). Nothing here touches Vela's window.
+#[cfg(target_os = "linux")]
 fn set_up(start: &Start, mut surface: VideoSurface, shared: &Arc<Shared>) -> Result<Live, String> {
     // The waiting the window's thread was spared: learn the surface's scale.
     surface.settle()?;
@@ -662,6 +745,7 @@ impl Live {
     }
 }
 
+#[cfg(target_os = "linux")]
 impl PlayLoop for Live {
     fn wait(&mut self, shared: &Shared, timeout_ms: i32) -> bool {
         self.surface.wait(shared.wake.as_fd(), timeout_ms).is_ok()
@@ -780,7 +864,7 @@ pub(crate) struct Session {
 impl Session {
     /// Start a play on `surface` and wait until mpv has been given its file,
     /// or until something on the way there failed.
-    pub(crate) fn start(mut start: Start, surface: VideoSurface) -> Result<Self, String> {
+    pub(crate) fn start(mut start: Start, surface: VideoTarget) -> Result<Self, String> {
         let shared = Shared::new()?;
         let header_include = start.header_include.take();
         let session_id = std::mem::take(&mut start.session_id);
@@ -794,13 +878,7 @@ impl Session {
                 let shared = thread_shared;
                 // The window's thread must not keep a handle to a surface
                 // that is about to go; this takes it away first.
-                let forget_surface = || {
-                    shared
-                        .subsurface
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .take();
-                };
+                let forget_surface = || shared.forget_surface();
                 match set_up(&start, surface, &shared) {
                     Err(reason) => {
                         forget_surface();
@@ -857,19 +935,19 @@ impl Session {
     }
 
     /// A play that was never started, for tests of what holds one.
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "linux"))]
     pub(crate) fn for_test(session_id: &str) -> Self {
         Self::for_test_holding(session_id, None)
     }
 
     /// The same, whose player view's commands go to the socket at `path`.
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "linux"))]
     pub(crate) fn for_test_on(session_id: &str, path: &str) -> Self {
         Self::for_test_with_channel(session_id, Channel::new(path.to_string()))
     }
 
     /// The same, with a channel a test has made.
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "linux"))]
     pub(crate) fn for_test_with_channel(session_id: &str, channel: Channel) -> Self {
         let mut session = Self::for_test(session_id);
         session.channel = Arc::new(channel);
@@ -877,8 +955,11 @@ impl Session {
     }
 
     /// The same, owning a stream-auth include.
-    #[cfg(test)]
-    pub(crate) fn for_test_holding(session_id: &str, header_include: Option<HeaderInclude>) -> Self {
+    #[cfg(all(test, target_os = "linux"))]
+    pub(crate) fn for_test_holding(
+        session_id: &str,
+        header_include: Option<HeaderInclude>,
+    ) -> Self {
         Session {
             session_id: session_id.to_string(),
             channel: Arc::new(Channel::new(String::new())),
@@ -893,7 +974,7 @@ impl Session {
 
     /// A play that runs, as far as anything holding it can tell, until it is
     /// told to stop, for tests of what holds one.
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "linux"))]
     pub(crate) fn for_test_live(session_id: &str) -> Self {
         let mut play = Self::for_test_running(STOP_PATIENCE, &LEFTOVERS, |stopped| {
             while !stopped() {
@@ -906,7 +987,7 @@ impl Session {
 
     /// The same, that takes a moment to end once told to stop, as a real
     /// play does.
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "linux"))]
     pub(crate) fn for_test_slow_to_stop(session_id: &str) -> Self {
         let mut play = Self::for_test_running(STOP_PATIENCE, &LEFTOVERS, |stopped| {
             while !stopped() {
@@ -921,7 +1002,7 @@ impl Session {
     /// A play whose thread runs `body`, for tests of what happens to a
     /// thread that does or does not end. `body` is given a way to ask
     /// whether the play has been told to stop.
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "linux"))]
     fn for_test_running(
         patience: Duration,
         leftovers: &'static Leftovers,
@@ -1000,6 +1081,7 @@ impl Session {
     /// Move and size the video. Call on the window's own thread, and have
     /// the window redraw afterwards: the position takes effect with the
     /// window's next redraw, the size with the next video frame.
+    #[cfg(target_os = "linux")]
     pub(crate) fn place(&self, rect: Rect) {
         if let Some(subsurface) = self
             .shared
@@ -1038,6 +1120,7 @@ impl Drop for Session {
     }
 }
 
+#[cfg(target_os = "linux")]
 #[cfg(test)]
 mod tests {
     use super::*;

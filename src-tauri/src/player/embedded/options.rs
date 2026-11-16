@@ -132,6 +132,7 @@ pub(crate) fn steps(args: &[LaunchArg]) -> Vec<Step> {
 /// embedded player. The user's scripts folder, per-script option files and
 /// key bindings are not loaded: the first two would run before Vela's options
 /// could be asserted over them, and no key press reaches an embedded mpv.
+#[cfg(target_os = "linux")]
 pub(crate) fn user_config_files(
     mpv_home: Option<&std::ffi::OsStr>,
     xdg_config_home: Option<&std::ffi::OsStr>,
@@ -145,6 +146,53 @@ pub(crate) fn user_config_files(
     let mut files = vec![PathBuf::from("/etc/mpv/mpv.conf")];
     files.extend(user_dir.map(|dir| dir.join("mpv.conf")));
     files
+}
+
+/// Decimal HWND, as mpv's WinID option and the W0 toplevel probe require.
+#[cfg(any(target_os = "windows", test))]
+pub(crate) fn windows_window_options(hwnd: usize) -> Vec<LaunchArg> {
+    let mut args = crate::player::launch::windows_embedded_required_args();
+    args.push(LaunchArg::Option {
+        name: "wid",
+        value: Some(hwnd.to_string()),
+    });
+    args
+}
+
+pub(crate) fn current_user_config_files() -> Vec<std::path::PathBuf> {
+    #[cfg(target_os = "linux")]
+    {
+        user_config_files(
+            std::env::var_os("MPV_HOME").as_deref(),
+            std::env::var_os("XDG_CONFIG_HOME").as_deref(),
+            std::env::var_os("HOME").as_deref(),
+        )
+    }
+    #[cfg(target_os = "windows")]
+    {
+        use std::path::PathBuf;
+        // mpv's Windows search: explicit MPV_HOME; otherwise portable_config
+        // beside the executable, or global exe/mpv then RoamingAppData/mpv.
+        if let Some(home) = std::env::var_os("MPV_HOME").filter(|v| !v.is_empty()) {
+            return vec![PathBuf::from(home).join("mpv.conf")];
+        }
+        let executable = std::env::current_exe().ok();
+        let directory = executable.as_deref().and_then(std::path::Path::parent);
+        if let Some(portable) = directory
+            .map(|dir| dir.join("portable_config"))
+            .filter(|p| p.is_dir())
+        {
+            return vec![portable.join("mpv.conf")];
+        }
+        let mut files: Vec<_> = directory
+            .map(|dir| dir.join("mpv/mpv.conf"))
+            .into_iter()
+            .collect();
+        files.extend(
+            directories::BaseDirs::new().map(|dirs| dirs.config_dir().join("mpv/mpv.conf")),
+        );
+        files
+    }
 }
 
 #[cfg(test)]
@@ -419,6 +467,7 @@ mod tests {
         assert_eq!(steps(&[]), []);
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn the_users_own_configuration_is_found_where_mpv_looks_for_it() {
         use std::ffi::OsStr;
@@ -449,5 +498,43 @@ mod tests {
             [system.clone(), PathBuf::from("/home/u/.config/mpv/mpv.conf")]
         );
         assert_eq!(files(None, None, None), [system]);
+    }
+}
+
+#[cfg(test)]
+mod windows_tests {
+    use super::*;
+
+    #[test]
+    fn windows_play_uses_a_decimal_parent_and_the_native_video_output() {
+        let args = windows_window_options(123456);
+        let steps = steps(&args);
+        assert!(steps.contains(&Step::Options("wid=%6%123456\n".into())));
+        assert!(steps.contains(&Step::Options("vo=%8%gpu-next\n".into())));
+        assert!(steps.contains(&Step::Options("gpu-api=%5%d3d11\n".into())));
+        assert!(!steps.contains(&Step::Options("vo=%6%libmpv\n".into())));
+        assert!(steps.contains(&Step::Options("target-colorspace-hint=%3%yes\n".into())));
+    }
+
+    #[test]
+    fn windows_play_leaves_every_input_source_with_the_page() {
+        let args = windows_window_options(123456);
+        let steps = steps(&args);
+        for option in [
+            "osc",
+            "input-default-bindings",
+            "input-builtin-bindings",
+            "input-vo-keyboard",
+            "input-cursor",
+            "input-media-keys",
+            "input-terminal",
+            "input-builtin-dragging",
+            "input-builtin-drag-and-drop",
+        ] {
+            assert!(
+                steps.contains(&Step::Options(format!("{option}=%2%no\n"))),
+                "{option}"
+            );
+        }
     }
 }

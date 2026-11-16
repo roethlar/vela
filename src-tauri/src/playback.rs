@@ -15,21 +15,19 @@ use std::time::{Duration, Instant};
 // with a `try_clone`, so the tracker code below is platform-agnostic once we pick
 // the right connector.
 #[cfg(unix)]
-type IpcStream = std::os::unix::net::UnixStream;
+pub(crate) type IpcStream = std::os::unix::net::UnixStream;
 #[cfg(windows)]
-type IpcStream = std::fs::File;
+mod windows_ipc;
+#[cfg(windows)]
+pub(crate) use windows_ipc::IpcStream;
 
 #[cfg(unix)]
-fn ipc_connect(path: &str) -> std::io::Result<IpcStream> {
+pub(crate) fn ipc_connect(path: &str) -> std::io::Result<IpcStream> {
     std::os::unix::net::UnixStream::connect(path)
 }
 #[cfg(windows)]
-fn ipc_connect(path: &str) -> std::io::Result<IpcStream> {
-    // A Windows named pipe can be opened like a file for duplex read/write.
-    std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(path)
+pub(crate) fn ipc_connect(path: &str) -> std::io::Result<IpcStream> {
+    IpcStream::connect(path)
 }
 
 /// Everything the progress tracker needs to report back to Plex.
@@ -948,8 +946,8 @@ pub fn play(
     // The player view's state, for an embedded play only: one that runs in
     // the external player, from the start or after falling back, has no view
     // and never gets the notifier. Non-fatal like the watcher above: the play
-    // goes on, its view without controls. Only Linux has an embedded play.
-    #[cfg(target_os = "linux")]
+    // goes on, its view without controls.
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
     if started_player == crate::player::PlayerKind::Embedded {
         if let Some(notify) = on_state {
             if let Err(e) = crate::player::report::spawn_reporter(
@@ -963,7 +961,7 @@ pub fn play(
             }
         }
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
     let _ = (on_state, state_session);
 
     // Automatic only. Like the EOF watcher, failing to spawn is non-fatal:

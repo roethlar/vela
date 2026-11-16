@@ -3,8 +3,8 @@
 //! [`build_launch`] turns "what to play" ([`PlaySpec`]) and the user's
 //! settings into a [`LaunchPlan`]: the ordered mpv options, the environment
 //! the player needs, the URL, and the two private files the options refer to.
-//! Whichever player starts the plan (see `super::external`) adds nothing and
-//! reorders nothing, so the order built here is the order mpv sees.
+//! Both players preserve that order. The Windows embedded session then binds
+//! its native parent (`wid`) and reasserts the protected native-window options.
 
 use std::io::Write;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -466,10 +466,10 @@ fn user_args(cfg: &crate::config::AppConfig) -> Vec<LaunchArg> {
 ///   asked to, before these options.
 /// - `vo`: asserted in the protected tail instead, because the embedded
 ///   player cannot work with any other value.
-/// - `gpu-api`, `ENABLE_HDR_WSI`, `target-colorspace-hint`: these make mpv's
-///   own window negotiate HDR with the compositor. Embedded, Vela owns the
-///   surface and tags it itself.
-/// - the macOS audio default: the embedded player exists on Linux only.
+/// - `gpu-api`, `target-colorspace-hint`: Linux owns and tags the surface
+///   itself; Windows asserts these in its protected native-window tail.
+/// - `ENABLE_HDR_WSI`: only the external Linux Vulkan player uses it.
+/// - the macOS audio default: macOS has no embedded player yet.
 fn embedded_default_args() -> Vec<LaunchArg> {
     vec![
         LaunchArg::flag("no-ytdl"),
@@ -544,10 +544,36 @@ fn lifecycle_args(player: PlayerKind) -> [LaunchArg; 1] {
 /// This holds for options only: a conditional profile in the user's mpv.conf,
 /// applied once mpv runs, or a command on its IPC socket, can still turn
 /// `force-window` on (see `Live::load`).
-fn embedded_required_args() -> [LaunchArg; 2] {
-    [
+fn embedded_required_args() -> Vec<LaunchArg> {
+    if cfg!(target_os = "windows") {
+        return windows_embedded_required_args();
+    }
+    vec![
         LaunchArg::set("vo", "libmpv"),
         LaunchArg::set("force-window", "no"),
+    ]
+}
+
+/// mpv's own D3D11 child under WebView2. These are protected against user
+/// includes/profiles as well as Advanced arguments, like vo=libmpv on Linux.
+/// w32_common.c disables a wid child with EnableWindow(child, 0), which keeps
+/// it from taking focus/input. focus-on and cursor-passthrough do not apply to
+/// a Windows child. Also turn off mpv's other input sources and bindings.
+pub(crate) fn windows_embedded_required_args() -> Vec<LaunchArg> {
+    vec![
+        LaunchArg::set("vo", "gpu-next"),
+        LaunchArg::set("gpu-api", "d3d11"),
+        LaunchArg::set("target-colorspace-hint", "yes"),
+        LaunchArg::set("force-window", "no"),
+        LaunchArg::set("osc", "no"),
+        LaunchArg::set("input-default-bindings", "no"),
+        LaunchArg::set("input-builtin-bindings", "no"),
+        LaunchArg::set("input-vo-keyboard", "no"),
+        LaunchArg::set("input-cursor", "no"),
+        LaunchArg::set("input-media-keys", "no"),
+        LaunchArg::set("input-terminal", "no"),
+        LaunchArg::set("input-builtin-dragging", "no"),
+        LaunchArg::set("input-builtin-drag-and-drop", "no"),
     ]
 }
 

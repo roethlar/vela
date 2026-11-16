@@ -934,7 +934,7 @@
           <p class="muted small">
             Vela's window shows video inside Vela with Vela's own controls,
             using a copy of mpv that comes with Vela.
-            It is experimental and works only on Linux with Wayland.
+            It is experimental and works on Windows and on Linux with Wayland.
             Switching to mpv's own window applies to the next video.
             To use Vela's window, restart Vela if this run started without embedded playback.
             When it cannot be used, videos play in mpv's own window and a line

@@ -30,13 +30,13 @@ pub(crate) const NOT_A_COMMAND: &str = "Not a player command.";
 pub(crate) const NOT_RUNNING: &str = "The player is not running.";
 // The other three come only from a player's socket, which only Linux has.
 /// Another command to the same play has not been answered yet.
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 pub(crate) const BUSY: &str = "The player is busy.";
 /// The player did not answer in time, or has not answered a command lately.
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 pub(crate) const NO_ANSWER: &str = "The player did not answer.";
 /// The player answered with anything but success.
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 pub(crate) const REFUSED: &str = "The player refused.";
 
 /// The farthest a relative seek may go, in seconds, either way.
@@ -172,7 +172,7 @@ pub(crate) fn parse(name: &Value, args: &Value) -> Result<PlayerCommand, &'stati
     command.ok_or(NOT_A_COMMAND)
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 impl PlayerCommand {
     /// The one mpv command each stands for, as the array of mpv's JSON IPC.
     /// `stop` has none: it never reaches mpv (see [`command`]).
@@ -248,24 +248,24 @@ pub(crate) fn is_running_embedded_play(slot: &mut Option<PlayerHandle>, session_
         .is_some_and(|player| player.is_running_embedded_play(session_id))
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 pub(crate) use channel::Channel;
 
 /// No system but Linux has an embedded play, and so nothing to send to.
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "windows")))]
 pub(crate) enum Channel {}
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "windows")))]
 impl Channel {
     fn send(&self, _command: PlayerCommand) -> Result<(), &'static str> {
         match *self {}
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 mod channel {
+    use crate::playback::IpcStream;
     use std::io::Write;
-    use std::os::unix::net::UnixStream;
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
     use std::sync::Mutex;
     use std::time::{Duration, Instant};
@@ -305,7 +305,7 @@ mod channel {
         }
 
         /// The same, with shorter waits, for tests.
-        #[cfg(test)]
+        #[cfg(all(test, target_os = "linux"))]
         pub(crate) fn with_limits(path: String, answer_limit: Duration, quiet: Duration) -> Self {
             Channel {
                 path,
@@ -382,12 +382,16 @@ mod channel {
     /// Connect to the player's socket, waiting at most `limit` (see
     /// [`report::connect`]). With no such file, or nobody listening any more,
     /// the player has gone.
-    fn connect(path: &str, limit: Duration) -> Result<UnixStream, &'static str> {
-        report::connect(path, limit).map_err(|error| match error.raw_os_error() {
-            // The wait ran out with the queue still full (or a signal ended
-            // it): the player is not taking connections.
-            Some(libc::EAGAIN) | Some(libc::EINTR) => NO_ANSWER,
-            _ => NOT_RUNNING,
+    fn connect(path: &str, limit: Duration) -> Result<IpcStream, &'static str> {
+        report::connect(path, limit).map_err(|error| {
+            if is_timeout(&error) || error.kind() == std::io::ErrorKind::Interrupted {
+                return NO_ANSWER;
+            }
+            #[cfg(target_os = "linux")]
+            if matches!(error.raw_os_error(), Some(libc::EAGAIN) | Some(libc::EINTR)) {
+                return NO_ANSWER;
+            }
+            NOT_RUNNING
         })
     }
 

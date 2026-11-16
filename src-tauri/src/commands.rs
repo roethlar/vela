@@ -1170,6 +1170,12 @@ pub struct PlayerDto {
     note: Option<&'static str>,
 }
 
+/// Keep the choice visible on supported hosts even when this installation
+/// lacks the library; `note` explains availability and restart requirements.
+fn player_offered(platform: &str) -> bool {
+    matches!(platform, "linux" | "windows")
+}
+
 #[tauri::command]
 pub async fn get_player(
     app: tauri::AppHandle,
@@ -1182,7 +1188,7 @@ pub async fn get_player(
     })
     .await
     .map_err(|_| "could not read Vela settings".to_string())??;
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
     let note = {
         let probe_app = app.clone();
         let known = tauri::async_runtime::spawn_blocking(move || {
@@ -1204,13 +1210,17 @@ pub async fn get_player(
             known,
         )
     };
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
     let note = {
         let _ = (app, state);
         (saved == PlayerKind::Embedded)
             .then(|| crate::player::EmbeddedUnavailable::NotOnThisSystem.settings_note())
     };
-    Ok(PlayerDto { player: saved.as_str(), offered: cfg!(target_os = "linux"), note })
+    Ok(PlayerDto {
+        player: saved.as_str(),
+        offered: player_offered(std::env::consts::OS),
+        note,
+    })
 }
 
 #[tauri::command]
@@ -6507,6 +6517,9 @@ pub fn player_set_rect(
         };
         state.embedded.place(&app, reported, session);
     }
+    // Windows mpv 0.42's w32_common.c installs a parent window hook and
+    // fits the disabled child to the entire client area. There is no separate
+    // placement operation: the page currently covers that whole area.
     #[cfg(not(target_os = "linux"))]
     {
         let _ = (x, y, width, height, app, state);
@@ -6518,7 +6531,7 @@ pub fn player_set_rect(
 /// `player::embedded::startup`); otherwise it means nothing.
 #[tauri::command]
 pub fn player_window_ready() {
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
     crate::player::embedded::startup::window_came_up();
 }
 
@@ -11237,5 +11250,19 @@ mod tests {
         let out = filter_live_recents(items, &live);
         let keys: Vec<_> = out.iter().map(|i| i.rating_key.as_str()).collect();
         assert_eq!(keys, vec!["plex:1", "jf:9"], "dead-source entry dropped");
+    }
+}
+
+#[cfg(test)]
+mod windows_player_choice_tests {
+    #[test]
+    fn windows_offers_the_same_video_player_choice_as_linux() {
+        assert!(super::player_offered("windows"));
+        assert!(super::player_offered("linux"));
+        assert!(!super::player_offered("macos"));
+        // Label and experimental marking belong to the shared page.
+        let page = include_str!("../../src/lib/Settings.svelte");
+        assert!(page.contains("Vela's window"));
+        assert!(page.contains("Experimental"));
     }
 }

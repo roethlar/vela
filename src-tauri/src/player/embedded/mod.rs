@@ -1,28 +1,32 @@
 //! The embedded player: mpv's library drawing inside Vela's own window.
 //!
-//! Linux on Wayland only (decision D5 of
-//! `.agents/plans/embedded-player.md`). Experimental and off by default; the
-//! external player stays the default and is never removed.
-//!
-//! How the pieces fit: `startup` decides, before any window exists, whether
-//! this run's window can have video under it. `host` answers whether an
-//! embedded play can run and starts one. A play is a `session`: one thread
-//! owning a `surface` under the window, an OpenGL window on it (`egl`), and
-//! an mpv player from the shipped library (`libmpv`) configured through
-//! `options`. `hdr` decides what mpv and the compositor are told about the
-//! display's range.
+//! Linux draws through the render API into a Wayland/EGL surface; Windows
+//! gives mpv the main window's HWND and lets gpu-next own its D3D11 child.
+//! Both use the same startup recovery, launch, session and IPC lifecycle.
 
+#[cfg(target_os = "linux")]
 mod egl;
+#[cfg(target_os = "linux")]
 mod hdr;
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 mod host;
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 mod libmpv;
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 mod options;
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 mod session;
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 pub(crate) mod startup;
+#[cfg(target_os = "linux")]
 mod surface;
 
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 pub(crate) use host::{follow_fullscreen, Host, Launcher};
-pub(crate) use session::{wait_for_unfinished_plays, Rect, Session};
+#[cfg(target_os = "linux")]
+pub(crate) use session::Rect;
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+pub(crate) use session::{wait_for_unfinished_plays, Session};
 
 /// Turn an address the system's loader returned into a function pointer of
 /// type `F`. Refuses, at compile time, an `F` that is not pointer-sized.
@@ -31,6 +35,7 @@ pub(crate) use session::{wait_for_unfinished_plays, Rect, Session};
 /// `address` must be the address of a function whose signature is exactly
 /// `F`. Nothing can check that; it is transcribed from the library's header
 /// at each place this is called.
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 unsafe fn function_at<F: Copy>(address: *mut std::ffi::c_void) -> F {
     const { assert!(std::mem::size_of::<F>() == std::mem::size_of::<*mut std::ffi::c_void>()) };
     // SAFETY: the caller's contract, and the size check above.

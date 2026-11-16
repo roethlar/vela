@@ -15,7 +15,12 @@ use std::ffi::{c_char, c_double, c_int, c_ulong, c_void, CStr, CString};
 use std::path::{Path, PathBuf};
 
 /// The file name of the library inside the shipped set.
+#[cfg(target_os = "linux")]
 pub(crate) const LIBRARY_FILE: &str = "libmpv.so.2";
+#[cfg(target_os = "windows")]
+pub(crate) const LIBRARY_FILE: &str = WINDOWS_LIBRARY_FILE;
+#[cfg(any(target_os = "windows", test))]
+const WINDOWS_LIBRARY_FILE: &str = "libmpv-2.dll";
 
 /// The client API this code was written against. A library with a different
 /// major number has changed incompatibly; a lower minor number lacks
@@ -28,30 +33,42 @@ pub(crate) struct RawHandle {
     _opaque: [u8; 0],
 }
 
+#[cfg(target_os = "linux")]
 #[repr(C)]
 pub(crate) struct RawRenderContext {
     _opaque: [u8; 0],
 }
 
 /// `mpv_render_param`.
+#[cfg(target_os = "linux")]
 #[repr(C)]
 pub(crate) struct RenderParam {
     pub(crate) kind: c_int,
     pub(crate) data: *mut c_void,
 }
 
+#[cfg(target_os = "linux")]
 pub(crate) const RENDER_PARAM_END: c_int = 0;
+#[cfg(target_os = "linux")]
 pub(crate) const RENDER_PARAM_API_TYPE: c_int = 1;
+#[cfg(target_os = "linux")]
 pub(crate) const RENDER_PARAM_OPENGL_INIT_PARAMS: c_int = 2;
+#[cfg(target_os = "linux")]
 pub(crate) const RENDER_PARAM_OPENGL_FBO: c_int = 3;
+#[cfg(target_os = "linux")]
 pub(crate) const RENDER_PARAM_FLIP_Y: c_int = 4;
+#[cfg(target_os = "linux")]
 pub(crate) const RENDER_PARAM_DEPTH: c_int = 5;
+#[cfg(target_os = "linux")]
 pub(crate) const RENDER_PARAM_DRM_DISPLAY_V2: c_int = 16;
+#[cfg(target_os = "linux")]
 pub(crate) const RENDER_API_TYPE_OPENGL: &CStr = c"opengl";
 /// `MPV_RENDER_UPDATE_FRAME`.
+#[cfg(target_os = "linux")]
 pub(crate) const RENDER_UPDATE_FRAME: u64 = 1;
 
 /// `mpv_opengl_init_params`.
+#[cfg(target_os = "linux")]
 #[repr(C)]
 pub(crate) struct OpenGlInitParams {
     pub(crate) get_proc_address:
@@ -60,6 +77,7 @@ pub(crate) struct OpenGlInitParams {
 }
 
 /// `mpv_opengl_fbo`.
+#[cfg(target_os = "linux")]
 #[repr(C)]
 pub(crate) struct OpenGlFbo {
     pub(crate) fbo: c_int,
@@ -70,6 +88,7 @@ pub(crate) struct OpenGlFbo {
 
 /// `mpv_opengl_drm_params_v2`. Only `render_fd` is used: it names the GPU for
 /// hardware decoding. The other fields describe a display Vela does not drive.
+#[cfg(target_os = "linux")]
 #[repr(C)]
 pub(crate) struct OpenGlDrmParamsV2 {
     pub(crate) fd: c_int,
@@ -190,9 +209,12 @@ pub(crate) struct LibMpv {
     set_option_string:
         unsafe extern "C" fn(*mut RawHandle, *const c_char, *const c_char) -> c_int,
     initialize: unsafe extern "C" fn(*mut RawHandle) -> c_int,
+    #[cfg(target_os = "linux")]
     set_property_async:
         unsafe extern "C" fn(*mut RawHandle, u64, *const c_char, c_int, *mut c_void) -> c_int,
+    #[cfg(target_os = "linux")]
     observe_property: unsafe extern "C" fn(*mut RawHandle, u64, *const c_char, c_int) -> c_int,
+    #[cfg(target_os = "linux")]
     unobserve_property: unsafe extern "C" fn(*mut RawHandle, u64) -> c_int,
     command: unsafe extern "C" fn(*mut RawHandle, *mut *const c_char) -> c_int,
     command_async: unsafe extern "C" fn(*mut RawHandle, u64, *mut *const c_char) -> c_int,
@@ -202,16 +224,19 @@ pub(crate) struct LibMpv {
     terminate_destroy: unsafe extern "C" fn(*mut RawHandle),
     error_string: unsafe extern "C" fn(c_int) -> *const c_char,
     free: unsafe extern "C" fn(*mut c_void),
-    render_context_create: unsafe extern "C" fn(
-        *mut *mut RawRenderContext,
-        *mut RawHandle,
-        *mut RenderParam,
-    ) -> c_int,
+    #[cfg(target_os = "linux")]
+    render_context_create:
+        unsafe extern "C" fn(*mut *mut RawRenderContext, *mut RawHandle, *mut RenderParam) -> c_int,
+    #[cfg(target_os = "linux")]
     render_context_set_update_callback:
         unsafe extern "C" fn(*mut RawRenderContext, Callback, *mut c_void),
+    #[cfg(target_os = "linux")]
     render_context_update: unsafe extern "C" fn(*mut RawRenderContext) -> u64,
+    #[cfg(target_os = "linux")]
     render_context_render: unsafe extern "C" fn(*mut RawRenderContext, *mut RenderParam) -> c_int,
+    #[cfg(target_os = "linux")]
     render_context_report_swap: unsafe extern "C" fn(*mut RawRenderContext),
+    #[cfg(target_os = "linux")]
     render_context_free: unsafe extern "C" fn(*mut RawRenderContext),
 }
 
@@ -244,15 +269,20 @@ pub(crate) fn set_directory(
 /// library, and a relative path depends on the current directory. Either
 /// could end in a library that is not Vela's.
 fn refuse_unless_exact(path: &Path) -> Result<(), String> {
+    refuse_unless_named(path, LIBRARY_FILE)
+}
+
+fn refuse_unless_named(path: &Path, name: &str) -> Result<(), String> {
     if !path.is_absolute() {
         return Err("its path is not absolute".to_string());
     }
-    if path.file_name() != Some(std::ffi::OsStr::new(LIBRARY_FILE)) {
-        return Err(format!("it is not named {LIBRARY_FILE}"));
+    if path.file_name() != Some(std::ffi::OsStr::new(name)) {
+        return Err(format!("it is not named {name}"));
     }
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
 fn last_loader_error() -> String {
     // SAFETY: dlerror returns NULL or a NUL-terminated string owned by the
     // loader, valid until the next loader call on this thread.
@@ -270,28 +300,68 @@ impl LibMpv {
     /// Open the library at exactly `path` and resolve every function used.
     pub(crate) fn load(path: &Path) -> Result<Self, String> {
         refuse_unless_exact(path)?;
-        use std::os::unix::ffi::OsStrExt;
-        let c_path = CString::new(path.as_os_str().as_bytes())
-            .map_err(|_| "its path contains a NUL byte".to_string())?;
-        // NOW: a missing symbol fails here, not in the middle of a play.
-        // LOCAL: the library's symbols are not offered to the rest of the
-        // process. DEEPBIND: the library resolves its own references inside
-        // its own set first. Vela's process already holds the system's
-        // FreeType, HarfBuzz, FriBidi and dav1d (the web view needs them);
-        // without this the shipped copies would be bypassed.
-        let flags = libc::RTLD_NOW | libc::RTLD_LOCAL | libc::RTLD_DEEPBIND;
-        // SAFETY: `c_path` is a valid C string. Loading runs the library's
-        // initialisers; the file is Vela's own shipped library.
-        let handle = unsafe { libc::dlopen(c_path.as_ptr(), flags) };
-        if handle.is_null() {
-            return Err(last_loader_error());
-        }
+        #[cfg(target_os = "linux")]
+        let handle = {
+            use std::os::unix::ffi::OsStrExt;
+            let c_path = CString::new(path.as_os_str().as_bytes())
+                .map_err(|_| "its path contains a NUL byte".to_string())?;
+            // NOW: a missing symbol fails here, not in the middle of a play.
+            // LOCAL: the library's symbols are not offered to the rest of the
+            // process. DEEPBIND: the library resolves its own references inside
+            // its own set first. Vela's process already holds the system's
+            // FreeType, HarfBuzz, FriBidi and dav1d (the web view needs them);
+            // without this the shipped copies would be bypassed.
+            let flags = libc::RTLD_NOW | libc::RTLD_LOCAL | libc::RTLD_DEEPBIND;
+            // SAFETY: `c_path` is a valid C string. Loading runs the library's
+            // initialisers; the file is Vela's own shipped library.
+            let handle = unsafe { libc::dlopen(c_path.as_ptr(), flags) };
+            if handle.is_null() {
+                return Err(last_loader_error());
+            }
+
+            handle
+        };
+        #[cfg(target_os = "windows")]
+        let handle = {
+            use std::os::windows::ffi::OsStrExt;
+            use windows::{
+                core::PCWSTR,
+                Win32::System::LibraryLoader::{
+                    LoadLibraryExW, LOAD_LIBRARY_SEARCH_DEFAULT_DIRS,
+                    LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR,
+                },
+            };
+            let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();
+            if wide.contains(&0) {
+                return Err("its path contains a NUL byte".into());
+            }
+            wide.push(0);
+            // SAFETY: absolute, terminated path. Dependencies search this DLL's
+            // directory and Windows' safe defaults, never PATH or the CWD.
+            unsafe {
+                LoadLibraryExW(
+                    PCWSTR(wide.as_ptr()),
+                    None,
+                    LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS,
+                )
+            }
+            .map_err(|error| error.to_string())?
+        };
 
         macro_rules! symbol {
             ($name:literal) => {{
                 // SAFETY: `handle` is a live library handle and the name is a
                 // C string literal.
+                #[cfg(target_os = "linux")]
                 let address = unsafe { libc::dlsym(handle, concat!($name, "\0").as_ptr().cast()) };
+                #[cfg(target_os = "windows")]
+                let address = unsafe {
+                    windows::Win32::System::LibraryLoader::GetProcAddress(
+                        handle,
+                        windows::core::PCSTR(concat!($name, "\0").as_ptr()),
+                    )
+                }
+                .map_or(std::ptr::null_mut(), |function| function as *mut c_void);
                 if address.is_null() {
                     return Err(format!("it has no function {}", $name));
                 }
@@ -306,8 +376,11 @@ impl LibMpv {
             create: symbol!("mpv_create"),
             set_option_string: symbol!("mpv_set_option_string"),
             initialize: symbol!("mpv_initialize"),
+            #[cfg(target_os = "linux")]
             set_property_async: symbol!("mpv_set_property_async"),
+            #[cfg(target_os = "linux")]
             observe_property: symbol!("mpv_observe_property"),
+            #[cfg(target_os = "linux")]
             unobserve_property: symbol!("mpv_unobserve_property"),
             command: symbol!("mpv_command"),
             command_async: symbol!("mpv_command_async"),
@@ -317,14 +390,39 @@ impl LibMpv {
             terminate_destroy: symbol!("mpv_terminate_destroy"),
             error_string: symbol!("mpv_error_string"),
             free: symbol!("mpv_free"),
+            #[cfg(target_os = "linux")]
             render_context_create: symbol!("mpv_render_context_create"),
+            #[cfg(target_os = "linux")]
             render_context_set_update_callback: symbol!("mpv_render_context_set_update_callback"),
+            #[cfg(target_os = "linux")]
             render_context_update: symbol!("mpv_render_context_update"),
+            #[cfg(target_os = "linux")]
             render_context_render: symbol!("mpv_render_context_render"),
+            #[cfg(target_os = "linux")]
             render_context_report_swap: symbol!("mpv_render_context_report_swap"),
+            #[cfg(target_os = "linux")]
             render_context_free: symbol!("mpv_render_context_free"),
         };
+        #[cfg(target_os = "linux")]
         lib.refuse_another_file(path)?;
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::ffi::OsStringExt;
+            let mut buffer = vec![0u16; 32768];
+            // SAFETY: the handle returned by LoadLibraryExW and writable storage.
+            let count = unsafe {
+                windows::Win32::System::LibraryLoader::GetModuleFileNameW(Some(handle), &mut buffer)
+            } as usize;
+            if count == 0 || count >= buffer.len() {
+                return Err("the system's loader cannot say which file it came from".into());
+            }
+            let from = PathBuf::from(std::ffi::OsString::from_wide(&buffer[..count]));
+            if !matches!((std::fs::canonicalize(&from), std::fs::canonicalize(path)),
+                (Ok(a), Ok(b)) if a == b)
+            {
+                return Err("another mpv library is already loaded in this process".into());
+            }
+        }
         let (major, minor) = lib.api_version();
         check_api_version(major, minor)?;
         Ok(lib)
@@ -334,6 +432,7 @@ impl LibMpv {
     /// with the same name. Vela loads no other mpv, but if anything in the
     /// process ever did, this is where it would be caught: the functions must
     /// come from the file that was asked for.
+    #[cfg(target_os = "linux")]
     fn refuse_another_file(&self, asked: &Path) -> Result<(), String> {
         let mut info: libc::Dl_info = unsafe { std::mem::zeroed() };
         // SAFETY: `info` is a valid out-parameter; the address is a function
@@ -418,7 +517,10 @@ impl Player {
         // mpv refuses to start unless numbers are formatted the C way, and
         // GTK switches the process to the user's locale at startup.
         // SAFETY: a valid category and a static C string.
-        unsafe { libc::setlocale(libc::LC_NUMERIC, c"C".as_ptr()) };
+        #[cfg(target_os = "linux")]
+        unsafe {
+            libc::setlocale(libc::LC_NUMERIC, c"C".as_ptr())
+        };
         // SAFETY: no arguments; returns NULL on failure.
         let raw = unsafe { (lib.create)() };
         if raw.is_null() {
@@ -494,6 +596,7 @@ impl Player {
     /// The next event, waiting up to `limit` for one. A waiting call: only
     /// while no renderer exists for this player, because once one does, mpv
     /// may itself be waiting for the thread that would be waiting here.
+    #[cfg(target_os = "linux")]
     pub(crate) fn wait_for_event(&self, limit: std::time::Duration) -> Event {
         self.event(limit.as_secs_f64())
     }
@@ -535,15 +638,18 @@ impl Player {
         unsafe { (self.lib.set_wakeup_callback)(self.raw, Some(callback), context) };
     }
 
+    #[cfg(target_os = "linux")]
     pub(crate) fn lib(&self) -> &std::sync::Arc<LibMpv> {
         &self.lib
     }
 
+    #[cfg(target_os = "linux")]
     pub(crate) fn raw(&self) -> *mut RawHandle {
         self.raw
     }
 }
 
+#[cfg(target_os = "linux")]
 impl super::hdr::Targetable for Player {
     /// Ask the running player, without waiting, to change one of the options
     /// that say what it draws for. mpv answers later with an event carrying
@@ -611,11 +717,13 @@ impl Drop for Player {
 /// mpv drawing through OpenGL into a framebuffer its owner provides. Must be
 /// created, used and dropped on the thread whose OpenGL context it uses, and
 /// dropped before its [`Player`].
+#[cfg(target_os = "linux")]
 pub(crate) struct Renderer {
     lib: std::sync::Arc<LibMpv>,
     raw: *mut RawRenderContext,
 }
 
+#[cfg(target_os = "linux")]
 impl Renderer {
     /// # Safety
     /// An OpenGL context must be current on this thread, `get_proc_address`
@@ -728,6 +836,7 @@ impl Renderer {
     }
 }
 
+#[cfg(target_os = "linux")]
 impl Drop for Renderer {
     fn drop(&mut self) {
         // SAFETY: live, never used again, and the OpenGL context it was
@@ -736,6 +845,7 @@ impl Drop for Renderer {
     }
 }
 
+#[cfg(target_os = "linux")]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -902,5 +1012,28 @@ mod tests {
         );
         // SAFETY: NULL is allowed.
         assert_eq!(unsafe { property_change(57, std::ptr::null()) }, Event::Other);
+    }
+}
+
+#[cfg(test)]
+mod windows_tests {
+    use super::*;
+
+    #[test]
+    fn windows_library_is_an_exact_dll_in_the_selected_set() {
+        let resources = std::env::temp_dir().join("vela-resources");
+        let elsewhere = std::env::temp_dir().join("vela-development-set");
+        let release = set_directory(&resources, false, Some(elsewhere.as_os_str()))
+            .join(WINDOWS_LIBRARY_FILE);
+        assert_eq!(release, resources.join("libmpv/libmpv-2.dll"));
+        assert!(refuse_unless_named(&release, WINDOWS_LIBRARY_FILE).is_ok());
+        assert_eq!(
+            set_directory(&resources, true, Some(elsewhere.as_os_str())).join(WINDOWS_LIBRARY_FILE),
+            elsewhere.join("libmpv-2.dll")
+        );
+        for name in ["libmpv-2.dll", "libmpv/libmpv-2.dll", "./libmpv-2.dll"] {
+            assert!(refuse_unless_named(Path::new(name), WINDOWS_LIBRARY_FILE).is_err());
+        }
+        assert!(refuse_unless_named(&resources.join("mpv.exe"), WINDOWS_LIBRARY_FILE).is_err());
     }
 }

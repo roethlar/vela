@@ -168,7 +168,7 @@ test("every start is today's unless embedded window mode was decided", () => {
   // What "decided" means: the start-up module's answer, on Linux only.
   assert.match(
     functionBody(lib, 'pub fn prepare_startup() -> bool {', 'prepare_startup'),
-    /#\[cfg\(target_os = "linux"\)\]\s+\{\s+use player::embedded::startup;\s+startup::prepare\(\) == startup::WindowMode::Embedded\s+\}\s+#\[cfg\(not\(target_os = "linux"\)\)\]\s+\{\s+false\s+\}/,
+    /#\[cfg\(any\(target_os = "linux", target_os = "windows"\)\)\]\s+\{\s+use player::embedded::startup;\s+startup::prepare\(\) == startup::WindowMode::Embedded\s+\}\s+#\[cfg\(not\(any\(target_os = "linux", target_os = "windows"\)\)\)\]\s+\{\s+false\s+\}/,
   );
 
   // The window is transparent only in that mode. The configuration file,
@@ -200,7 +200,7 @@ test('embedded window mode is entered only behind its safety marker, which the l
   // The page reports that it loaded, and that is what clears the marker.
   assert.match(
     functionBody(commands, 'pub fn player_window_ready() {', 'player_window_ready'),
-    /#\[cfg\(target_os = "linux"\)\]\s+crate::player::embedded::startup::window_came_up\(\);/,
+    /#\[cfg\(any\(target_os = "linux", target_os = "windows"\)\)\]\s+crate::player::embedded::startup::window_came_up\(\);/,
   );
   assert.match(lib, /commands::player_window_ready,/);
   assert.match(page, /invoke\("player_window_ready"\)/);
@@ -429,7 +429,7 @@ test('a play that outlasts the wait for it neither starts unannounced nor goes u
   assert.ok(refusal < library.indexOf('self.checked.get_or_init'));
   assert.match(
     lib,
-    /queue\.clear\(\);\s+\}\s+(?:\/\/[^\n]*\n\s+)*#\[cfg\(target_os = "linux"\)\]\s+player::embedded::wait_for_unfinished_plays\(std::time::Duration::from_secs\(2\)\);/,
+    /queue\.clear\(\);\s+\}\s+(?:\/\/[^\n]*\n\s+)*#\[cfg\(any\(target_os = "linux", target_os = "windows"\)\)\]\s+player::embedded::wait_for_unfinished_plays\(std::time::Duration::from_secs\(2\)\);/,
   );
 });
 

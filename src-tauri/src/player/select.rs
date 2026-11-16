@@ -36,34 +36,42 @@ impl PlayerKind {
 
 /// Why the embedded player cannot run a play right now.
 ///
-/// Every reason but the first can only arise on Linux, the one system that
-/// has an embedded player so far.
+/// Platform-specific reasons exist only where that platform can report them.
+/// Tests keep all reasons to check their notices and fallback rules.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub(crate) enum EmbeddedUnavailable {
     /// Vela has no embedded player for this operating system yet. (On
-    /// Linux, which has one, nothing reports this.)
-    #[cfg_attr(target_os = "linux", allow(dead_code))]
+    /// Linux and Windows, which have one, nothing reports this.)
+    #[cfg(any(test, not(any(target_os = "linux", target_os = "windows"))))]
     NotOnThisSystem,
     /// It was chosen after this run of Vela started. How the window is
     /// created is decided at start-up, so the choice takes effect next time.
+    #[cfg(any(test, target_os = "linux", target_os = "windows"))]
     NeedsRestart,
     /// The previous start in embedded window mode did not get as far as
     /// showing the page, so this one started the ordinary way.
+    #[cfg(any(test, target_os = "linux", target_os = "windows"))]
     FailedLastStart,
     /// The session is X11, or GTK was told to use X11.
+    #[cfg(any(test, target_os = "linux"))]
     NotWayland,
     /// The NVIDIA proprietary driver is in use; untested there.
+    #[cfg(any(test, target_os = "linux"))]
     NvidiaDriver,
     /// The user's environment turns off the WebKit renderer it depends on.
+    #[cfg(any(test, target_os = "linux"))]
     RendererOff,
     /// The mpv library Vela ships could not be loaded.
+    #[cfg(any(test, target_os = "linux", target_os = "windows"))]
     LibraryMissing,
     /// The compositor lacks a protocol the video surface needs.
+    #[cfg(any(test, target_os = "linux"))]
     CompositorLacks,
     /// The GPU offers no OpenGL window format the video can use.
+    #[cfg(any(test, target_os = "linux"))]
     NoGpuFormat,
-    /// Vela's window has no Wayland surface to attach the video to.
+    /// Vela's window has no native parent to attach the video to.
+    #[cfg(any(test, target_os = "linux", target_os = "windows"))]
     WindowNotReady,
     /// An embedded play failed to start earlier in this run.
     StartFailed,
@@ -76,15 +84,25 @@ impl EmbeddedUnavailable {
     /// goes to Vela's log, not here.
     pub(crate) fn notice(&self) -> String {
         let why = match self {
-            EmbeddedUnavailable::NotOnThisSystem => "Linux only for now",
+            #[cfg(any(test, not(any(target_os = "linux", target_os = "windows"))))]
+            EmbeddedUnavailable::NotOnThisSystem => "not on this system yet",
+            #[cfg(any(test, target_os = "linux", target_os = "windows"))]
             EmbeddedUnavailable::NeedsRestart => "restart Vela to use it",
+            #[cfg(any(test, target_os = "linux", target_os = "windows"))]
             EmbeddedUnavailable::FailedLastStart => "off after a failed start",
+            #[cfg(any(test, target_os = "linux"))]
             EmbeddedUnavailable::NotWayland => "needs a Wayland session",
+            #[cfg(any(test, target_os = "linux"))]
             EmbeddedUnavailable::NvidiaDriver => "not on NVIDIA drivers yet",
+            #[cfg(any(test, target_os = "linux"))]
             EmbeddedUnavailable::RendererOff => "WebKit GPU drawing is off",
+            #[cfg(any(test, target_os = "linux", target_os = "windows"))]
             EmbeddedUnavailable::LibraryMissing => "its mpv library did not load",
+            #[cfg(any(test, target_os = "linux"))]
             EmbeddedUnavailable::CompositorLacks => "compositor lacks a protocol",
+            #[cfg(any(test, target_os = "linux"))]
             EmbeddedUnavailable::NoGpuFormat => "no usable OpenGL format",
+            #[cfg(any(test, target_os = "linux", target_os = "windows"))]
             EmbeddedUnavailable::WindowNotReady => "window not ready",
             EmbeddedUnavailable::StartFailed => "could not start",
         };
@@ -95,15 +113,30 @@ impl EmbeddedUnavailable {
     /// No diagnostic detail from the machine belongs in this text.
     pub(crate) fn settings_note(&self) -> &'static str {
         match self {
-            Self::NotOnThisSystem => "Videos play in mpv's own window because video in Vela's window is only available on Linux.",
+            #[cfg(any(test, not(any(target_os = "linux", target_os = "windows"))))]
+            Self::NotOnThisSystem => {
+                #[cfg(target_os = "linux")]
+                { "Videos play in mpv's own window because video in Vela's window is only available on Linux." }
+                #[cfg(not(target_os = "linux"))]
+                { "Videos play in mpv's own window because video in Vela's window is not available on this system yet." }
+            },
+            #[cfg(any(test, target_os = "linux", target_os = "windows"))]
             Self::NeedsRestart => "Videos play in mpv's own window until you restart Vela to use Vela's window.",
+            #[cfg(any(test, target_os = "linux", target_os = "windows"))]
             Self::FailedLastStart => "Videos play in mpv's own window because Vela did not finish starting with video in its window last time; this run started without it, and the next start tries again.",
+            #[cfg(any(test, target_os = "linux"))]
             Self::NotWayland => "Videos play in mpv's own window because video in Vela's window requires a Wayland session.",
+            #[cfg(any(test, target_os = "linux"))]
             Self::NvidiaDriver => "Videos play in mpv's own window because video in Vela's window does not support the NVIDIA proprietary driver yet.",
+            #[cfg(any(test, target_os = "linux"))]
             Self::RendererOff => "Videos play in mpv's own window because your environment disables the renderer needed for video in Vela's window.",
+            #[cfg(any(test, target_os = "linux", target_os = "windows"))]
             Self::LibraryMissing => "Videos play in mpv's own window because the library needed for video in Vela's window could not be loaded.",
+            #[cfg(any(test, target_os = "linux"))]
             Self::CompositorLacks => "Videos play in mpv's own window because this desktop cannot provide the video surface Vela's window needs.",
+            #[cfg(any(test, target_os = "linux"))]
             Self::NoGpuFormat => "Videos play in mpv's own window because this graphics driver cannot draw video in Vela's window.",
+            #[cfg(any(test, target_os = "linux", target_os = "windows"))]
             Self::WindowNotReady => "Videos play in mpv's own window because Vela's window is not ready to show video.",
             Self::StartFailed => "Videos play in mpv's own window because a video failed to start in Vela's window earlier in this run; restarting Vela tries again.",
         }
@@ -113,7 +146,7 @@ impl EmbeddedUnavailable {
 /// Settings explains the saved choice, this run, and what a restart could
 /// fix. A library that is absent can be explained more precisely than one
 /// that exists but failed to load; an already loaded library stays usable.
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 pub(crate) fn settings_note(
     saved: PlayerKind,
     started: &super::embedded::startup::Decision,

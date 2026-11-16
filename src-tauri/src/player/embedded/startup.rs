@@ -8,6 +8,10 @@
 //! on NVIDIA's driver. Both are fixed when the process starts and cannot be
 //! changed afterwards.
 //!
+//! Windows also needs a transparent main window. Its WebView2 and mpv child
+//! need none of those Linux renderer/driver restrictions; only the saved
+//! choice and the recovery marker determine its window mode.
+//!
 //! So there are two ways to start. **Today's**: an opaque window with that
 //! renderer off, exactly as before this player existed, and what every start
 //! is unless the user has chosen the embedded player. **Embedded window
@@ -26,13 +30,14 @@ use crate::player::EmbeddedUnavailable;
 /// How the window is created for this run of Vela.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum WindowMode {
-    /// Opaque window, WebKit's GPU renderer off.
+    /// Opaque window; on Linux, WebKit's GPU renderer is off.
     Today,
-    /// Transparent window, WebKit's GPU renderer on.
+    /// Transparent window; on Linux, WebKit's GPU renderer is on.
     Embedded,
 }
 
 /// What is known when the process starts, before any window exists.
+#[cfg(target_os = "linux")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Facts<'a> {
     /// The saved `player` setting; `None` when unset or unreadable.
@@ -57,6 +62,7 @@ pub(crate) struct Decision {
 
 /// Decide how this run starts. Anything short of "the user chose the
 /// embedded player and nothing known rules it out" is today's start.
+#[cfg(target_os = "linux")]
 pub(crate) fn decide(facts: Facts<'_>) -> Decision {
     let today = |refused| Decision {
         mode: WindowMode::Today,
@@ -85,15 +91,51 @@ pub(crate) fn decide(facts: Facts<'_>) -> Decision {
     }
 }
 
+/// Windows has no Wayland, WebKitGTK or NVIDIA restriction. The library is
+/// checked when Settings/playing asks for availability, as on Linux.
+#[cfg(any(target_os = "windows", test))]
+fn decide_windows(player_setting: Option<&str>, marker_left_behind: bool) -> Decision {
+    if player_setting != Some("embedded") {
+        return Decision {
+            mode: WindowMode::Today,
+            refused: None,
+        };
+    }
+    if marker_left_behind {
+        return Decision {
+            mode: WindowMode::Today,
+            refused: Some(EmbeddedUnavailable::FailedLastStart),
+        };
+    }
+    Decision {
+        mode: WindowMode::Embedded,
+        refused: None,
+    }
+}
+
+#[cfg(target_os = "windows")]
+#[path = "windows_startup.rs"]
+mod windows;
+#[cfg(target_os = "windows")]
+use windows::{regular_file_at, text_of};
+
 static DECISION: std::sync::OnceLock<Decision> = std::sync::OnceLock::new();
 // Keep the environment as the user supplied it: main may subsequently turn
 // WebKit's renderer off for today's window, which is not a user refusal.
+#[cfg(target_os = "linux")]
 static SYSTEM_FACTS: std::sync::OnceLock<Facts<'static>> = std::sync::OnceLock::new();
 
 /// What would rule out choosing embedded mode on this system, independent
 /// of the saved choice and the one-start recovery marker. Reuses `decide`.
 pub(crate) fn system_refusal() -> Option<EmbeddedUnavailable> {
-    SYSTEM_FACTS.get().and_then(|facts| decide(*facts).refused)
+    #[cfg(target_os = "linux")]
+    {
+        SYSTEM_FACTS.get().and_then(|facts| decide(*facts).refused)
+    }
+    #[cfg(target_os = "windows")]
+    {
+        None
+    }
 }
 
 /// This run's decision. Today's mode when nothing decided (tests, or a
@@ -117,6 +159,7 @@ pub(crate) fn window_came_up() {
     }
 }
 
+#[cfg(target_os = "linux")]
 fn wayland_session(
     wayland_display: Option<&std::ffi::OsStr>,
     gdk_backend: Option<&std::ffi::OsStr>,
@@ -178,6 +221,7 @@ fn settings_text(path: &std::path::Path) -> Option<String> {
 /// Steps 1 and 2 of [`settings_text`]: a handle on the regular file at
 /// `path`, which has not been opened for reading. Nothing when what is there
 /// is anything else, a link included.
+#[cfg(target_os = "linux")]
 fn regular_file_at(path: &std::path::Path) -> Option<std::fs::File> {
     use std::os::unix::fs::OpenOptionsExt;
     let held = std::fs::OpenOptions::new()
@@ -190,6 +234,7 @@ fn regular_file_at(path: &std::path::Path) -> Option<std::fs::File> {
 
 /// Steps 3 and 4 of [`settings_text`]: the text of the file `held` is a
 /// handle on. It is given no path, so it cannot read anything else.
+#[cfg(target_os = "linux")]
 fn text_of(held: &std::fs::File) -> Option<String> {
     use std::os::fd::AsRawFd;
     use std::os::unix::fs::OpenOptionsExt;
@@ -228,6 +273,7 @@ pub(crate) fn prepare() -> WindowMode {
     let player_setting = saved_player_setting();
     let marker = marker_path();
     let marker_left_behind = marker.as_ref().is_some_and(|path| path.exists());
+    #[cfg(target_os = "linux")]
     let facts = Facts {
         player_setting: player_setting.as_deref(),
         marker_left_behind,
@@ -239,12 +285,16 @@ pub(crate) fn prepare() -> WindowMode {
         renderer_turned_off_by_user: std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER")
             .is_some_and(|value| value != "0" && !value.is_empty()),
     };
+    #[cfg(target_os = "linux")]
     let _ = SYSTEM_FACTS.set(Facts {
         player_setting: Some("embedded"),
         marker_left_behind: false,
         ..facts
     });
+    #[cfg(target_os = "linux")]
     let mut decision = decide(facts);
+    #[cfg(target_os = "windows")]
+    let mut decision = decide_windows(player_setting.as_deref(), marker_left_behind);
     if marker_left_behind {
         // Whatever this start is, the next one may try again.
         if let Some(path) = &marker {
@@ -264,7 +314,10 @@ pub(crate) fn prepare() -> WindowMode {
             // play; capped, memory stayed flat (Slice 0, A8). It has to be
             // set before any other thread exists.
             // SAFETY: a documented tunable and a positive value.
-            unsafe { libc::mallopt(libc::M_ARENA_MAX, 4) };
+            #[cfg(target_os = "linux")]
+            unsafe {
+                libc::mallopt(libc::M_ARENA_MAX, 4)
+            };
         } else {
             decision = Decision {
                 mode: WindowMode::Today,
@@ -285,6 +338,7 @@ pub(crate) fn prepare() -> WindowMode {
     mode
 }
 
+#[cfg(target_os = "linux")]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -628,5 +682,42 @@ mod tests {
         let over = scratch.path("over.json");
         std::fs::write(&over, vec![b' '; limit + 1]).unwrap();
         assert_eq!(read_within_two_seconds(&over), None);
+    }
+}
+
+#[cfg(test)]
+mod windows_tests {
+    use super::*;
+
+    #[test]
+    fn windows_start_requires_the_saved_embedded_choice() {
+        for setting in [None, Some("external"), Some("unknown")] {
+            assert_eq!(
+                decide_windows(setting, false),
+                Decision {
+                    mode: WindowMode::Today,
+                    refused: None,
+                }
+            );
+        }
+        assert_eq!(
+            decide_windows(Some("embedded"), false),
+            Decision {
+                mode: WindowMode::Embedded,
+                refused: None,
+            }
+        );
+    }
+
+    #[test]
+    fn windows_failed_start_recovers_to_an_opaque_window() {
+        assert_eq!(
+            decide_windows(Some("embedded"), true),
+            Decision {
+                mode: WindowMode::Today,
+                refused: Some(EmbeddedUnavailable::FailedLastStart),
+            }
+        );
+        assert_eq!(decide_windows(Some("external"), true).refused, None);
     }
 }

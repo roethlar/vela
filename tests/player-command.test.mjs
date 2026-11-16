@@ -116,7 +116,7 @@ test("stop is decided and done in one hold of the player slot's lock, and the so
   // The one decision, in the one place, for stopping and for sending.
   assert.match(
     playerMod,
-    /pub\(crate\) fn close_embedded_play\(&mut self, session_id: &str\) -> bool \{\s+match self \{\s+PlayerHandle::External\(_\) => \{\s+let _ = session_id;\s+false\s+\}\s+#\[cfg\(target_os = "linux"\)\]\s+PlayerHandle::Embedded\(session\) => \{\s+if !session\.is_play\(session_id\) \{\s+return false;\s+\}\s+session\.stop\(\);\s+true\s+\}\s+\}\s+\}/,
+    /pub\(crate\) fn close_embedded_play\(&mut self, session_id: &str\) -> bool \{\s+match self \{\s+PlayerHandle::External\(_\) => \{\s+let _ = session_id;\s+false\s+\}\s+#\[cfg\(any\(target_os = "linux", target_os = "windows"\)\)\]\s+PlayerHandle::Embedded\(session\) => \{\s+if !session\.is_play\(session_id\) \{\s+return false;\s+\}\s+session\.stop\(\);\s+true\s+\}\s+\}\s+\}/,
   );
   assert.ok(
     playerMod.includes(`    pub(crate) fn command_channel(
@@ -128,7 +128,7 @@ test("stop is decided and done in one hold of the player slot's lock, and the so
                 let _ = session_id;
                 None
             }
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "linux", target_os = "windows"))]
             PlayerHandle::Embedded(session) => session
                 .is_play(session_id)
                 .then(|| session.channel()),
@@ -152,7 +152,7 @@ test("stop is decided and done in one hold of the player slot's lock, and the so
   assert.ok(session.includes('let session_id = std::mem::take(&mut start.session_id);\n        let channel = Arc::new(Channel::new(start.ipc_path.clone()));'));
   assert.ok(session.includes('        let session = Session {\n            session_id,\n            channel,\n            shared,\n'));
   assert.ok(host.includes('            ipc_path: ipc_path.to_string(),'));
-  assert.match(host, /let start = Start \{\s+lib,\s+guest,\s+session_id,/);
+  assert.match(host, /let start = Start \{\s+lib,\s+#\[cfg\(target_os = "linux"\)\]\s+guest,\s+session_id,/);
   assert.match(host, /let started = Session::start\(start, surface\);/);
 });
 
@@ -269,7 +269,7 @@ test("the window's real fullscreen reaches the page from GDK, followed once from
   assert.equal(count(lib, 'player::embedded::follow_fullscreen(app.handle());'), 1);
   const setup = lib.slice(lib.indexOf('.setup(move |app| {'), lib.indexOf('.invoke_handler('));
   assert.ok(
-    setup.includes('            #[cfg(target_os = "linux")]\n            player::embedded::follow_fullscreen(app.handle());\n'),
+    setup.includes('            #[cfg(any(target_os = "linux", target_os = "windows"))]\n            player::embedded::follow_fullscreen(app.handle());\n'),
     'connected in setup, on the window thread',
   );
   for (const [file, code] of shippedRust()) {
@@ -295,7 +295,7 @@ test("an embedded play's state goes to the page as player-state, and only an emb
   // after the end-of-file watcher. The Rust tests in playback.rs prove both
   // sides with stand-ins: an embedded play reports, one that fell back does not.
   assert.ok(
-    playback.includes(`    #[cfg(target_os = "linux")]
+    playback.includes(`    #[cfg(any(target_os = "linux", target_os = "windows"))]
     if started_player == crate::player::PlayerKind::Embedded {
         if let Some(notify) = on_state {
             if let Err(e) = crate::player::report::spawn_reporter(

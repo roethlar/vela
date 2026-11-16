@@ -4,22 +4,21 @@
 //! something that starts it and a handle to what it started. There are two
 //! players: mpv as a separate program ([`external`]), on every system and
 //! the default, and mpv's library drawing inside Vela's own window
-//! (`embedded`), on Linux and experimental. The trackers in
+//! (`embedded`), on Linux and Windows and experimental. The trackers in
 //! `crate::playback` reach whichever player is running through mpv's JSON
 //! IPC socket and do not care which one it is. [`select`] decides which
 //! player a play uses.
 
 pub(crate) mod control;
-#[cfg(target_os = "linux")]
 pub(crate) mod embedded;
 pub(crate) mod external;
 pub(crate) mod launch;
 pub(crate) mod report;
 mod select;
 
-pub(crate) use select::{choose, EmbeddedUnavailable, FallbackNotices, PlayerChoice, PlayerKind};
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 pub(crate) use select::settings_note;
+pub(crate) use select::{choose, EmbeddedUnavailable, FallbackNotices, PlayerChoice, PlayerKind};
 
 /// A started player, as the rest of the app holds it: the current player, and
 /// replaced players waiting to be reaped.
@@ -27,7 +26,7 @@ pub(crate) enum PlayerHandle {
     /// mpv running as a child process.
     External(external::ManagedChild),
     /// mpv's library running inside Vela, on a thread of its own.
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
     Embedded(embedded::Session),
 }
 
@@ -55,8 +54,8 @@ pub(crate) struct ViewRecord {
 impl ViewRecord {
     /// Record that the view of `session_id` opened (`opened`) or closed, and
     /// send the event with `emit`, as one step. `emit` must only send. Only
-    /// the embedded player has a view, and it runs only on Linux.
-    #[cfg(target_os = "linux")]
+    /// the embedded player has a view, and it runs on Linux and Windows.
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
     pub(crate) fn announce(&self, session_id: &str, opened: bool, emit: impl FnOnce()) {
         let mut showing = self.showing.lock().unwrap_or_else(|e| e.into_inner());
         if opened {
@@ -86,14 +85,14 @@ impl ViewRecord {
 }
 
 /// The embedded player's side of the app, for the life of the process.
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 pub(crate) use embedded::Host as EmbeddedHost;
 
 /// A system with no embedded player has nothing to keep.
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "windows")))]
 pub(crate) struct EmbeddedHost;
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "windows")))]
 impl EmbeddedHost {
     pub(crate) fn new() -> Self {
         EmbeddedHost
@@ -105,7 +104,7 @@ pub(crate) async fn embedded_availability(
     host: &std::sync::Arc<EmbeddedHost>,
     app: Option<&tauri::AppHandle>,
 ) -> Result<(), EmbeddedUnavailable> {
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
     {
         let Some(app) = app.cloned() else {
             return Err(EmbeddedUnavailable::WindowNotReady);
@@ -117,7 +116,7 @@ pub(crate) async fn embedded_availability(
             .await
             .unwrap_or(Err(EmbeddedUnavailable::WindowNotReady))
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
     {
         let _ = (host, app);
         Err(EmbeddedUnavailable::NotOnThisSystem)
@@ -129,14 +128,14 @@ pub(crate) fn embedded_launcher(
     host: &std::sync::Arc<EmbeddedHost>,
     app: Option<&tauri::AppHandle>,
 ) -> Option<std::sync::Arc<dyn EmbeddedLauncher>> {
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
     {
         app.map(|app| {
             std::sync::Arc::new(embedded::Launcher::new(host.clone(), app.clone()))
                 as std::sync::Arc<dyn EmbeddedLauncher>
         })
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
     {
         let _ = (host, app);
         None
@@ -165,7 +164,7 @@ impl PlayerHandle {
     pub(crate) fn kill(&mut self) -> std::io::Result<()> {
         match self {
             PlayerHandle::External(child) => child.kill(),
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "linux", target_os = "windows"))]
             PlayerHandle::Embedded(session) => {
                 session.stop();
                 Ok(())
@@ -186,7 +185,7 @@ impl PlayerHandle {
                 let _ = session_id;
                 false
             }
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "linux", target_os = "windows"))]
             PlayerHandle::Embedded(session) => {
                 if !session.is_play(session_id) {
                     return false;
@@ -210,7 +209,7 @@ impl PlayerHandle {
                 let _ = session_id;
                 None
             }
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "linux", target_os = "windows"))]
             PlayerHandle::Embedded(session) => session
                 .is_play(session_id)
                 .then(|| session.channel()),
@@ -228,7 +227,7 @@ impl PlayerHandle {
                 let _ = session_id;
                 false
             }
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "linux", target_os = "windows"))]
             PlayerHandle::Embedded(session) => {
                 session.is_play(session_id) && !session.stop_requested() && !session.has_ended()
             }
@@ -241,7 +240,7 @@ impl PlayerHandle {
     pub(crate) fn serial(&self) -> u64 {
         match self {
             PlayerHandle::External(child) => child.serial(),
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "linux", target_os = "windows"))]
             PlayerHandle::Embedded(session) => session.serial(),
         }
     }
@@ -251,7 +250,7 @@ impl PlayerHandle {
     pub(crate) fn has_ended(&mut self) -> std::io::Result<bool> {
         match self {
             PlayerHandle::External(child) => child.try_wait().map(|status| status.is_some()),
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "linux", target_os = "windows"))]
             PlayerHandle::Embedded(session) => Ok(session.has_ended()),
         }
     }
@@ -262,7 +261,7 @@ impl PlayerHandle {
     pub(crate) fn remove_consumed_header_include(&mut self) -> Result<(), String> {
         match self {
             PlayerHandle::External(child) => child.remove_consumed_header_include(),
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "linux", target_os = "windows"))]
             PlayerHandle::Embedded(session) => session.remove_consumed_header_include(),
         }
     }
