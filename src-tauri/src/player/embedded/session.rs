@@ -106,6 +106,87 @@ pub(crate) const START_LIMIT: Duration = Duration::from_secs(20);
 /// to stop, before it is handed to [`Leftovers`] instead.
 const STOP_PATIENCE: Duration = Duration::from_secs(5);
 
+/// A ceiling, not a delay: mpv's wake-up ends a healthy stop as soon as
+/// Shutdown arrives. A quarter second leaves most of STOP_PATIENCE for the
+/// existing teardown, and is also below the exit path's two-second wait
+/// for leftovers. Close and replacement still only set the stop flag.
+const QUIT_GRACE: Duration = Duration::from_millis(250);
+
+#[derive(Debug, PartialEq, Eq)]
+enum StopAction {
+    Continue,
+    RequestQuit,
+    TearDown,
+}
+
+/// The stop decision, independent of mpv, frames, and the display. Once
+/// asked, keep serving mpv until Shutdown or this original deadline; a
+/// repeated stop must neither send another quit nor extend the wait.
+#[derive(Default)]
+struct Stopping {
+    deadline: Option<Instant>,
+}
+
+impl Stopping {
+    fn expired(&self, now: Instant) -> bool {
+        self.deadline.is_some_and(|deadline| now >= deadline)
+    }
+
+    fn next(&mut self, requested: bool, now: Instant) -> StopAction {
+        if self.expired(now) {
+            StopAction::TearDown
+        } else if self.deadline.is_some() {
+            StopAction::Continue
+        } else if requested {
+            self.deadline = Some(now + QUIT_GRACE);
+            StopAction::RequestQuit
+        } else {
+            StopAction::Continue
+        }
+    }
+
+    fn wait_ms(&self, now: Instant) -> i32 {
+        self.deadline.map_or(100, |deadline| {
+            // Round up to avoid spinning in the last partial millisecond,
+            // and never add a whole surface poll past the deadline.
+            deadline
+                .saturating_duration_since(now)
+                .as_nanos()
+                .div_ceil(1_000_000)
+                .min(100) as i32
+        })
+    }
+}
+
+/// The loop's graphics work is separate so the stop/wake/quit wiring can
+/// also run headlessly. `turn` returns false on mpv's Shutdown or expiry;
+/// the wait returns false when the compositor connection is gone.
+trait PlayLoop {
+    fn wait(&mut self, shared: &Shared, timeout_ms: i32) -> bool;
+    fn request_quit(&self);
+    fn turn(&mut self, shared: &Shared, stopping: &Stopping) -> bool;
+
+    fn run(&mut self, shared: &Shared) {
+        let mut stopping = Stopping::default();
+        loop {
+            if !self.wait(shared, stopping.wait_ms(Instant::now())) {
+                return;
+            }
+            shared.drain_wake();
+            match stopping.next(shared.stop.load(Ordering::SeqCst), Instant::now()) {
+                StopAction::Continue => {}
+                StopAction::RequestQuit => self.request_quit(),
+                StopAction::TearDown => return,
+            }
+            // Keep drawing and reading events even while stopped: mpv's
+            // video thread may need us to draw before it can shut down.
+            if !self.turn(shared, &stopping) {
+                return;
+            }
+        }
+    }
+}
+
 /// Who decides whether a starting play has started: the play's own thread,
 /// once mpv has its file, or the caller that is waiting for it, when it
 /// stops waiting. Exactly one of them wins, and the other finds out.
@@ -579,99 +660,101 @@ impl Live {
             .command(&["loadfile", url])
             .map_err(|reason| format!("mpv would not load the stream ({reason})"))
     }
+}
 
-    /// Draw frames and follow the rectangle until the player shuts down by
-    /// itself or the play is stopped.
-    fn run(&mut self, shared: &Shared) {
-        loop {
-            if self.surface.wait(shared.wake.as_fd(), 100).is_err() {
-                // The connection to the compositor is gone; so is the window.
-                return;
-            }
-            shared.drain_wake();
-            if shared.stop.load(Ordering::SeqCst) {
-                return;
-            }
-            let mut redraw = false;
-            let resize_to = shared
-                .resize_to
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .take();
-            if let Some((width, height)) = resize_to {
-                if let Some((width, height)) = self.surface.resize(width, height) {
-                    self.window.resize(width, height);
-                    redraw = true;
-                }
-            }
-            if let Some((width, height)) = self.surface.rescale() {
+impl PlayLoop for Live {
+    fn wait(&mut self, shared: &Shared, timeout_ms: i32) -> bool {
+        self.surface.wait(shared.wake.as_fd(), timeout_ms).is_ok()
+    }
+
+    fn request_quit(&self) {
+        self.player.request_quit();
+    }
+
+    fn turn(&mut self, shared: &Shared, stopping: &Stopping) -> bool {
+        let mut redraw = false;
+        let resize_to = shared
+            .resize_to
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
+        if let Some((width, height)) = resize_to {
+            if let Some((width, height)) = self.surface.resize(width, height) {
                 self.window.resize(width, height);
                 redraw = true;
             }
-            let now = Instant::now();
-            follow_colour(
-                &self.player,
-                &mut self.surface,
-                self.capabilities,
-                &mut self.tagging,
-                now,
-            );
-            // Nothing on this thread waits for mpv from here on: mpv's
-            // video thread may itself be waiting for this one to draw.
-            loop {
-                match self.player.next_event() {
-                    Event::None => {
-                        hdr::drained(&mut self.tagging, &self.player, &mut self.surface, now);
-                        break;
-                    }
-                    // The file ended, or mpv was told to quit over its socket.
-                    Event::Shutdown => return,
-                    Event::Answer { request, taken } => say(hdr::answered(
-                        request,
-                        taken,
-                        &mut self.tagging,
-                        &self.player,
-                        &mut self.surface,
-                        now,
-                    )),
-                    Event::TargetChanged {
-                        registration,
-                        option,
-                        value,
-                    } => say(hdr::target_changed(
-                        registration,
-                        &option,
-                        value.as_deref(),
-                        &mut self.tagging,
-                        &self.player,
-                        &mut self.surface,
-                        now,
-                    )),
-                    Event::Other => {}
-                }
+        }
+        if let Some((width, height)) = self.surface.rescale() {
+            self.window.resize(width, height);
+            redraw = true;
+        }
+        let now = Instant::now();
+        follow_colour(
+            &self.player,
+            &mut self.surface,
+            self.capabilities,
+            &mut self.tagging,
+            now,
+        );
+        // Nothing on this thread waits for mpv from here on: mpv's
+        // video thread may itself be waiting for this one to draw.
+        loop {
+            if stopping.expired(Instant::now()) {
+                return false;
             }
-            // Decided after every answer waiting has been read, and before
-            // anything is drawn.
-            let (width, height) = self.surface.buffer_size();
-            match self.tagging.frame(self.renderer.has_new_frame(), redraw, now) {
-                Frame::Nothing => {}
-                Frame::Hold => {
-                    self.renderer.draw(width, height, self.window.depth);
-                    self.renderer.frame_shown();
+            match self.player.next_event() {
+                Event::None => {
+                    hdr::drained(&mut self.tagging, &self.player, &mut self.surface, now);
+                    break;
                 }
-                Frame::Show => {
-                    self.renderer.draw(width, height, self.window.depth);
-                    self.window.swap();
-                    self.renderer.frame_shown();
-                }
-                Frame::Black => self.window.show_black(),
-                Frame::HoldAndBlack => {
-                    self.renderer.draw(width, height, self.window.depth);
-                    self.renderer.frame_shown();
-                    self.window.show_black();
-                }
+                // The file ended, or quit was requested here or over IPC.
+                Event::Shutdown => return false,
+                Event::Answer { request, taken } => say(hdr::answered(
+                    request,
+                    taken,
+                    &mut self.tagging,
+                    &self.player,
+                    &mut self.surface,
+                    now,
+                )),
+                Event::TargetChanged {
+                    registration,
+                    option,
+                    value,
+                } => say(hdr::target_changed(
+                    registration,
+                    &option,
+                    value.as_deref(),
+                    &mut self.tagging,
+                    &self.player,
+                    &mut self.surface,
+                    now,
+                )),
+                Event::Other => {}
             }
         }
+        // Decided after every answer waiting has been read, and before
+        // anything is drawn.
+        let (width, height) = self.surface.buffer_size();
+        match self.tagging.frame(self.renderer.has_new_frame(), redraw, now) {
+            Frame::Nothing => {}
+            Frame::Hold => {
+                self.renderer.draw(width, height, self.window.depth);
+                self.renderer.frame_shown();
+            }
+            Frame::Show => {
+                self.renderer.draw(width, height, self.window.depth);
+                self.window.swap();
+                self.renderer.frame_shown();
+            }
+            Frame::Black => self.window.show_black(),
+            Frame::HoldAndBlack => {
+                self.renderer.draw(width, height, self.window.depth);
+                self.renderer.frame_shown();
+                self.window.show_black();
+            }
+        }
+        true
     }
 }
 
@@ -959,6 +1042,291 @@ impl Drop for Session {
 mod tests {
     use super::*;
     use crate::player::launch::write_header_include_at;
+
+    #[test]
+    fn a_running_play_has_no_quit_request_or_deadline() {
+        let mut stopping = Stopping::default();
+        let now = Instant::now();
+        for now in [now, now + STOP_PATIENCE] {
+            assert_eq!(stopping.next(false, now), StopAction::Continue);
+            assert_eq!(stopping.wait_ms(now), 100);
+        }
+    }
+
+    #[test]
+    fn a_stop_asks_for_quit_once_even_when_repeated() {
+        let mut stopping = Stopping::default();
+        let now = Instant::now();
+        assert_eq!(stopping.next(true, now), StopAction::RequestQuit);
+        for requested in [true, true, false, true] {
+            assert_eq!(stopping.next(requested, now), StopAction::Continue);
+        }
+    }
+
+    #[test]
+    fn a_stop_keeps_serving_mpv_until_its_original_deadline() {
+        let mut stopping = Stopping::default();
+        let now = Instant::now();
+        assert_eq!(stopping.next(true, now), StopAction::RequestQuit);
+        assert_eq!(
+            stopping.next(true, now + QUIT_GRACE - Duration::from_nanos(1)),
+            StopAction::Continue
+        );
+        // A second stop just before the deadline did not buy another wait.
+        assert_eq!(stopping.next(true, now + QUIT_GRACE), StopAction::TearDown);
+        assert_eq!(
+            stopping.next(false, now + STOP_PATIENCE),
+            StopAction::TearDown
+        );
+    }
+
+    #[test]
+    fn a_stop_caps_the_surface_wait_at_its_deadline() {
+        let mut stopping = Stopping::default();
+        let now = Instant::now();
+        stopping.next(true, now);
+        let deadline = now + QUIT_GRACE;
+        assert_eq!(stopping.wait_ms(now), 100);
+        assert_eq!(stopping.wait_ms(deadline - Duration::from_millis(17)), 17);
+        assert_eq!(stopping.wait_ms(deadline - Duration::from_nanos(1)), 1);
+        assert_eq!(stopping.wait_ms(deadline), 0);
+        assert_eq!(stopping.wait_ms(deadline + Duration::from_secs(1)), 0);
+    }
+
+    /// Like VideoSurface::wait, but with no compositor. The real mpv test
+    /// below is woken through the very callback used by Live.
+    fn wait_headlessly(shared: &Shared, timeout_ms: i32) -> bool {
+        let mut fd = libc::pollfd {
+            fd: shared.wake.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        // SAFETY: one valid descriptor in one writable pollfd.
+        unsafe { libc::poll(&mut fd, 1, timeout_ms) >= 0 }
+    }
+
+    struct LoopProbe {
+        quits: std::cell::Cell<usize>,
+        turns: usize,
+        waits: usize,
+        shutdown_after: Option<usize>,
+        disconnect_after: Option<usize>,
+        began: Instant,
+    }
+
+    impl LoopProbe {
+        fn new(shutdown_after: Option<usize>, disconnect_after: Option<usize>) -> Self {
+            Self {
+                quits: std::cell::Cell::new(0),
+                turns: 0,
+                waits: 0,
+                shutdown_after,
+                disconnect_after,
+                began: Instant::now(),
+            }
+        }
+    }
+
+    impl PlayLoop for LoopProbe {
+        fn wait(&mut self, shared: &Shared, timeout_ms: i32) -> bool {
+            // A missing deadline must fail the test, not hang the suite.
+            assert!(
+                self.began.elapsed() < Duration::from_secs(2),
+                "the loop never gave up"
+            );
+            let disconnected = self.disconnect_after == Some(self.waits);
+            self.waits += 1;
+            if disconnected {
+                return false;
+            }
+            if self.shutdown_after.is_none() && self.disconnect_after.is_none() {
+                return wait_headlessly(shared, timeout_ms);
+            }
+            true
+        }
+
+        fn request_quit(&self) {
+            self.quits.set(self.quits.get() + 1);
+        }
+
+        fn turn(&mut self, _: &Shared, _: &Stopping) -> bool {
+            self.turns += 1;
+            self.shutdown_after != Some(self.turns)
+        }
+    }
+
+    #[test]
+    fn a_stopped_play_keeps_pumping_until_shutdown() {
+        let session = Session::for_test("stopped");
+        session.stop();
+        session.stop();
+        let mut play = LoopProbe::new(Some(2), None);
+        play.run(&session.shared);
+        assert_eq!(play.quits.get(), 1);
+        assert_eq!(play.turns, 2, "the turn after asking to quit still runs");
+        assert_eq!(play.waits, 2, "Shutdown ends the loop immediately");
+    }
+
+    #[test]
+    fn a_play_that_shuts_down_itself_leaves_without_asking_to_quit() {
+        let session = Session::for_test("ended");
+        let mut play = LoopProbe::new(Some(1), None);
+        play.run(&session.shared);
+        assert_eq!(play.quits.get(), 0);
+        assert_eq!(play.turns, 1);
+        assert_eq!(play.waits, 1);
+        // A late Stop (including Drop) only wakes the now-finished loop.
+        session.stop();
+        assert_eq!(play.quits.get(), 0);
+    }
+
+    #[test]
+    fn a_gone_compositor_ends_the_loop_even_while_stopping() {
+        for disconnect_after in [0, 1] {
+            let session = Session::for_test("disconnected");
+            session.stop();
+            let mut play = LoopProbe::new(None, Some(disconnect_after));
+            play.run(&session.shared);
+            assert_eq!(play.quits.get(), disconnect_after);
+            assert_eq!(play.turns, disconnect_after);
+            assert_eq!(play.waits, disconnect_after + 1);
+        }
+    }
+
+    #[test]
+    fn a_stop_without_shutdown_falls_back_at_the_bound() {
+        let session = Session::for_test("unanswered");
+        session.stop();
+        let mut play = LoopProbe::new(None, None);
+        play.run(&session.shared);
+        assert_eq!(play.quits.get(), 1);
+        assert!(play.turns > 0, "mpv was served while waiting");
+        assert!(play.began.elapsed() >= QUIT_GRACE);
+        assert!(
+            play.began.elapsed() < Duration::from_secs(1),
+            "only the grace is waited"
+        );
+    }
+
+    /// The same loop as Live, with an actual player and its actual wake-up
+    /// callback, but no renderer or compositor. Like hdr's real-library
+    /// tests this requires Vela's built set and never uses a system mpv.
+    #[test]
+    #[ignore = "needs the shipped libmpv set: npm run test:libmpv"]
+    fn real_library_stop_reaches_shutdown_in_every_playback_state() {
+        use super::super::libmpv::LIBRARY_FILE;
+
+        struct Headless {
+            player: Player,
+            shutdown: bool,
+            answers: Vec<(u64, bool)>,
+        }
+
+        impl PlayLoop for Headless {
+            fn wait(&mut self, shared: &Shared, timeout_ms: i32) -> bool {
+                wait_headlessly(shared, timeout_ms)
+            }
+
+            fn request_quit(&self) {
+                self.player.request_quit();
+            }
+
+            fn turn(&mut self, _: &Shared, stopping: &Stopping) -> bool {
+                while !stopping.expired(Instant::now()) {
+                    match self.player.next_event() {
+                        Event::None => return true,
+                        Event::Shutdown => {
+                            self.shutdown = true;
+                            return false;
+                        }
+                        Event::Answer { request, taken } => self.answers.push((request, taken)),
+                        Event::Other | Event::TargetChanged { .. } => {}
+                    }
+                }
+                false
+            }
+        }
+
+        let directory = std::env::var_os("VELA_LIBMPV_DIR")
+            .filter(|dir| !dir.is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.libmpv/out/libmpv")
+            });
+        let directory = std::fs::canonicalize(directory).expect("a built libmpv set");
+        let lib =
+            Arc::new(LibMpv::load(&directory.join(LIBRARY_FILE)).expect("the shipped library"));
+        for mode in ["idle", "loading", "paused", "failed", "shutdown"] {
+            // Declared first and dropped last: mpv's callback holds its
+            // address until the player is destroyed.
+            let session = Session::for_test(mode);
+            let player = Player::create(lib.clone()).expect("a player");
+            for (name, value) in [
+                ("config", "no"),
+                ("terminal", "no"),
+                ("vo", "null"),
+                ("ao", "null"),
+                ("idle", "yes"),
+                ("pause", "yes"),
+            ] {
+                player.set_option(name, value).expect(name);
+            }
+            player.initialize().expect("mpv starts");
+            // SAFETY: session holds Shared until after Headless/player goes.
+            unsafe {
+                player.set_wakeup(wake_from_mpv, Arc::as_ptr(&session.shared) as *mut c_void)
+            };
+            if matches!(mode, "loading" | "paused" | "failed") {
+                let file = if mode == "failed" {
+                    "/nonexistent-vela-stop-test.mp4".to_string()
+                } else {
+                    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                        .join("../packaging/libmpv/fixtures/h264-aac.mp4")
+                        .to_string_lossy()
+                        .into_owned()
+                };
+                player
+                    .command(&["loadfile", &file])
+                    .expect("loadfile is accepted");
+                if mode == "paused" {
+                    let deadline = Instant::now() + Duration::from_secs(5);
+                    while player.property("time-pos").is_none() {
+                        assert!(Instant::now() < deadline, "the fixture loaded");
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                    assert_eq!(player.property("pause").as_deref(), Some("yes"));
+                }
+            }
+            // An ask as hdr makes them (of a property that is not one of its
+            // targets: only hdr.rs names those), with the quit command's
+            // userdata: a command reply must not appear as a second answer
+            // to this ask.
+            assert!(hdr::Targetable::ask(&player, 0, "volume", "50"));
+            if mode == "shutdown" {
+                player
+                    .command(&["quit"])
+                    .expect("mpv quits before the stop is seen");
+            }
+            let mut play = Headless {
+                player,
+                shutdown: false,
+                answers: Vec::new(),
+            };
+            session.stop();
+            session.stop();
+            let began = Instant::now();
+            play.run(&session.shared);
+            assert!(
+                play.shutdown,
+                "{mode}: mpv shut down before teardown, not the deadline"
+            );
+            assert_eq!(play.answers, [(0, true)], "{mode}: only the HDR answer");
+            eprintln!(
+                "headless {mode} stop reached Shutdown in {:?}",
+                began.elapsed()
+            );
+        }
+    }
 
     // The embedded play must hold on to a stream-auth file it could not
     // remove, as the external player's handle does, so that reaping the play

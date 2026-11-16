@@ -595,7 +595,7 @@ test('mpv is told what it draws for in one place, together with the surface', ()
   for (const reached of ['hdr::answered(', 'hdr::drained(']) {
     assert.equal(count(code(session), reached), 2, reached);
     assert.equal(count(functionBody(session, 'fn set_up(', 'set_up'), reached), 1, reached);
-    assert.equal(count(methodBody(session, '    fn run(&mut self, shared: &Shared) {', 'Live::run'), reached), 1, reached);
+    assert.equal(count(methodBody(session, '    fn turn(&mut self, shared: &Shared, stopping: &Stopping) -> bool {', 'Live::turn'), reached), 1, reached);
   }
   for (const direct of ['.describe(', '.tag(', '.untag(', '.ask(', '.observe(', '.unobserve(', '.set_target(']) {
     assert.equal(count(code(session), direct), 0, `the session never calls ${direct} itself`);
@@ -731,7 +731,7 @@ test("what the compositor says about the display is followed from a play's start
   assert.notEqual(rendererMade, -1);
   assert.equal(count(code(session), '.wait_for_event('), 1);
   assert.ok(setUp.indexOf('player.wait_for_event(') < rendererMade);
-  assert.equal(count(code(session), '.set_wakeup('), 1);
+  assert.equal(count(code(session.slice(0, session.indexOf('#[cfg(test)]\nmod tests'))), '.set_wakeup('), 1);
   const wakeup = setUp.indexOf('unsafe { player.set_wakeup(wake_from_mpv, context) };');
   assert.ok(wakeup !== -1 && settle < wakeup && wakeup < rendererMade);
   // After the renderer, set-up only hands over what it built.
@@ -749,7 +749,7 @@ test("what the compositor says about the display is followed from a play's start
   assert.match(setUp, /capabilities,\s+tagging,\s+\}\)$/, 'and the running play keeps both');
 
   // ...and on every turn of the running play.
-  const run = methodBody(session, '    fn run(&mut self, shared: &Shared) {', 'Live::run');
+  const run = methodBody(session, '    fn turn(&mut self, shared: &Shared, stopping: &Stopping) -> bool {', 'Live::turn');
   assert.match(
     run,
     /let now = Instant::now\(\);\s+follow_colour\(\s+&self\.player,\s+&mut self\.surface,\s+self\.capabilities,\s+&mut self\.tagging,\s+now,\s+\);/,
@@ -765,17 +765,45 @@ test('the running play never waits for mpv and does with each frame what hdr dec
   // Review finding hd-3. mpv's video thread waits for the thread that draws
   // (render.h), so that thread must never wait for mpv once the renderer
   // exists. The unit tests in hdr.rs prove the decisions; this proves the
-  // loop is the one they decide for.
-  const run = methodBody(session, '    fn run(&mut self, shared: &Shared) {', 'Live::run');
+  // loop is the one they decide for. A turn of it is `PlayLoop::turn`; the
+  // loop around the turns is the trait's `run`, the same for the play and
+  // for the tests that drive it without a display.
+  const run = methodBody(session, '    fn turn(&mut self, shared: &Shared, stopping: &Stopping) -> bool {', 'Live::turn');
+  const shipped = code(session.slice(0, session.indexOf('#[cfg(test)]\nmod tests')));
+  const loop = methodBody(session, '    fn run(&mut self, shared: &Shared) {', 'Live::run');
+  assert.equal(count(shipped, 'fn run(&mut self, shared: &Shared)'), 1, 'the play has no loop of its own');
+  assert.equal(count(shipped, 'fn turn(&mut self, shared: &Shared, stopping: &Stopping) -> bool {'), 1);
+  assert.match(session, /\n                                live\.run\(&shared\);\n/);
+  // The loop: wait on the surface (a gone compositor ends it), then the stop
+  // decision, then a turn, every time round. A stop does not end it: mpv is
+  // asked to quit, without being waited on, and the loop goes on drawing and
+  // reading events until mpv says it has shut down or the bound has passed
+  // (found 2026-11-16: freeing the renderer first made mpv report the
+  // audio's position as the play's last).
+  assert.match(
+    loop,
+    /let mut stopping = Stopping::default\(\);\s+loop \{\s+if !self\.wait\(shared, stopping\.wait_ms\(Instant::now\(\)\)\) \{\s+return;\s+\}\s+shared\.drain_wake\(\);\s+match stopping\.next\(shared\.stop\.load\(Ordering::SeqCst\), Instant::now\(\)\) \{\s+StopAction::Continue => \{\}\s+StopAction::RequestQuit => self\.request_quit\(\),\s+StopAction::TearDown => return,\s+\}\s+(?:\/\/[^\n]*\n\s+)*if !self\.turn\(shared, &stopping\) \{\s+return;\s+\}\s+\}$/,
+  );
+  assert.match(
+    session,
+    /impl PlayLoop for Live \{\s+fn wait\(&mut self, shared: &Shared, timeout_ms: i32\) -> bool \{\s+self\.surface\.wait\(shared\.wake\.as_fd\(\), timeout_ms\)\.is_ok\(\)\s+\}\s+fn request_quit\(&self\) \{\s+self\.player\.request_quit\(\);\s+\}/,
+  );
+  // The quit is asked through the call that does not wait for mpv's core.
+  const quit = methodBody(libmpv, '    pub(crate) fn request_quit(&self) {', 'request_quit');
+  assert.match(code(quit), /let mut words = \[c"quit"\.as_ptr\(\), std::ptr::null\(\)\];\s+unsafe \{ \(self\.lib\.command_async\)\(self\.raw, 0, words\.as_mut_ptr\(\)\) \};$/);
+  assert.equal(count(code(libmpv), '(self.lib.command_async)('), 1);
+  assert.equal(count(code(libmpv), '(self.lib.command)('), 1, 'the waiting call is in `command` alone');
+  assert.match(session, /^const QUIT_GRACE: Duration = Duration::from_millis\(250\);$/m);
   // Events are read without waiting, every kind named, none swallowed by a
   // wildcard, and mpv's answers and its reports of a changed target go to
   // `hdr`.
   assert.match(
     run,
-    /loop \{\s+match self\.player\.next_event\(\) \{\s+Event::None => \{\s+hdr::drained\(&mut self\.tagging, &self\.player, &mut self\.surface, now\);\s+break;\s+\}\s+(?:\/\/[^\n]*\n\s+)*Event::Shutdown => return,\s+Event::Answer \{ request, taken \} => say\(hdr::answered\(\s+request,\s+taken,\s+&mut self\.tagging,\s+&self\.player,\s+&mut self\.surface,\s+now,\s+\)\),\s+Event::TargetChanged \{\s+registration,\s+option,\s+value,\s+\} => say\(hdr::target_changed\(\s+registration,\s+&option,\s+value\.as_deref\(\),\s+&mut self\.tagging,\s+&self\.player,\s+&mut self\.surface,\s+now,\s+\)\),\s+Event::Other => \{\}\s+\}\s+\}/,
+    /loop \{\s+if stopping\.expired\(Instant::now\(\)\) \{\s+return false;\s+\}\s+match self\.player\.next_event\(\) \{\s+Event::None => \{\s+hdr::drained\(&mut self\.tagging, &self\.player, &mut self\.surface, now\);\s+break;\s+\}\s+(?:\/\/[^\n]*\n\s+)*Event::Shutdown => return false,\s+Event::Answer \{ request, taken \} => say\(hdr::answered\(\s+request,\s+taken,\s+&mut self\.tagging,\s+&self\.player,\s+&mut self\.surface,\s+now,\s+\)\),\s+Event::TargetChanged \{\s+registration,\s+option,\s+value,\s+\} => say\(hdr::target_changed\(\s+registration,\s+&option,\s+value\.as_deref\(\),\s+&mut self\.tagging,\s+&self\.player,\s+&mut self\.surface,\s+now,\s+\)\),\s+Event::Other => \{\}\s+\}\s+\}/,
   );
   assert.doesNotMatch(code(run), /_ =>/);
   assert.doesNotMatch(code(run), /wait_for_event|\.property\(|\.command\(|set_option|roundtrip/);
+  assert.doesNotMatch(code(loop), /wait_for_event|\.property\(|\.command\(|set_option|roundtrip|_ =>/);
   assert.match(
     methodBody(libmpv, '    pub(crate) fn next_event(&self) -> Event {', 'next_event'),
     /^\n    pub\(crate\) fn next_event\(&self\) -> Event \{\n        self\.event\(0\.0\)$/,
@@ -861,7 +889,7 @@ test("mpv's reports of a changed target reach hdr from the start of a play to it
   );
   assert.equal(count(shippedSession, 'hdr::target_changed('), 2);
   assert.equal(count(setUp, 'hdr::target_changed('), 1);
-  assert.equal(count(methodBody(session, '    fn run(&mut self, shared: &Shared) {', 'Live::run'), 'hdr::target_changed('), 1);
+  assert.equal(count(methodBody(session, '    fn turn(&mut self, shared: &Shared, stopping: &Stopping) -> bool {', 'Live::turn'), 'hdr::target_changed('), 1);
   // The play's thread reads no target itself.
   assert.doesNotMatch(shippedSession, /\.property\("target/);
   // What mpv reports came from the user's configuration or from whatever
@@ -902,15 +930,31 @@ test("mpv's reports of a changed target reach hdr from the start of a play to it
 test('the shipped library is tested itself, in every full embedded E2E run', () => {
   // What the player relies on mpv for when it changes HDR targets can only
   // be shown against the real library (hdr.rs, "against the library Vela
-  // ships"). Those tests are ignored in an ordinary `cargo test`, so they
-  // must be run somewhere routinely: here.
-  const realTests = hdr.match(/#\[ignore = "needs the shipped libmpv set: npm run test:libmpv"\]\n    fn real_library_\w+\(\)/g) ?? [];
+  // ships"), and so can what it relies on when a play is stopped: that mpv,
+  // asked to quit without being waited on, says it has shut down
+  // (session.rs). Those tests are ignored in an ordinary `cargo test`, so
+  // they must be run somewhere routinely: here.
+  const REAL_TEST = /#\[ignore = "needs the shipped libmpv set: npm run test:libmpv"\]\n    fn real_library_\w+\(\)/g;
+  const realTests = hdr.match(REAL_TEST) ?? [];
   assert.equal(realTests.length, 10);
+  const session = read('src-tauri/src/player/embedded/session.rs');
+  assert.deepEqual(session.match(REAL_TEST)?.map((found) => found.split('fn ')[1]), [
+    'real_library_stop_reaches_shutdown_in_every_playback_state()',
+  ]);
+  // Every test ignored for want of the set is named real_library_..., in one
+  // of the two files the script's two filters name: none is left out of it.
+  for (const [file, source] of [['hdr.rs', hdr], ['session.rs', session]]) {
+    assert.equal(
+      (source.match(/#\[ignore = "needs the shipped libmpv set[^"]*"\]/g) ?? []).length,
+      (source.match(REAL_TEST) ?? []).length,
+      file,
+    );
+  }
   assert.match(hdr, /\.unwrap_or_else\(\|_\| panic!\("no libmpv set at \{\}", directory\.display\(\)\)\);/, 'a missing set fails them');
   const pkg = JSON.parse(read('package.json'));
   assert.equal(
     pkg.scripts['test:libmpv'],
-    'cargo test --manifest-path src-tauri/Cargo.toml --locked --lib player::embedded::hdr::tests::real_library -- --ignored',
+    'cargo test --manifest-path src-tauri/Cargo.toml --locked --lib -- --ignored player::embedded::hdr::tests::real_library player::embedded::session::tests::real_library',
   );
   const runner = read('tests/e2e/run.mjs');
   const embeddedBlock = runner.indexOf("if (runPlayer === 'embedded') {");

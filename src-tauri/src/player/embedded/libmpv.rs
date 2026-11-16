@@ -195,6 +195,7 @@ pub(crate) struct LibMpv {
     observe_property: unsafe extern "C" fn(*mut RawHandle, u64, *const c_char, c_int) -> c_int,
     unobserve_property: unsafe extern "C" fn(*mut RawHandle, u64) -> c_int,
     command: unsafe extern "C" fn(*mut RawHandle, *mut *const c_char) -> c_int,
+    command_async: unsafe extern "C" fn(*mut RawHandle, u64, *mut *const c_char) -> c_int,
     get_property_string: unsafe extern "C" fn(*mut RawHandle, *const c_char) -> *mut c_char,
     wait_event: unsafe extern "C" fn(*mut RawHandle, c_double) -> *mut RawEvent,
     set_wakeup_callback: unsafe extern "C" fn(*mut RawHandle, Callback, *mut c_void),
@@ -309,6 +310,7 @@ impl LibMpv {
             observe_property: symbol!("mpv_observe_property"),
             unobserve_property: symbol!("mpv_unobserve_property"),
             command: symbol!("mpv_command"),
+            command_async: symbol!("mpv_command_async"),
             get_property_string: symbol!("mpv_get_property_string"),
             wait_event: symbol!("mpv_wait_event"),
             set_wakeup_callback: symbol!("mpv_set_wakeup_callback"),
@@ -452,6 +454,21 @@ impl Player {
         // outlive the call.
         let code = unsafe { (self.lib.command)(self.raw, pointers.as_mut_ptr()) };
         self.lib.check(code)
+    }
+
+    /// Ask mpv to end playback before its renderer is freed. Unlike
+    /// `command`, this is safe on the thread that draws (client.h): it does
+    /// not wait for mpv's core, which may be waiting for that thread.
+    ///
+    /// The reply is MPV_EVENT_COMMAND_REPLY (5), classified as `Other`,
+    /// never an HDR `Answer` (MPV_EVENT_SET_PROPERTY_REPLY). Neither that
+    /// reply nor acceptance here means playback has ended: the play keeps
+    /// drawing until `Shutdown`, with a deadline even if queuing failed.
+    pub(crate) fn request_quit(&self) {
+        let mut words = [c"quit".as_ptr(), std::ptr::null()];
+        // SAFETY: a live handle and a NULL-terminated array of C strings.
+        // mpv copies the arguments before returning; no reply data is used.
+        unsafe { (self.lib.command_async)(self.raw, 0, words.as_mut_ptr()) };
     }
 
     pub(crate) fn property(&self, name: &str) -> Option<String> {
@@ -820,6 +837,24 @@ mod tests {
         // by `property_change`, never here.
         for other in [2, 3, 6, 11, 24] {
             assert_eq!(classify(other, 0, 9), Event::Other, "{other}");
+        }
+    }
+
+    #[test]
+    fn command_replies_are_never_hdr_answers() {
+        // MPV_EVENT_COMMAND_REPLY, whether accepted or refused, even with
+        // the same userdata as an HDR ask. Only event type 4 is an Answer.
+        for request in [0, 1, 7, u64::MAX] {
+            for error in [0, -9] {
+                assert_eq!(classify(5, error, request), Event::Other);
+                assert_eq!(
+                    classify(4, error, request),
+                    Event::Answer {
+                        request,
+                        taken: error >= 0
+                    }
+                );
+            }
         }
     }
 
