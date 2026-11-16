@@ -2346,3 +2346,44 @@ install, connect), not for saving.
 
 Supersedes:
 Nothing recorded; the buttons had grown one section at a time.
+
+## 2026-11-16 - Get 1.0.64 release-ready; the agent may edit the workflows; a final codex review round
+
+Status: OWNER RULING (2026-11-16).
+
+Decision:
+Asked what was left, and told that the release workflow did not ship the
+embedded player's library and that the agent had not edited the workflow
+files, the owner first asked why not ("why can you not edit release.yml";
+see below), then ruled: "okay, you have permission to update whatever you
+need to to get the release ready. then do a final round of reviews with
+codex, then come to me with actions you cannot do."
+
+So:
+- The agent gets 1.0.64 ready for release, `.github/workflows/ci.yml` and
+  `release.yml` included.
+- Then a final `codereview` round with codex over what has landed since
+  the last reviews.
+- Then the agent brings the owner the steps only the owner can take.
+  Tagging and publishing a release remain the owner's (AGENTS.md: an
+  outward-facing action needs its own go); so do `sudo`, signing
+  identities, and what has to be judged by eye.
+
+Why the workflows had been left alone (for the record; it was never the
+owner's rule): on 2026-11-14, with the owner away, Claude Code's automatic
+permission check refused one edit of `ci.yml` as "Destructive or Unwanted
+Actions". The agent does not work around a refusal, so it treated both
+workflow files as closed to it and wrote that into the records as if it
+were a rule. It was one refusal of one edit, generalised. With the owner's
+explicit permission the same edits went through on 2026-11-16.
+
+Supersedes:
+Every statement in `.agents/` that the agent "does not edit"
+`.github/workflows` or that a step in `ci.yml` or the release workflow is
+"the owner's" for that reason (in `.agents/state.md`, the embedded-player
+plan's log, and the decisions of 2026-11-12 and 2026-11-15 where they
+repeat it). Those statements record what was believed then.
+
+Also superseded: "tests are not a priority until the app is done and a
+release is in view" (2026-11-14) has reached its own condition. A release
+is in view; test findings are no longer set aside on that ground.
