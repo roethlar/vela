@@ -207,6 +207,9 @@ pub struct WindowStateObservation {
     /// Vela's exit can wait for what mpv had already sent (review finding
     /// pw-8, `wait_for_reader`).
     reader: Arc<ReaderProgress>,
+    /// Reader setup, not an observed screen: set only on the clone handed to
+    /// this play's reader when its external Linux launch set fs-screen-name.
+    initial_fullscreen_screen: Option<String>,
 }
 
 /// How far the window-state reader of one play has got. An observation no
@@ -298,6 +301,7 @@ impl WindowStateObservation {
             })),
             display: Arc::default(),
             reader: Arc::default(),
+            initial_fullscreen_screen: None,
         }
     }
 
@@ -1018,13 +1022,21 @@ pub fn play(
     // sees the new state); untracked sessions fire it when mpv exits. The match
     // guards keep degenerate track targets (empty server base) on the untracked
     // path so the notifier still fires exactly once per session.
+    let mut window_observation = spec.window_observation.clone();
+    window_observation.initial_fullscreen_screen =
+        crate::player::launch::initial_fullscreen_screen_name(
+            spec,
+            started_player,
+            cfg!(target_os = "linux"),
+        )
+        .map(str::to_string);
     let tracking = match progress {
         ProgressTarget::Plex(info) if !info.server_base.is_empty() => start_tracking_plex(
             ipc_path,
             info,
             start_ms,
             stop_flag.clone(),
-            spec.window_observation.clone(),
+            window_observation,
             player_exit,
             on_end,
         ),
@@ -1033,14 +1045,14 @@ pub fn play(
             track,
             start_ms,
             stop_flag.clone(),
-            spec.window_observation.clone(),
+            window_observation,
             player_exit,
             on_end,
         ),
         _ => spawn_end_watcher(
             ipc_path,
             stop_flag.clone(),
-            spec.window_observation.clone(),
+            window_observation,
             player_exit,
             on_end,
         ),
@@ -1146,6 +1158,50 @@ impl PositionReader {
     }
 }
 
+/// Keep a Linux fullscreen launch's target on the window's current screen.
+/// An empty-string reset does not work: mpv's Wayland backend tests the
+/// fs-screen-name pointer, and an allocated empty string selects screen 0.
+struct FullscreenScreenFollow {
+    screen: String,
+    configured: bool,
+}
+
+impl FullscreenScreenFollow {
+    fn apply(
+        &mut self,
+        event: &serde_json::Value,
+        observation: &WindowStateObservation,
+        stream: &mut impl Write,
+    ) {
+        // fullscreen=true is an option value and can precede the window.
+        // mpv 0.42: vo-configured reads vo->config_ok, set after reconfig
+        // succeeds (vo.c). Wayland has then issued the initial fullscreen
+        // request (vo_wayland_reconfig), so its launch target can be updated.
+        if event["event"] == "property-change"
+            && event["name"] == "vo-configured"
+            && event["data"].as_bool() == Some(true)
+        {
+            self.configured = true;
+        }
+        if !self.configured {
+            return;
+        }
+        let display = observation.display_snapshot();
+        let Some(name) = display.names.first() else {
+            return;
+        };
+        if !crate::config::usable_screen_name(name) || *name == self.screen {
+            return;
+        }
+        let command = serde_json::json!({"command": ["set_property", "fs-screen-name", name]});
+        // The reader retains a writer to its own IPC connection. Do not log
+        // commands, replies or screen names alongside stream diagnostics.
+        if writeln!(stream, "{command}").is_ok() {
+            self.screen.clone_from(name);
+        }
+    }
+}
+
 /// Observe position and window state without server I/O. `done` is set on
 /// every way out of the reader's thread, a panic included (the trackers wait
 /// on it): when the IPC connection ends, or cannot be made. A confirmed exit
@@ -1198,6 +1254,14 @@ fn spawn_position_reader(
                 Err(_) => return,
             };
             let mut reader = BufReader::new(reader_clone);
+            let mut fullscreen_screen =
+                window_observation
+                    .initial_fullscreen_screen
+                    .as_ref()
+                    .map(|screen| FullscreenScreenFollow {
+                        screen: screen.clone(),
+                        configured: false,
+                    });
 
             // Ask mpv to push position and window-state updates; then drain every
             // line. Distinct ids keep command replies unambiguous during IPC
@@ -1215,6 +1279,10 @@ fn spawn_position_reader(
                   {\"command\":[\"observe_property\",6,\"display-height\"]}\n\
                   {\"command\":[\"observe_property\",7,\"osd-dimensions\"]}\n",
             );
+            if fullscreen_screen.is_some() {
+                let _ =
+                    stream.write_all(b"{\"command\":[\"observe_property\",8,\"vo-configured\"]}\n");
+            }
 
             let mut line = String::new();
             loop {
@@ -1245,6 +1313,9 @@ fn spawn_position_reader(
                         start_unconfirmed_r.store(false, Ordering::Relaxed);
                     }
                     window_observation.apply_ipc_event(&v);
+                    if let Some(follow) = &mut fullscreen_screen {
+                        follow.apply(&v, &window_observation, &mut stream);
+                    }
                 }
             }
         })?;
@@ -3245,6 +3316,317 @@ mod tests {
 
     fn event(name: &str, data: serde_json::Value) -> serde_json::Value {
         serde_json::json!({"event": "property-change", "id": 1, "name": name, "data": data})
+    }
+
+    /// Feed the real reader, half-close mpv's side, then collect everything
+    /// written back. EOF is the barrier: no sleep or "nothing arrived yet"
+    /// timeout stands in for proving that no command was sent.
+    #[cfg(unix)]
+    fn screen_requests_on(
+        listener: &std::os::unix::net::UnixListener,
+        events: &[serde_json::Value],
+    ) -> Vec<serde_json::Value> {
+        let (mut mpv, _) = listener.accept().expect("reader connects");
+        mpv.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        for value in events {
+            writeln!(mpv, "{value}").unwrap();
+        }
+        mpv.shutdown(std::net::Shutdown::Write).unwrap();
+        BufReader::new(mpv)
+            .lines()
+            .map(|line| serde_json::from_str(&line.expect("reader closes")).unwrap())
+            .collect()
+    }
+
+    #[cfg(unix)]
+    fn fullscreen_screen_requests(
+        spec: &PlaySpec,
+        player: crate::player::PlayerKind,
+        linux: bool,
+        events: &[serde_json::Value],
+    ) -> Vec<serde_json::Value> {
+        let path = crate::player::launch::new_ipc_path().unwrap();
+        let listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
+        let observation = WindowStateObservation {
+            initial_fullscreen_screen: crate::player::launch::initial_fullscreen_screen_name(
+                spec, player, linux,
+            )
+            .map(str::to_string),
+            ..Default::default()
+        };
+        spawn_position_reader(
+            path.clone(),
+            0,
+            Arc::new(AtomicBool::new(false)),
+            observation.clone(),
+            PlayerExit::default(),
+        )
+        .unwrap();
+        let requests = screen_requests_on(&listener, events);
+        assert!(reader_finished(&observation, Duration::from_secs(5)));
+        std::fs::remove_file(path).unwrap();
+        requests
+    }
+
+    #[cfg(unix)]
+    fn screen_sets(requests: &[serde_json::Value]) -> Vec<serde_json::Value> {
+        requests
+            .iter()
+            .filter(|request| request["command"][0] != "observe_property")
+            .cloned()
+            .collect()
+    }
+
+    #[cfg(unix)]
+    fn set_fullscreen_screen(name: &str) -> serde_json::Value {
+        serde_json::json!({"command": ["set_property", "fs-screen-name", name]})
+    }
+
+    #[cfg(unix)]
+    fn fullscreen_screen_spec() -> PlaySpec {
+        PlaySpec {
+            player: crate::player::PlayerKind::External,
+            screen_name: Some("DP-3".into()),
+            inherited_window_state: PlaybackWindowState {
+                fullscreen: Some(true),
+                ..Default::default()
+            },
+            ..embedded_spec()
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fullscreen_screen_waits_for_successful_output_configuration() {
+        let spec = fullscreen_screen_spec();
+        let mut events = vec![
+            event("display-names", serde_json::json!(["DP-4"])),
+            event("fullscreen", true.into()),
+            event("vo-configured", false.into()),
+            event("vo-configured", "true".into()),
+            serde_json::json!({"name": "vo-configured", "data": true, "error": "success"}),
+            serde_json::json!({"event": "video-reconfig"}),
+            serde_json::json!({"event": "file-loaded"}),
+        ];
+        let requests = fullscreen_screen_requests(&spec, spec.player, true, &events);
+        assert!(
+            requests.iter().any(|request| {
+                request["command"][0] == "observe_property"
+                    && request["command"][2] == "vo-configured"
+            }),
+            "the real reader must subscribe, including when it connects after configuration"
+        );
+        assert!(
+            screen_sets(&requests).is_empty(),
+            "fullscreen alone is too early"
+        );
+        events.push(event("vo-configured", true.into()));
+        assert_eq!(
+            screen_sets(&fullscreen_screen_requests(
+                &spec,
+                spec.player,
+                true,
+                &events
+            )),
+            [set_fullscreen_screen("DP-4")],
+            "the first successful configuration releases the cached current screen"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fullscreen_screen_follows_only_changes_to_the_first_display_name() {
+        let spec = fullscreen_screen_spec();
+        let events = [
+            event("vo-configured", true.into()),
+            event("display-names", serde_json::json!(["DP-3"])),
+            event("display-names", serde_json::json!(["DP-4", "DP-3"])),
+            event("display-names", serde_json::json!(["DP-4", "DP-3"])),
+            event("fullscreen", false.into()),
+            event("display-names", serde_json::json!(["DP-4", "DP-5"])),
+            event("display-names", serde_json::json!(["DP-5", "DP-4"])),
+            event("time-pos", 12.into()),
+            event("fullscreen", true.into()),
+            event("vo-configured", false.into()),
+            event("display-names", serde_json::json!(["DP-3"])),
+            event("vo-configured", true.into()),
+        ];
+        assert_eq!(
+            screen_sets(&fullscreen_screen_requests(
+                &spec,
+                spec.player,
+                true,
+                &events
+            )),
+            [
+                set_fullscreen_screen("DP-4"),
+                set_fullscreen_screen("DP-5"),
+                set_fullscreen_screen("DP-3")
+            ],
+            "follow the window after its first configuration, including while windowed"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fullscreen_screen_never_sends_an_unusable_display_name() {
+        let spec = fullscreen_screen_spec();
+        let mut events = vec![
+            event("vo-configured", true.into()),
+            event("display-names", serde_json::json!(["DP-4"])),
+        ];
+        for name in ["", "   ", "DP\n4", "DP\0-4", "DP\u{7f}", &"D".repeat(257)] {
+            events.push(event("display-names", serde_json::json!([name, "DP-5"])));
+        }
+        for data in [
+            serde_json::json!([]),
+            serde_json::json!([1]),
+            serde_json::json!(["DP-5", 1]),
+            serde_json::Value::Null,
+        ] {
+            events.push(event("display-names", data));
+        }
+        events.push(
+            serde_json::json!({"name": "display-names", "data": ["DP-5"], "error": "success"}),
+        );
+        events.push(event("display-names", serde_json::json!(["DP-4"])));
+        let quoted = "DP-\"quoted\\screen";
+        events.push(event("display-names", serde_json::json!([quoted])));
+        assert_eq!(
+            screen_sets(&fullscreen_screen_requests(
+                &spec,
+                spec.player,
+                true,
+                &events
+            )),
+            [set_fullscreen_screen("DP-4"), set_fullscreen_screen(quoted)],
+            "validate the first entry, never substitute another, and encode it as JSON"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fullscreen_screen_following_requires_a_linux_external_fullscreen_launch() {
+        use crate::player::PlayerKind;
+        for linux in [false, true] {
+            for fullscreen in [Some(false), None, Some(true)] {
+                for player in [PlayerKind::External, PlayerKind::Embedded] {
+                    for screen in [None, Some("DP-3")] {
+                        let mut spec = fullscreen_screen_spec();
+                        spec.inherited_window_state.fullscreen = fullscreen;
+                        spec.screen_name = screen.map(str::to_string);
+                        let requests = fullscreen_screen_requests(
+                            &spec,
+                            player,
+                            linux,
+                            &[
+                                event("fullscreen", true.into()),
+                                event("vo-configured", true.into()),
+                                event("display-names", serde_json::json!(["DP-4"])),
+                            ],
+                        );
+                        let enabled = linux
+                            && player == PlayerKind::External
+                            && fullscreen == Some(true)
+                            && screen.is_some();
+                        let expected = if enabled {
+                            vec![set_fullscreen_screen("DP-4")]
+                        } else {
+                            vec![]
+                        };
+                        assert_eq!(screen_sets(&requests), expected,
+                            "linux={linux}, player={player:?}, fullscreen={fullscreen:?}, screen={screen:?}");
+                    }
+                }
+            }
+        }
+    }
+
+    /// Reach the launch-to-reader wiring, including an embedded play that
+    /// actually starts externally. Neither a detached policy unit test nor
+    /// a reader fed a hand-built seed can prove that `play` supplies it.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn play_wires_fullscreen_screen_following_to_the_player_that_started() {
+        use crate::player::PlayerKind;
+        with_test_watchdog(
+            Duration::from_secs(20),
+            "fullscreen screen play wiring",
+            || {
+                for (requested, fallback) in [
+                    (PlayerKind::External, false),
+                    (PlayerKind::Embedded, true),
+                    (PlayerKind::Embedded, false),
+                ] {
+                    let (program, arguments) = stand_in_for_mpv("fullscreen-screen-wiring");
+                    let found = program.to_string_lossy().into_owned();
+                    let _mpv = mpv_is(move || Ok(found.clone()));
+                    let failing = FailingLauncher {
+                        asked: Arc::default(),
+                    };
+                    let bound = Arc::new(Mutex::new(None));
+                    let listening = ListeningLauncher {
+                        listener: bound.clone(),
+                    };
+                    let launcher: &dyn crate::player::EmbeddedLauncher =
+                        if fallback { &failing } else { &listening };
+                    let mut spec = fullscreen_screen_spec();
+                    spec.player = requested;
+                    let slot = Arc::new(Mutex::new(None));
+                    let started = play(
+                        &spec,
+                        ProgressTarget::None,
+                        Players {
+                            slot: &slot,
+                            shutting_down: &Arc::new(AtomicBool::new(false)),
+                            embedded: Some(launcher),
+                        },
+                        &Arc::new(crate::commands::PlaybackAdvance::default()),
+                        "fullscreen-screen-session".into(),
+                        None,
+                        None,
+                    )
+                    .unwrap();
+                    let (listener, path) = if let Some(bound) = bound.lock().unwrap().take() {
+                        bound
+                    } else {
+                        let deadline = Instant::now() + Duration::from_secs(5);
+                        while !arguments.exists() && Instant::now() < deadline {
+                            std::thread::sleep(Duration::from_millis(10));
+                        }
+                        let args = std::fs::read_to_string(&arguments).unwrap();
+                        let path = args
+                            .lines()
+                            .find_map(|arg| arg.strip_prefix("--input-ipc-server="))
+                            .unwrap()
+                            .to_string();
+                        (std::os::unix::net::UnixListener::bind(&path).unwrap(), path)
+                    };
+                    let events = [
+                        event("vo-configured", true.into()),
+                        event("display-names", serde_json::json!(["DP-4"])),
+                    ];
+                    // The EOF watcher and the position reader each connect.
+                    let mut requests = screen_requests_on(&listener, &events);
+                    requests.extend(screen_requests_on(&listener, &events));
+                    let finished =
+                        reader_finished(&spec.window_observation, Duration::from_secs(5));
+                    started.stop.store(true, Ordering::Relaxed);
+                    if let Some(mut player) = slot.lock().unwrap().take() {
+                        let _ = player.kill();
+                    }
+                    std::fs::remove_file(path).unwrap();
+                    std::fs::remove_dir_all(program.parent().unwrap()).unwrap();
+                    assert!(finished);
+                    let expected = if started.player == PlayerKind::External {
+                        vec![set_fullscreen_screen("DP-4")]
+                    } else {
+                        vec![]
+                    };
+                    assert_eq!(screen_sets(&requests), expected);
+                }
+            },
+        );
     }
 
     /// Drive the REAL reader over a real socket, feeding it `events` in order,

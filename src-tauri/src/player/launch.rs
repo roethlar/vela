@@ -605,6 +605,27 @@ fn screen_name_arg(name: Option<&str>, screens: &PlaybackScreens) -> Option<Laun
     }
 }
 
+/// Linux's window backends choose the initial fullscreen output separately
+/// from `screen-name`. macOS and Windows enter fullscreen on the window's
+/// screen, and an embedded play has no window of its own.
+pub(crate) fn initial_fullscreen_screen_name(
+    spec: &PlaySpec,
+    player: PlayerKind,
+    linux: bool,
+) -> Option<&str> {
+    if !linux
+        || player != PlayerKind::External
+        || !matches!(spec.screens, PlaybackScreens::Named)
+        || spec.inherited_window_state.fullscreen != Some(true)
+    {
+        return None;
+    }
+    spec.screen_name
+        .as_deref()
+        .filter(|name| crate::config::usable_screen_name(name))
+        .map(str::trim)
+}
+
 /// mpv launch args for the autocrop feature, given the config `mode`
 /// (`"off"|"manual"|"auto"`) and the resolved script paths (already existence-
 /// checked by the caller; `None` when unresolved/missing). Pure so the injection
@@ -965,6 +986,10 @@ pub(crate) fn build_launch_for(
             // Reassert after user options. On Wayland this is a placement request,
             // not a guarantee; the compositor's actual choice is observed over IPC.
             args.push(screen_arg);
+        }
+        if let Some(name) = initial_fullscreen_screen_name(spec, player, cfg!(target_os = "linux"))
+        {
+            args.push(LaunchArg::set("fs-screen-name", name));
         }
     }
 
@@ -1389,6 +1414,97 @@ mod tests {
                 ["--screen-name=other", &expected]
             );
             assert!(!args.iter().any(|arg| arg.starts_with("--screen=")));
+        }
+    }
+
+    #[test]
+    fn fullscreen_launch_reasserts_the_linux_screen_after_user_options() {
+        let cfg = crate::config::AppConfig {
+            mpv_extra_args: Some(
+                "--screen-name=other\n--fs-screen-name=other\n--fullscreen=no".to_string(),
+            ),
+            ..Default::default()
+        };
+        let spec = PlaySpec {
+            screen_name: Some("  DP-3  ".to_string()),
+            inherited_window_state: PlaybackWindowState {
+                fullscreen: Some(true),
+                ..Default::default()
+            },
+            ..plain_spec(PlayerKind::External, "https://media.invalid/video.mkv")
+        };
+        let args = cli(build_launch(&spec, &cfg, "screen-test.sock").unwrap().args);
+        let last_user_option = args
+            .iter()
+            .position(|arg| arg == "--fullscreen=no")
+            .unwrap();
+        for option in ["--screen-name=DP-3", "--fullscreen=yes"] {
+            assert!(args.iter().position(|arg| arg == option).unwrap() > last_user_option);
+        }
+        let fullscreen_screens: Vec<_> = args
+            .iter()
+            .filter(|arg| arg.starts_with("--fs-screen-name="))
+            .map(String::as_str)
+            .collect();
+        if cfg!(target_os = "linux") {
+            assert_eq!(
+                fullscreen_screens,
+                ["--fs-screen-name=other", "--fs-screen-name=DP-3"]
+            );
+            assert!(
+                args.iter()
+                    .position(|arg| arg == "--fs-screen-name=DP-3")
+                    .unwrap()
+                    > last_user_option
+            );
+        } else {
+            assert_eq!(fullscreen_screens, ["--fs-screen-name=other"]);
+        }
+        assert!(!args.iter().any(|arg| arg.starts_with("--screen=")));
+    }
+
+    #[test]
+    fn fullscreen_screen_override_requires_an_external_fullscreen_start_and_a_name() {
+        for fullscreen in [None, Some(false), Some(true)] {
+            let too_long = "D".repeat(257);
+            for name in [
+                None,
+                Some(""),
+                Some("  "),
+                Some("DP-3"),
+                Some("DP-3\n"),
+                Some(too_long.as_str()),
+            ] {
+                for player in [PlayerKind::External, PlayerKind::Embedded] {
+                    let spec = PlaySpec {
+                        screen_name: name.map(str::to_string),
+                        inherited_window_state: PlaybackWindowState {
+                            fullscreen,
+                            ..Default::default()
+                        },
+                        // Also exercise an embedded play falling back to external:
+                        // build_launch_for must follow the player actually started.
+                        ..plain_spec(PlayerKind::Embedded, "https://media.invalid/video.mkv")
+                    };
+                    let args = cli(build_launch_for(
+                        &spec,
+                        player,
+                        &Default::default(),
+                        "screen-test.sock",
+                    )
+                    .unwrap()
+                    .args);
+                    let expected = cfg!(target_os = "linux")
+                        && player == PlayerKind::External
+                        && fullscreen == Some(true)
+                        && name == Some("DP-3");
+                    assert_eq!(
+                        args.iter().any(|arg| arg.starts_with("--fs-screen-name=")),
+                        expected,
+                        "player={player:?}, fullscreen={fullscreen:?}, name={name:?}"
+                    );
+                }
+            }
         }
     }
 
