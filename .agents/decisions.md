@@ -2434,3 +2434,34 @@ How to apply:
 - Before proposing a tag, point the owner at the artifacts of a green run
   by hand of the commit to be tagged.
 - A release whose Windows installers are unsigned says so in its notes.
+
+## 2026-11-16 - The SvelteKit removal lands now, before the release; its end-to-end gates run on continuum
+
+Status: OWNER RULING (2026-11-16).
+
+Decision:
+The release workflow stopped at `npm audit` on advisories against
+SvelteKit (`.agents/state.md`, Blockers). The owner was given three ways
+out: SvelteKit 3; landing the removal approved on 2026-10-23
+(`.agents/plans/remove-sveltekit.md`), with its end-to-end gates run on
+`continuum` in place of the suspended Linux VM; or an exception for the
+advisories. The owner: "and land the sveltkit removal. I thought that was
+done. do it next."
+
+The removal lands before the release, which becomes Vela 1.0.66. The
+plan's gates that named the Linux VM (the end-to-end baseline, the font
+guard's red-proofs, the full suite at the branch head, the red-proof of a
+webview that loads and does not mount) run on `continuum`, the end-to-end
+venue since 2026-11-12. The plan's Review step is a `codereview` hunt by
+codex over the branch's net change against `main`. The plan's visual
+checks on the Mac are made by the owner on the macOS build of the release
+workflow, before any tag.
+
+Why:
+The gate fails closed by the owner's rule of 2026-11-02, the owner had
+already chosen removal over the SvelteKit 3 upgrade, and with SvelteKit
+gone its advisories cannot hold a release again.
+
+How to apply:
+- Do not upgrade SvelteKit and do not suppress its advisories.
+- The 2026-11-02 rule stands unchanged.

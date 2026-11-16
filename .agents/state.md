@@ -9,6 +9,10 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Now
 
+- THE RELEASE IS HELD AT `npm audit` WHILE THE SVELTEKIT REMOVAL LANDS (it
+  becomes Vela 1.0.66; Blockers, first entry, says where that stands).
+  What follows was written for 1.0.65 and holds for everything but the
+  front end's build:
 - VELA 1.0.65 IS READY TO BE RELEASED, AS FAR AS THE AGENT CAN TAKE IT
   (2026-11-16). It is NOT tagged and NOT published. The whole account,
   with what was verified and the owner's steps in order, is
@@ -356,9 +360,38 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   - Way 3, an exception by the owner for these four advisories, on the
     ground of no exposure. It needs the owner to change the rule of
     2026-11-02.
-  - Put to the owner on 2026-11-16 with the agent's recommendation (way
-    2). Until the owner rules, nothing can be built by the release
-    workflow.
+  - RULED by the owner on 2026-11-16: way 2. "and land the sveltkit
+    removal. I thought that was done. do it next." (`.agents/decisions.md`,
+    last entry.) IN PROGRESS, on the branch `remove-sveltekit` (local
+    only until it is merged; worktree `~/dev/vela-agent-keep/wt/rmkit-land`
+    on `continuum`):
+    - `334a8bf` merges `main` into the branch (ten conflicts, all
+      versions and records; `src/` merged by itself); `c8016b7` repoints
+      three of `main`'s newer tests at `src/App.svelte`; `a13be71` is
+      Vela 1.0.66 with the release notes. There: `npm audit` passes,
+      `npm run check` passes (676 tests), the build passes the branch's
+      own check, and every test file that reads the page fails when the
+      page is moved away.
+    - Running when this was written: both end-to-end suites in full at
+      `a13be71` (logs in `~/dev/vela-agent-keep/full-a13be71-e2e/`), the
+      full check, and the codex hunt the plan's Review step asks for
+      (the seventh of the day's round).
+    - Still to do, in order: the plan's three red-proofs that need this
+      venue (the font guard F1 and F2, and the webview that loads but
+      does not mount); read the hunt's verdict and repair what it finds;
+      merge the branch into `main` and push; the plan's Slice 4 records;
+      a package of 1.0.66 for `continuum`; the release workflow by hand
+      for the owner's macOS and Windows builds.
+    - The plan asked for its end-to-end gates on the Linux VM, which is
+      suspended; they run on `continuum`, which the owner was told when
+      the way was offered. The owner's look at the macOS build is the
+      plan's visual check on the Mac.
+  - One correction to what the owner was told that day: the agent said
+    "four advisories published today". Two of the four
+    (GHSA-pfhg-q3qv-9q6r, GHSA-27mw-82g8-phjj) are the ones the removal
+    plan was written against in October; what changed on 2026-11-16 is
+    that npm began to report them, and two new ones, against the version
+    Vela had been moved to.
 - E2E `completionhub` fails now and then in the embedded player. First seen
   2026-11-15: once in the full embedded run at `3505387` (which therefore
   failed the parity verdict: 48 of 50), then in 2 of 49 runs of the scenario
