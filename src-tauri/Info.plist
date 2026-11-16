@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Merged by Tauri into the macOS app's Info.plist. macOS asks the user
+     before an app talks to devices on the local network, and expects the app
+     to say why; Vela's media servers are usually on that network. -->
+<plist version="1.0">
+<dict>
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>Vela connects to the Plex, Jellyfin and Emby servers on your local network to browse and play your media.</string>
+</dict>
+</plist>

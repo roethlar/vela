@@ -113,3 +113,14 @@ test("every promised native artifact has an exact inventory guard", () => {
     assert.ok(workflow.includes(contract), `missing release contract: ${contract}`);
   }
 });
+
+test('the macOS app says why it reaches the local network, and the release checks the built app says it', async () => {
+  // macOS asks before an app talks to devices on the local network, where
+  // Vela's servers usually are, and expects the app's Info.plist to say why
+  // (NSLocalNetworkUsageDescription). Tauri merges src-tauri/Info.plist into
+  // the app's; the release workflow reads the key back from the built app.
+  const plist = await readFile(new URL('../src-tauri/Info.plist', import.meta.url), 'utf8');
+  assert.match(plist, /<key>NSLocalNetworkUsageDescription<\/key>\s*<string>[^<]*Plex[^<]*Jellyfin[^<]*Emby[^<]*local network[^<]*<\/string>/);
+  const release = await readFile(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8');
+  assert.match(release, /\/usr\/libexec\/PlistBuddy -c 'Print :NSLocalNetworkUsageDescription' "\$app\/Contents\/Info\.plist"/);
+});

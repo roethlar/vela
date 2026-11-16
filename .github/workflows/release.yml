@@ -299,6 +299,10 @@ jobs:
           xcrun stapler validate "$app"
           spctl --assess --type execute --verbose=4 "$app"
 
+          # src-tauri/Info.plist is merged into the app's: macOS asks before an
+          # app reaches the local network, where Vela's servers usually are.
+          /usr/libexec/PlistBuddy -c 'Print :NSLocalNetworkUsageDescription' "$app/Contents/Info.plist"
+
           codesign --verify --strict --verbose=2 "$dmg"
           codesign -dv --verbose=4 "$dmg" 2>&1 | grep 'Authority=Developer ID Application'
 
