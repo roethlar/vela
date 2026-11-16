@@ -81,6 +81,10 @@ Vela's own window on Linux with Wayland.
 
 ## Fixes
 
+- On KDE Plasma under Wayland, Vela's window has the desktop's own title bar,
+  with its usual height, buttons and Vela's icon, and KDE's window settings
+  (such as hiding the title bar) apply to it. It used to have a taller one,
+  drawn by Vela's toolkit, that KDE could not change.
 - Send a playback report again, once, when the connection it was sent on had
   already been closed by the server. The final report of a play could be lost
   this way, leaving the server showing the item as playing and without its

@@ -15,6 +15,8 @@ mod recents;
 mod selection;
 mod source;
 mod storage;
+#[cfg(any(target_os = "linux", test))]
+mod window_decorations;
 
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
@@ -296,6 +298,10 @@ pub fn run() {
     builder
         .setup(move |app| {
             use tauri::Manager;
+
+            // Finish the native window before handlers or playback can use it.
+            #[cfg(target_os = "linux")]
+            window_decorations::configure(app.handle());
 
             // Publish the app handle so playback threads can emit UI events
             // (`playback-ended`). Set-once; a second set can't happen (setup

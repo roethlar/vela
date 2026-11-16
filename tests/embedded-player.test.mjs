@@ -18,6 +18,7 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 const read = (file) => fs.readFileSync(path.join(repoRoot, file), 'utf8').replace(/\r\n/g, '\n');
 const main = read('src-tauri/src/main.rs');
 const lib = read('src-tauri/src/lib.rs');
+const decorations = read('src-tauri/src/window_decorations.rs');
 const commands = read('src-tauri/src/commands.rs');
 const startup = read('src-tauri/src/player/embedded/startup.rs');
 const host = read('src-tauri/src/player/embedded/host.rs');
@@ -54,6 +55,48 @@ function functionBody(source, signature, what) {
   assert.notEqual(end, -1, `${what} must have a closing brace`);
   return source.slice(start, end);
 }
+
+test('server decorations are chosen first in setup and only on Linux', () => {
+  assert.match(lib, /#\[cfg\(any\(target_os = "linux", test\)\)\]\nmod window_decorations;/);
+  // Before publishing the handle, installing fullscreen tracking, spawning
+  // playback work, or any future call that could show the window again.
+  assert.match(code(lib), /\.setup\(move \|app\| \{\s+use tauri::Manager;\s+#\[cfg\(target_os = "linux"\)\]\s+window_decorations::configure\(app.handle\(\)\);\s+let _ = app/);
+  assert.equal(count(code(lib), 'window_decorations::configure('), 1);
+  assert.match(decorations, /#\[cfg\(target_os = "linux"\)\]\nmod linux \{/);
+});
+
+test('server decorations require the main window and its Wayland SSD preference', () => {
+  const configure = methodBody(code(decorations), '    pub(crate) fn configure(', 'decoration setup');
+  assert.match(configure, /\.get_webview_window\("main"\)\s+\.and_then\(\|window\| window.gtk_window\(\).ok\(\)\)/);
+  assert.match(configure, /let display = window.as_ref\(\).map\(\|window\| window.display\(\)\);/);
+  assert.match(configure, /let wayland = display\s+\.as_ref\(\)\s+\.is_some_and\(\|display\| display.type_\(\).name\(\) == "GdkWaylandDisplay"\);/);
+  assert.match(configure, /\.filter\(\|_\| wayland\)\s+\.and_then\(display_prefers_ssd\);/);
+  assert.match(configure, /if !super::should_remove_titlebar\(\s+cfg!\(target_os = "linux"\),\s+wayland,\s+preference,\s+window.is_some\(\),\s+\) \{\s+return;\s+\}\s+if let Some\(window\) = window \{\s+remove_titlebar\(&window\);\s+\}$/);
+  assert.doesNotMatch(configure, /\.(hide|unrealize|set_titlebar|resize|show|realize)\(/);
+  const lookup = methodBody(code(decorations), '    fn display_prefers_ssd(', 'GDK preference lookup');
+  assert.match(lookup, /unsafe extern "C" fn\(\*mut gtk::gdk::ffi::GdkDisplay\) -> gtk::glib::ffi::gboolean/);
+  assert.match(lookup, /libc::dlsym\(\s*libc::RTLD_DEFAULT,\s*c"gdk_wayland_display_prefers_ssd".as_ptr\(\),?\s*\)/);
+  assert.match(lookup, /if address.is_null\(\) \{\s+return None;\s+\}/);
+  assert.match(lookup, /Some\(unsafe \{ prefers_ssd\(display.to_glib_none\(\).0\) != 0 \}\)/);
+});
+
+test('changing a GTK titlebar requires an unrealized window', () => {
+  const replace = methodBody(code(decorations), '    fn replace_titlebar(', 'titlebar replacement');
+  assert.match(replace, /if window.is_realized\(\) \{\s+window.hide\(\);\s+window.unrealize\(\);\s+\}\s+if window.is_realized\(\) \{\s+return false;\s+\}\s+window.set_titlebar\(titlebar\);/);
+  assert.equal(count(code(decorations), '.set_titlebar('), 1, 'the rollback uses the same guarded setter');
+});
+
+test('titlebar replacement preserves size and mapping and restores the original on failure', () => {
+  const remove = methodBody(code(decorations), '    fn remove_titlebar(', 'titlebar removal');
+  assert.match(remove, /let Some\(titlebar\) = window.titlebar\(\) else \{\s+return;\s+\};\s+let visible = window.is_visible\(\);\s+let realized = window.is_realized\(\);\s+let size = window.size\(\);/);
+  assert.match(remove, /if size.0 <= 0 \|\| size.1 <= 0 \{\s+return;\s+\}/);
+  assert.match(remove, /let removed = replace_titlebar\(window, None, size\);\s+let restored = restore_mapping\(window, visible, realized\);\s+if !removed \|\| !restored \{\s+let _ = replace_titlebar\(window, Some\(&titlebar\), size\);\s+let _ = restore_mapping\(window, visible, realized\);\s+\}$/);
+  const replace = methodBody(code(decorations), '    fn replace_titlebar(', 'titlebar replacement');
+  assert.match(replace, /window.set_titlebar\(titlebar\);\s+window.resize\(size.0, size.1\);\s+window.titlebar\(\).as_ref\(\) == titlebar$/);
+  const restore = methodBody(code(decorations), '    fn restore_mapping(', 'window mapping');
+  assert.match(restore, /if visible \{\s+window.show\(\);\s+\} else if realized \{\s+window.realize\(\);\s+\}\s+window.is_visible\(\) == visible\s+&& window.is_realized\(\) == realized\s+&& \(!realized \|\| window.window\(\).is_some\(\)\)$/);
+  assert.doesNotMatch(code(decorations), /\.(show_all|destroy|set_visual|set_app_paintable|set_title|set_geometry_hints|set_default_size|maximize|unmaximize|fullscreen|unfullscreen)\(/);
+});
 
 test("every start is today's unless embedded window mode was decided", () => {
   // The decision is the first thing main does, before anything can have
