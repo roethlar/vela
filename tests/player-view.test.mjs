@@ -83,6 +83,178 @@ function pictureHandlers() {
   `)(playerControls);
 }
 
+// Run the whole view script, including its dispatcher, state listener and
+// cleanup. Svelte rendering/effects and the DOM are inert; command promises
+// stay unanswered until the test releases them. No queue logic is copied here.
+function viewHandlers(initial = {}) {
+  const script = view.match(/<script lang="ts">([\s\S]*?)<\/script>/)[1]
+    .replace(/^\s*import[\s\S]*? from "[^"]+";/gm, '');
+  const names = Object.keys(playerControls).filter((name) => name !== 'sendPlayerCommand');
+  return new Function('controls', 'initial', `
+    const { ${names.join(', ')} } = controls;
+    const commands = [], replies = [], fullscreens = [];
+    let stops = 0, mount, stateListener;
+    const $state = (value) => value, $derived = (value) => value, $effect = () => {};
+    const $props = () => ({
+      sessionId: 'test', fullscreen: false,
+      onfullscreen: (on) => { fullscreen = on; fullscreens.push(on); },
+      onstop: () => { stops++; },
+    });
+    const onMount = (callback) => { mount = callback; };
+    const tick = () => Promise.resolve();
+    const invoke = () => Promise.resolve();
+    const listen = (name, callback) => { stateListener = callback; return Promise.resolve(() => {}); };
+    const sendPlayerCommand = (session, name, args) => {
+      if (session !== 'test') throw new Error('wrong play');
+      commands.push({ name, args });
+      return new Promise((resolve, reject) => replies.push({ resolve, reject }));
+    };
+    const document = { activeElement: null, documentElement: { classList: { add() {}, remove() {} } } };
+    const window = { addEventListener() {}, removeEventListener() {} };
+    class Element {
+      constructor(tagName = 'DIV', cls = '') {
+        this.tagName = tagName;
+        this.classList = { contains: (name) => name === cls };
+      }
+      contains(element) { return element === this; }
+      focus() { document.activeElement = this; }
+      closest() { return null; }
+      getBoundingClientRect() { return { left: 0, top: 0, width: 640, height: 480 }; }
+      addEventListener() {}
+      removeEventListener() {}
+    }
+    const Node = Element;
+    class ResizeObserver { observe() {} disconnect() {} }
+    ${stripTypeScriptTypes(script)}
+    root = new Element();
+    const cleanup = mount();
+    const state = (update) => stateListener({ payload: { sessionId, ...player, ...update } });
+    state({ position: 0, duration: 1000, paused: false, volume: 40,
+      audioTracks: [{ id: 1, selected: true }, { id: 2 }], subtitleTracks: [{ id: 3 }], ...initial });
+    const event = (button = 0, detail = 1, target = root) => ({
+      button, detail, target, currentTarget: root, preventDefault() {}, stopPropagation() {},
+    });
+    return {
+      commands, fullscreens, state, cleanup, event, send,
+      get notice() { return notice; }, get stops() { return stops; },
+      get list() { return openList; },
+      pointerdown: pointerActivity, click: pictureClick, dblclick: pictureDblClick,
+      contextmenu: pictureContextMenu, open: toggleTrackList, choose: chooseTrack,
+      wheel: (x, y) => onwheel({ ...event(), deltaX: x, deltaY: y, deltaMode: 0 }),
+      key: (key) => onkey({ ...event(), key, ctrlKey: false, altKey: false, metaKey: false, repeat: false }),
+      seek: (value) => seekChange({ currentTarget: { value: String(value) } }),
+      volume: (value) => volumeChange({ currentTarget: { value: String(value) } }),
+      async reply(error) {
+        const next = replies.shift();
+        if (!next) throw new Error('no unanswered command');
+        if (error === undefined) next.resolve(); else next.reject(error);
+        await new Promise(setImmediate);
+      },
+    };
+  `)(playerControls, initial);
+}
+
+test('right-click waits for a wheel reply and takes priority over queued wheels', async () => {
+  const h = viewHandlers();
+  h.wheel(0, -40);
+  h.wheel(0, -40);
+  h.wheel(0, -40);
+  h.contextmenu(h.event(2));
+  assert.deepEqual(h.commands, [{ name: 'set-volume', args: [42] }]);
+  await h.reply();
+  assert.deepEqual(h.commands[1], { name: 'toggle-pause', args: [] });
+  await h.reply();
+  assert.deepEqual(h.commands[2], { name: 'set-volume', args: [46] });
+  await h.reply();
+  assert.equal(h.commands.length, 3);
+});
+
+for (const [kind, id, name] of [
+  ['audio', 2, 'set-audio-track'], ['subtitles', 3, 'set-subtitle-track'], ['subtitles', 'no', 'set-subtitle-track'],
+]) {
+  test(`${kind} choice ${id} waits for a wheel reply`, async () => {
+    const h = viewHandlers();
+    h.wheel(40, 0);
+    h.open(kind);
+    h.choose(id);
+    assert.equal(h.list, null, 'choosing still dismisses the list immediately');
+    assert.deepEqual(h.commands, [{ name: 'seek-relative', args: [10] }]);
+    await h.reply();
+    assert.deepEqual(h.commands[1], { name, args: [id] });
+    await h.reply();
+    assert.equal(h.commands.length, 2);
+  });
+}
+
+test('keys, range releases and buttons share the dispatcher, including after a refusal', async () => {
+  const h = viewHandlers();
+  h.wheel(0, -40);
+  h.key('m');
+  h.seek(123);
+  h.volume(70);
+  h.open('audio');
+  h.key('Enter');
+  h.send({ name: 'toggle-autocrop', args: [] });
+  h.send({ name: 'skip-active-marker', args: [] });
+  h.key('ArrowRight');
+  h.send({ name: 'toggle-pause', args: [] });
+  const expected = [
+    { name: 'set-volume', args: [42] }, { name: 'toggle-pause', args: [] },
+    { name: 'toggle-mute', args: [] }, { name: 'seek-absolute', args: [123] },
+    { name: 'set-volume', args: [70] }, { name: 'set-audio-track', args: [1] },
+    { name: 'toggle-autocrop', args: [] }, { name: 'skip-active-marker', args: [] },
+    { name: 'seek-relative', args: [5] },
+  ];
+  for (let i = 1; i <= expected.length; i++) {
+    assert.deepEqual(h.commands, expected.slice(0, i), 'only a reply releases the next command');
+    await h.reply(i === 1 ? 'The player refused.' : undefined);
+    assert.equal(h.notice, i === 1 ? 'The player refused.' : '');
+  }
+  assert.deepEqual(h.commands, expected);
+});
+
+test('wheel coalescing preserves absolute seek order and the latest slider volume', async () => {
+  const h = viewHandlers();
+  h.wheel(0, -40);
+  h.wheel(40, 0);
+  h.seek(100);
+  h.wheel(40, 0);
+  h.wheel(40, 0);
+  h.wheel(0, -40);
+  h.volume(70);
+  h.wheel(0, -40);
+  const expected = [
+    { name: 'set-volume', args: [42] }, { name: 'seek-relative', args: [10] },
+    { name: 'seek-absolute', args: [100] }, { name: 'seek-relative', args: [20] },
+    { name: 'set-volume', args: [72] },
+  ];
+  for (let i = 1; i <= expected.length; i++) {
+    assert.deepEqual(h.commands, expected.slice(0, i));
+    await h.reply();
+  }
+  assert.deepEqual(h.commands, expected);
+});
+
+for (const end of ['stop', 'cleanup']) {
+  test(`${end} drops queued controls and prevents late replies from sending more`, async () => {
+    const h = viewHandlers();
+    h.wheel(40, 0);
+    h.open('subtitles');
+    h.choose('no');
+    h.contextmenu(h.event(2));
+    assert.equal(h.commands.length, 1);
+    if (end === 'stop') h.send({ name: 'stop', args: [] }); else h.cleanup();
+    const expected = [{ name: 'seek-relative', args: [10] }];
+    if (end === 'stop') expected.push({ name: 'stop', args: [] });
+    assert.deepEqual(h.commands, expected, 'stop bypasses the unanswered command');
+    await h.reply();
+    h.send({ name: 'toggle-mute', args: [] });
+    h.wheel(40, 0);
+    assert.deepEqual(h.commands, expected);
+    assert.equal(h.stops, end === 'stop' ? 1 : 0);
+  });
+}
+
 test('picture clicks without a primary press leave playback, fullscreen, and a running wait alone', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const picture = pictureHandlers();

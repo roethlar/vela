@@ -40,7 +40,7 @@
     takeMouseCommand,
     wheelCommands,
     type FocusKind,
-    type MouseCommand,
+    type QueuedPlayerCommand,
     type PlayerCommand,
     type PlayerState,
     type PlayerTrack,
@@ -100,7 +100,7 @@
   let clickTimer: ReturnType<typeof setTimeout> | undefined;
   let disposed = false;
   let commandsPending = 0;
-  let mousePending: readonly MouseCommand[] = [];
+  let mousePending: readonly QueuedPlayerCommand[] = [];
   let wheelAccumulator = WHEEL_IDLE;
   let wheelTarget: WheelTarget = "none";
   let seekPointer = $state<{ x: number; y: number; left: number; width: number } | null>(null);
@@ -142,7 +142,18 @@
       clearPictureClick();
       mousePending = [];
       onstop();
+    } else {
+      mousePending = command.name === "toggle-pause" ? queuePicturePause(mousePending)
+        : command.name === "set-volume" || command.name === "seek-relative"
+          ? mergeWheelCommand(mousePending, command) : [...mousePending, command];
+      flushMouse();
+      return;
     }
+    deliver(command);
+  }
+
+  // Only stop bypasses the dispatcher: the backend stops without its IPC gate.
+  function deliver(command: PlayerCommand) {
     commandsPending++;
     sendPlayerCommand(sessionId, command.name, command.args).then(
       () => {
@@ -162,7 +173,7 @@
       busy: commandsPending !== 0, stopped: stopped || disposed, hasState: player !== null,
     });
     mousePending = next.pending;
-    if (next.command) send(next.command);
+    if (next.command) deliver(next.command);
   }
 
   function activity() {

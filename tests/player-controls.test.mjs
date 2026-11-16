@@ -110,7 +110,7 @@ test('the player view calls invoke only to report where it is', () => {
   assert.equal(view.split('sendPlayerCommand(').length - 1, 1);
   assert.match(
     view,
-    /function send\(command: PlayerCommand\) \{\s+if \(stopped \|\| disposed\) return;\s+if \(command\.name === "stop"\) \{\s+stopped = true;\s+clearPictureClick\(\);\s+mousePending = \[\];\s+onstop\(\);\s+\}\s+commandsPending\+\+;\s+sendPlayerCommand\(sessionId, command\.name, command\.args\)/,
+    /function deliver\(command: PlayerCommand\) \{\s+commandsPending\+\+;\s+sendPlayerCommand\(sessionId, command\.name, command\.args\)/,
   );
 });
 

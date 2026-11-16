@@ -403,12 +403,13 @@ export const WHEEL_IDLE: WheelAccumulator = {
 export type WheelSteps = { x: number; y: number };
 export type WheelTarget = "picture" | "volume" | "seek" | "list" | "none";
 export type WheelCommand = Extract<PlayerCommand, { name: "set-volume" | "seek-relative" }>;
-export type MouseCommand = WheelCommand | Extract<PlayerCommand, { name: "toggle-pause" }>;
+/** Mouse, keyboard and controls share one queue; stop is always immediate. */
+export type QueuedPlayerCommand = Exclude<PlayerCommand, { name: "stop" }>;
 
 /** Picture pause and its reversal go before queued wheel input. Both wait
  * for the current command's answer, so a slow pair cannot be refused as busy.
  */
-export function queuePicturePause(pending: readonly MouseCommand[]): MouseCommand[] {
+export function queuePicturePause(pending: readonly QueuedPlayerCommand[]): QueuedPlayerCommand[] {
   return [{ name: "toggle-pause", args: [] }, ...pending];
 }
 
@@ -457,9 +458,13 @@ export function wheelCommands(
 
 /** While a command is unanswered, keep the latest absolute volume target
  * and the sum of relative seek seconds. Keep the two kinds in arrival order.
+ * Other commands separate bursts: a relative seek must not cross an absolute
+ * seek (nor overtake a track choice or another explicit control).
  */
-export function mergeWheelCommand(pending: readonly MouseCommand[], command: WheelCommand): MouseCommand[] {
-  const index = pending.findIndex((p) => p.name === command.name);
+export function mergeWheelCommand(pending: readonly QueuedPlayerCommand[], command: WheelCommand): QueuedPlayerCommand[] {
+  let start = pending.length;
+  while (start > 0 && (pending[start - 1].name === "set-volume" || pending[start - 1].name === "seek-relative")) start--;
+  const index = pending.findIndex((p, i) => i >= start && p.name === command.name);
   if (index < 0) return [...pending, command];
   const merged = [...pending];
   const previous = pending[index];
@@ -472,9 +477,9 @@ export function mergeWheelCommand(pending: readonly MouseCommand[], command: Whe
 
 /** Take at most one command, only once the previous answer has arrived. */
 export function takeMouseCommand(
-  pending: readonly MouseCommand[],
+  pending: readonly QueuedPlayerCommand[],
   ctx: { busy: boolean; stopped: boolean; hasState: boolean },
-): { pending: readonly MouseCommand[]; command: MouseCommand | null } {
+): { pending: readonly QueuedPlayerCommand[]; command: QueuedPlayerCommand | null } {
   if (ctx.stopped || !ctx.hasState) return { pending: [], command: null };
   if (ctx.busy || pending.length === 0) return { pending, command: null };
   return { pending: pending.slice(1), command: pending[0] };
