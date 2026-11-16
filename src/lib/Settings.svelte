@@ -922,7 +922,7 @@
 
     {#if videoPlayer.offered}
     <section>
-      <h3>Video player <span class="badge experimental">Experimental</span></h3>
+      <h3>Video player</h3>
       {@render saveError(videoPlayerDraft.feedback.error)}
       <div class="form">
         <div class="field">

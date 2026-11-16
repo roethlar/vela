@@ -546,3 +546,17 @@ for (const file of ['src/lib/Settings.svelte', 'docs/usage.md', 'RELEASE_NOTES.m
     assert.ok(/To use Vela's window, restart Vela if this run started without embedded playback\./.test(playerGuidance(file)), 'explain when embedded playback needs a restart');
   });
 }
+
+test('Settings marks the embedded player as experimental, not the Video player setting', () => {
+  // Owner, 2026-11-16: "the experimental feature was the embedded player,
+  // not the setting." The choice carries the word in its own label; the
+  // section's heading carries no badge.
+  const settings = read('src/lib/Settings.svelte');
+  const start = settings.indexOf('{#if videoPlayer.offered}');
+  assert.notEqual(start, -1, 'the Video player section exists');
+  const section = settings.slice(start, settings.indexOf('</section>', start));
+  assert.match(section, /<h3>Video player<\/h3>/);
+  assert.doesNotMatch(section, /badge/);
+  assert.match(section, /<option value="embedded">Vela's window \(experimental\)<\/option>/);
+  assert.match(section, /<option value="external">mpv's own window<\/option>/);
+});
