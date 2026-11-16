@@ -36,6 +36,8 @@ it); pl-4 is open.
 | pl-2 | MEDIUM   | Windows: own-config mode skips `<exe dir>/mpv.conf`, which mpv reads     | `[x]`  | this commit |
 | pl-3 | MEDIUM   | macOS: a conditional mpv.conf profile can undo the protected SDR targets | `[x]`  | the HDR slice's commit |
 | pl-4 | MEDIUM   | macOS: in a launch that honours DYLD_*, a set dependency can be redirected past the load check | `[ ]` | queued |
+| pl-5 | MEDIUM   | Linux: a numeric `--fs-screen`/`--screen` from the user outranks the remembered name | `[ ]` | queued |
+| pl-6 | MEDIUM   | Windows: an explicitly empty MPV_HOME is read as unset, so config files are read mpv would not read | `[ ]` | queued |
 
 ### pl-1 (whost)
 
@@ -105,3 +107,40 @@ hardened runtime, which ignores DYLD_* variables, so the exposure is a
 build without it (a development build). Open: the repair checks every
 image dyld loaded against the set's directory after the load (the
 reviewer's suggestion), queued with pl-3.
+
+## A third hunt: the fixes of `c49be2a` and `ca07bfa`
+
+Dispatched by the working agent as each slice's hunt is (the plan's rule),
+over `623ec17..ca07bfa` with the mandate limited to the two product commits
+in that range: the Linux fullscreen screen (`c49be2a`) and the Windows
+host's review repairs (`ca07bfa`). Same harness and reviewer as above.
+**findings**: two candidates, both admitted (MEDIUM), as pl-5 and pl-6.
+A fix task for pl-4, pl-5 and pl-6 is queued (codex).
+
+### pl-5 (fixes2)
+
+Reviewer, verbatim, evidence: "src-tauri/src/player/launch.rs:992-994
+appends fs-screen-name but preserves an Advanced option such as
+--fs-screen=0. A Rust probe confirmed both survive. In mpv 0.42, Wayland's
+find_output and X11's vo_x11_select_screen prioritize the numeric selector
+regardless of argument order." Predicted failure: "If the remembered
+screen is not screen 0, playback still opens fullscreen on screen 0. The
+reader's subsequent fs-screen-name updates cannot override that numeric
+selection either."
+
+Admitted; it holds for `--screen` against `--screen-name` too. Repair
+queued: beside each reasserted name, the numeric selector's neutral value
+(`--screen=default`, `--fs-screen=current`) after the user's options.
+
+### pl-6 (fixes2)
+
+Reviewer, verbatim, evidence: "src-tauri/src/player/embedded/options.rs:161
+treats empty MPV_HOME as unset, allowing line 169 to add <exe
+dir>/mpv.conf. mpv 0.42 preserves an empty environment value and disables
+config discovery through options/path.c." Predicted failure: "With
+own-config mode enabled, MPV_HOME empty, and only <exe dir>/mpv.conf
+present, this commit newly applies that file's settings or profiles
+although mpv would read no config."
+
+Admitted. Repair queued: unset, discovery; set and empty, no files; set
+and non-empty, that directory's mpv.conf only.
