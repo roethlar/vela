@@ -2330,6 +2330,21 @@ artifact keeps the probe's logs and screenshots.
   `vkCreateInstance` aborts (run 43943291022). Runs 43943295116,
   43944005401 likewise.
 
+- **2026-11-16, M1 drawing through the render API: answered, yes.**
+  `probes/m1-render`, runs 43953780548 (`macos-15-intel`) and 43953775946
+  (`macos-latest`, arm64). The same window and page as M0; under the
+  WKWebView, a view whose layer is a CAOpenGLLayer subclass modelled on
+  mpv's own `video/out/mac/gl_layer.swift` (asynchronous; it draws when
+  `mpv_render_context_update` has a frame, into the layer's bound
+  framebuffer, `FLIP_Y`), and mpv with `vo=libmpv` drawing through
+  `mpv_render_context_render`. On both runners the pictures are right:
+  video through the transparent middle, darkened under the band with the
+  text readable, hidden by the opaque bar; 26 and 45 frames rendered,
+  clean teardown (render context freed with its CGL context current,
+  before mpv). Both virtual GPUs refused an accelerated OpenGL 3.2 pixel
+  format, so the runs used Apple's software renderer; a real Mac's GPU
+  gives the accelerated one.
+
 ### Design that follows (2026-11-16)
 
 - **Windows: mpv's own window inside Vela's.** Vela's main window is
@@ -2356,3 +2371,9 @@ artifact keeps the probe's logs and screenshots.
 - **Order.** Windows set (building) → Windows host → macOS probe M1 →
   macOS set → macOS host → packaging and Settings on both → the owner's
   checks, listed once with what each platform has and lacks.
+- **Landed (2026-11-16).** The Windows set from the pins, cross-built in
+  a container and checked in CI (`3dad7a8`, `8c40ff8`); the Windows host
+  (`6b206ec`: startup, library loading, the play, the page's controls and
+  reports over mpv's named pipe, Settings). Probe M1 answered (above).
+  In progress: the macOS set; next, the macOS host, then packaging of
+  both sets into the Windows and macOS bundles.
