@@ -494,6 +494,14 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   - Until then: an embedded run that fails the verdict on `completionhub`
     alone is this race until shown otherwise; run the scenario again by
     itself before reading it as a regression.
+- An observation not yet looked into (reported by a helper during the
+  `pa-7` repair work on 2026-11-14; NOT verified by the working agent, and
+  left out of the record until 2026-11-16): when an embedded play is closed
+  by the user, the final position reported to Plex was about 165 ms before
+  the position the play was being held at, after a "playing" report at the
+  held position. If true, the saved resume point is a fraction of a second
+  early; nothing is lost. Check it in both players before treating it as
+  the embedded player's alone.
 - CI does not exercise the package check (2026-11-14, the owner has not
   been asked yet). `tests/libmpv-packaging.test.mjs` needs `bsdtar` to
   build and unpack its stand-in packages; GitHub's runner image does not
