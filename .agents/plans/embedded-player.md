@@ -2362,12 +2362,22 @@ artifact keeps the probe's logs and screenshots.
   it into an OpenGL layer (CAOpenGLLayer, as mpv's own `gl_layer.swift`)
   in a view under the WKWebView, in a window made transparent
   (`macOSPrivateApi`). Whether the page draws over that layer on a hosted
-  runner is probe M1 (next). HDR/EDR: mpv's OpenGL path does not set up
-  EDR itself; whether Vela can get it (a float OpenGL surface with extended
-  dynamic range, mpv told the target) is M0(c), to be measured on the
-  owner's Mac. Until it is, the embedded player on macOS shows HDR video
-  tone-mapped to SDR, and the owner is told so before testing; the
-  external player keeps mpv's own HDR path on macOS.
+  runner is probe M1 (answered yes, above). HDR/EDR: mpv's OpenGL path
+  does not set up EDR itself, but the layer can, as IINA does on macOS
+  with the same render API (read 2026-11-16 from IINA's
+  `iina/ViewLayer.swift` and `iina/VideoView.swift`; IINA is GPL, so only
+  the technique is taken, never code): a CAOpenGLLayer with a 16-bit
+  float pixel format (`kCGLPFAColorSize` 64, `kCGLPFAColorFloat`,
+  contents `RGBA16Float`, `MPV_RENDER_PARAM_DEPTH` 16); for an HDR video
+  (transfer PQ or HLG, primaries BT.2020 or Display P3) on a screen whose
+  `maximumPotentialExtendedDynamicRangeColorComponentValue` is above 1.0,
+  the layer's `wantsExtendedDynamicRangeContent` on and its colour space
+  `itur_2100_PQ` (or `displayP3_PQ`), and mpv told `target-trc=pq`, the
+  video's primaries as `target-prim`, the display's peak as
+  `target-peak`, no ICC profile; for SDR all of it back. That is the
+  slice after the macOS host (its first version plays standard range);
+  it is measured on the owner's Mac, since hosted runners have no HDR
+  display. The external player keeps mpv's own HDR path on macOS.
 - **Order.** Windows set (building) → Windows host → macOS probe M1 →
   macOS set → macOS host → packaging and Settings on both → the owner's
   checks, listed once with what each platform has and lacks.

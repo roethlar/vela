@@ -29,9 +29,10 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     2026-11-16 ("Probe log", "Design that follows", "Landed"). Windows:
     mpv's own window inside Vela's; the set from the pins (`3dad7a8`,
     `8c40ff8`) and the host (`6b206ec`) have landed. macOS: the render API
-    (OpenGL) into a layer under the page, proven by probe M1; HDR is not
-    available there (no EDR on that path; to be measured on the owner's
-    Mac), and the owner is told before testing.
+    (OpenGL) into a layer under the page, proven by probe M1; HDR through
+    the layer's extended dynamic range, as IINA does with the same API, is
+    the slice after the macOS host (technique in the plan's "Design that
+    follows"; measured on the owner's Mac).
   - In progress (codex, one worktree each under
     `~/dev/vela-agent-keep/wt/cx-<tag>`): the macOS set (`maclib`), the
     macOS host (`mhost`), the Windows set in the Windows installers
