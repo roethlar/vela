@@ -566,6 +566,40 @@ fn wayland_session() -> bool {
         || std::env::var_os("WAYLAND_DISPLAY").is_none())
 }
 
+/// The native values tao 0.35.3 uses to describe a macOS monitor. Keep the
+/// matching independent of AppKit so it is tested on every platform.
+#[cfg(any(target_os = "macos", test))]
+#[derive(Debug, Clone, Copy)]
+struct MacScreenDescriptor {
+    display_id: u32,
+    model_number: u32,
+    /// CGDisplayBounds origin, in points (not NSScreen's flipped frame).
+    bounds_origin: (f64, f64),
+    /// CGDisplayPixelsWide/High, which tao treats as logical dimensions.
+    pixels: (usize, usize),
+    scale_factor: f64,
+}
+
+/// Match exactly what tao reports: the model-derived name and the position
+/// and size multiplied by the backing scale, rounded to the nearest integer
+/// with ties away from zero (dpi 0.1.2's PhysicalPosition/Size::from_logical).
+/// Neither a model name alone nor two identical descriptors identify a screen.
+#[cfg(any(target_os = "macos", test))]
+fn mac_monitor_display_id(
+    monitor: &MonitorDescriptor,
+    screens: &[MacScreenDescriptor],
+) -> Option<u32> {
+    let mut matching = screens.iter().filter(|screen| {
+        monitor.name.as_deref() == Some(format!("Monitor #{}", screen.model_number).as_str())
+            && monitor.position_x == (screen.bounds_origin.0 * screen.scale_factor).round() as i32
+            && monitor.position_y == (screen.bounds_origin.1 * screen.scale_factor).round() as i32
+            && monitor.width_px == (screen.pixels.0 as f64 * screen.scale_factor).round() as u32
+            && monitor.height_px == (screen.pixels.1 as f64 * screen.scale_factor).round() as u32
+    });
+    let first = matching.next()?;
+    matching.next().is_none().then_some(first.display_id)
+}
+
 #[cfg(target_os = "macos")]
 fn mac_display_id(screen: &objc2_app_kit::NSScreen) -> Option<u32> {
     use objc2::msg_send;
@@ -591,30 +625,35 @@ fn mac_mpv_screen_name(screen: &objc2_app_kit::NSScreen) -> Option<String> {
 }
 
 #[cfg(target_os = "macos")]
-fn mac_screen_matches(
-    screen: &objc2_app_kit::NSScreen,
-    target_name: Option<&str>,
-    width_px: u32,
-    height_px: u32,
-    target_position: Option<(i32, i32)>,
-) -> bool {
-    use objc2_core_graphics::{CGDisplayBounds, CGDisplayPixelsHigh, CGDisplayPixelsWide};
-    let Some(display_id) = mac_display_id(screen) else {
-        return false;
+fn mac_screen_descriptor(screen: &objc2_app_kit::NSScreen) -> Option<MacScreenDescriptor> {
+    use objc2_core_graphics::{
+        CGDisplayBounds, CGDisplayModelNumber, CGDisplayPixelsHigh, CGDisplayPixelsWide,
     };
-    if target_name.is_some_and(|name| {
-        screen.localizedName().to_string() == name
-            || mac_mpv_screen_name(screen).as_deref() == Some(name)
-    }) {
-        return true;
-    }
+    let display_id = mac_display_id(screen)?;
     let bounds = CGDisplayBounds(display_id);
-    target_position.is_some_and(|(x, y)| {
-        bounds.origin.x.round() as i32 == x
-            && bounds.origin.y.round() as i32 == y
-            && CGDisplayPixelsWide(display_id) as u32 == width_px
-            && CGDisplayPixelsHigh(display_id) as u32 == height_px
+    Some(MacScreenDescriptor {
+        display_id,
+        model_number: CGDisplayModelNumber(display_id),
+        bounds_origin: (bounds.origin.x, bounds.origin.y),
+        pixels: (CGDisplayPixelsWide(display_id), CGDisplayPixelsHigh(display_id)),
+        scale_factor: screen.backingScaleFactor(),
     })
+}
+
+/// Called only with the NSScreens gathered on the main thread.
+#[cfg(target_os = "macos")]
+fn mac_screen_for_monitor(
+    screens: &objc2_foundation::NSArray<objc2_app_kit::NSScreen>,
+    monitor: &MonitorDescriptor,
+) -> Option<objc2::rc::Retained<objc2_app_kit::NSScreen>> {
+    let described: Vec<_> = screens
+        .iter()
+        .filter_map(|screen| mac_screen_descriptor(&screen))
+        .collect();
+    let display_id = mac_monitor_display_id(monitor, &described)?;
+    screens
+        .iter()
+        .find(|screen| mac_display_id(screen) == Some(display_id))
 }
 
 #[cfg(target_os = "macos")]
@@ -622,24 +661,13 @@ async fn platform_screen_name(
     app: &tauri::AppHandle,
     monitor: MonitorDescriptor,
 ) -> Option<String> {
-    use objc2::{MainThreadMarker, Message};
+    use objc2::MainThreadMarker;
     use objc2_app_kit::NSScreen;
 
     let (send, receive) = tokio::sync::oneshot::channel();
     app.run_on_main_thread(move || {
         let name = MainThreadMarker::new().and_then(|mtm| {
-            NSScreen::screens(mtm)
-                .iter()
-                .find(|screen| {
-                    mac_screen_matches(
-                        screen,
-                        monitor.name.as_deref(),
-                        monitor.width_px,
-                        monitor.height_px,
-                        Some((monitor.position_x, monitor.position_y)),
-                    )
-                })
-                .map(|screen| screen.retain())
+            mac_screen_for_monitor(&NSScreen::screens(mtm), &monitor)
                 .and_then(|screen| mac_mpv_screen_name(&screen))
         });
         let _ = send.send(name);
@@ -705,11 +733,11 @@ pub(crate) async fn detect_profile(
 async fn native_hdr_state(
     app: &tauri::AppHandle,
     target_name: Option<String>,
-    _width_px: u32,
-    _height_px: u32,
+    width_px: u32,
+    height_px: u32,
     target_position: Option<(i32, i32)>,
 ) -> HdrState {
-    use objc2::{msg_send, sel, MainThreadMarker, Message};
+    use objc2::{msg_send, sel, MainThreadMarker};
     use objc2_app_kit::NSScreen;
 
     let (send, receive) = tokio::sync::oneshot::channel();
@@ -718,26 +746,42 @@ async fn native_hdr_state(
             let result = MainThreadMarker::new()
                 .and_then(|mtm| {
                     let screens = NSScreen::screens(mtm);
-                    let exact = screens.iter().find(|screen| {
-                        mac_screen_matches(
-                            screen,
-                            target_name.as_deref(),
-                            _width_px,
-                            _height_px,
-                            target_position,
-                        )
-                    });
-                    let sized = screens.iter().find(|screen| {
-                        use objc2_core_graphics::{CGDisplayPixelsHigh, CGDisplayPixelsWide};
-                        mac_display_id(screen).is_some_and(|display_id| {
-                            CGDisplayPixelsWide(display_id) as u32 == _width_px
-                                && CGDisplayPixelsHigh(display_id) as u32 == _height_px
+                    let screen = if target_name.as_deref().is_some_and(|name| {
+                        name.strip_prefix("Monitor #")
+                            .is_some_and(|model| model.parse::<u32>().is_ok())
+                    }) {
+                        // A tao monitor must match uniquely. Falling back by
+                        // size or to the main screen would undo that guarantee.
+                        target_position.and_then(|(position_x, position_y)| {
+                            mac_screen_for_monitor(
+                                &screens,
+                                &MonitorDescriptor {
+                                    name: target_name.clone(),
+                                    width_px,
+                                    height_px,
+                                    position_x,
+                                    position_y,
+                                },
+                            )
                         })
-                    });
-                    let screen = exact
-                        .or(sized)
-                        .map(|screen| screen.retain())
-                        .or_else(|| NSScreen::mainScreen(mtm));
+                    } else {
+                        // Observations and decided outputs carry mpv's name,
+                        // not tao's. Preserve their existing lookup and fallback.
+                        let exact = screens.iter().find(|screen| {
+                            target_name.as_deref().is_some_and(|name| {
+                                screen.localizedName().to_string() == name
+                                    || mac_mpv_screen_name(screen).as_deref() == Some(name)
+                            })
+                        });
+                        let sized = screens.iter().find(|screen| {
+                            use objc2_core_graphics::{CGDisplayPixelsHigh, CGDisplayPixelsWide};
+                            mac_display_id(screen).is_some_and(|display_id| {
+                                CGDisplayPixelsWide(display_id) as u32 == width_px
+                                    && CGDisplayPixelsHigh(display_id) as u32 == height_px
+                            })
+                        });
+                        exact.or(sized).or_else(|| NSScreen::mainScreen(mtm))
+                    };
                     screen.map(|screen| {
                         let has_edr_api: bool = unsafe {
                             msg_send![&*screen, respondsToSelector: sel!(maximumExtendedDynamicRangeColorComponentValue)]
@@ -1732,6 +1776,186 @@ mod tests {
         );
         // What was seen never tells what is connected: every name stands.
         assert!(mac.is_connected("DP-9") && wayland.is_connected("DP-9"));
+    }
+
+    fn mac_test_screen() -> MacScreenDescriptor {
+        MacScreenDescriptor {
+            display_id: 7,
+            model_number: 123,
+            bounds_origin: (80.0, 40.0),
+            pixels: (1920, 1080),
+            scale_factor: 1.0,
+        }
+    }
+
+    fn mac_test_monitor() -> MonitorDescriptor {
+        MonitorDescriptor {
+            name: Some("Monitor #123".to_string()),
+            width_px: 1920,
+            height_px: 1080,
+            position_x: 80,
+            position_y: 40,
+        }
+    }
+
+    #[test]
+    fn mac_monitor_scale_one_uses_model_number_not_display_id() {
+        let screen = mac_test_screen();
+        let monitor = mac_test_monitor();
+        assert_eq!(mac_monitor_display_id(&monitor, &[screen]), Some(7));
+        let id_as_name = MonitorDescriptor {
+            name: Some("Monitor #7".to_string()),
+            ..monitor
+        };
+        assert_eq!(mac_monitor_display_id(&id_as_name, &[screen]), None);
+    }
+
+    #[test]
+    fn mac_monitor_scale_two_scales_position_and_size() {
+        let screen = MacScreenDescriptor {
+            scale_factor: 2.0,
+            ..mac_test_screen()
+        };
+        let monitor = MonitorDescriptor {
+            width_px: 3840,
+            height_px: 2160,
+            position_x: 160,
+            position_y: 80,
+            ..mac_test_monitor()
+        };
+        assert_eq!(mac_monitor_display_id(&monitor, &[screen]), Some(7));
+        assert_eq!(mac_monitor_display_id(&mac_test_monitor(), &[screen]), None);
+    }
+
+    #[test]
+    fn mac_monitor_fractional_scale_rounds_after_multiplication() {
+        let screen = MacScreenDescriptor {
+            bounds_origin: (801.6, 1.0),
+            pixels: (1001, 701),
+            scale_factor: 1.5,
+            ..mac_test_screen()
+        };
+        // 801.6 * 1.5 = 1202.4; rounding the origin first would give 1203.
+        // The other three products end in .5, which tao rounds away from 0.
+        let monitor = MonitorDescriptor {
+            width_px: 1502,
+            height_px: 1052,
+            position_x: 1202,
+            position_y: 2,
+            ..mac_test_monitor()
+        };
+        assert_eq!(mac_monitor_display_id(&monitor, &[screen]), Some(7));
+    }
+
+    #[test]
+    fn mac_monitor_same_model_uses_position() {
+        let first = MacScreenDescriptor {
+            bounds_origin: (0.0, 0.0),
+            scale_factor: 2.0,
+            ..mac_test_screen()
+        };
+        // Two screens of one model, side by side or one above the other.
+        for (origin, position) in [((1920.0, 0.0), (3840, 0)), ((0.0, 1080.0), (0, 2160))] {
+            let second = MacScreenDescriptor {
+                display_id: 8,
+                bounds_origin: origin,
+                ..first
+            };
+            let monitor = MonitorDescriptor {
+                width_px: 3840,
+                height_px: 2160,
+                position_x: position.0,
+                position_y: position.1,
+                ..mac_test_monitor()
+            };
+            for screens in [[first, second], [second, first]] {
+                assert_eq!(mac_monitor_display_id(&monitor, &screens), Some(8));
+                let on_first = MonitorDescriptor {
+                    position_x: 0,
+                    position_y: 0,
+                    ..monitor.clone()
+                };
+                assert_eq!(mac_monitor_display_id(&on_first, &screens), Some(7));
+            }
+        }
+    }
+
+    #[test]
+    fn mac_monitor_size_distinguishes_overlapping_screens() {
+        let first = mac_test_screen();
+        for (pixels, size) in [((2560, 1080), (2560, 1080)), ((1920, 1440), (1920, 1440))] {
+            let second = MacScreenDescriptor {
+                display_id: 8,
+                pixels,
+                ..first
+            };
+            let monitor = MonitorDescriptor {
+                width_px: size.0,
+                height_px: size.1,
+                ..mac_test_monitor()
+            };
+            for screens in [[first, second], [second, first]] {
+                assert_eq!(mac_monitor_display_id(&monitor, &screens), Some(8));
+            }
+        }
+    }
+
+    #[test]
+    fn mac_monitor_left_of_main_keeps_negative_coordinates() {
+        let left = MacScreenDescriptor {
+            bounds_origin: (-1601.0, -1.0),
+            pixels: (1601, 901),
+            scale_factor: 1.5,
+            ..mac_test_screen()
+        };
+        let main = MacScreenDescriptor {
+            display_id: 8,
+            bounds_origin: (0.0, 0.0),
+            ..left
+        };
+        // Both negative half values round away from zero, just like dpi.
+        let monitor = MonitorDescriptor {
+            width_px: 2402,
+            height_px: 1352,
+            position_x: -2402,
+            position_y: -2,
+            ..mac_test_monitor()
+        };
+        assert_eq!(mac_monitor_display_id(&monitor, &[main, left]), Some(7));
+    }
+
+    #[test]
+    fn mac_monitor_with_no_exact_match_returns_none() {
+        let screen = mac_test_screen();
+        let monitor = mac_test_monitor();
+        assert_eq!(mac_monitor_display_id(&monitor, &[]), None);
+        for name in [None, Some("Monitor #999"), Some("Studio Display"), Some("Studio Display (7)")] {
+            let target = MonitorDescriptor {
+                name: name.map(str::to_string),
+                ..monitor.clone()
+            };
+            assert_eq!(mac_monitor_display_id(&target, &[screen]), None, "name: {name:?}");
+        }
+        for target in [
+            MonitorDescriptor { position_x: 81, ..monitor.clone() },
+            MonitorDescriptor { position_y: 41, ..monitor.clone() },
+            MonitorDescriptor { width_px: 1921, ..monitor.clone() },
+            MonitorDescriptor { height_px: 1081, ..monitor.clone() },
+        ] {
+            assert_eq!(mac_monitor_display_id(&target, &[screen]), None, "{target:?}");
+        }
+    }
+
+    #[test]
+    fn mac_monitor_with_identical_candidates_is_ambiguous() {
+        let first = mac_test_screen();
+        let second = MacScreenDescriptor {
+            display_id: 8,
+            ..first
+        };
+        for screens in [[first, second], [second, first]] {
+            assert_eq!(mac_monitor_display_id(&mac_test_monitor(), &screens), None);
+        }
     }
 
     #[cfg(target_os = "macos")]
