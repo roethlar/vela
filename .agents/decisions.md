@@ -2516,3 +2516,52 @@ gone its advisories cannot hold a release again.
 How to apply:
 - Do not upgrade SvelteKit and do not suppress its advisories.
 - The 2026-11-02 rule stands unchanged.
+
+## 2026-11-16 - Vela works the same on every platform; a feature missing on one is a defect
+
+Status: OWNER RULING (2026-11-16).
+
+Decision:
+Checking the 1.0.67 builds, the owner found no embedded player on macOS,
+and the agent answered that this was "by design" (the embedded player's
+plan said "Linux on Wayland first"). The owner, verbatim apart from the
+expletives: "I did not intentionally approve variations in how the app
+works on different platforms. don't put me through the [...] process of
+testing a new feature on a different OS just to notice it's not there then
+come back to tell you and for you to [...] tell me that's by [...] design.
+NO IT [...] IS NOT."
+
+- Vela's features work the same on Linux, macOS and Windows. A feature
+  that exists on one platform and not on another is a defect to be fixed,
+  not a design, unless the owner has approved that difference explicitly,
+  for that feature, in words that say so. A plan's order of work ("Linux
+  first") is not such an approval.
+- The embedded player is to work on macOS and Windows as it does on Linux
+  (`.agents/plans/embedded-player.md`, amendment of this date).
+- Before the owner is asked to check anything on a platform, the agent
+  says plainly what that platform has and does not have, so that nothing
+  is found missing by surprise. "By design" is never the answer to a
+  feature the owner finds missing.
+
+User-visible platform differences known on 2026-11-16 (each is now a
+defect to fix, or, for the last two, the owner's own choice):
+- The embedded player (Settings, Player, Video player): Linux under
+  Wayland only; absent on macOS and Windows.
+- The player window's remembered screen: on macOS the names tao gives
+  screens ("Monitor #123") do not translate to mpv's, so a play cannot
+  reopen on the screen it was left on (review finding `pw-1`); on Windows
+  the names are assumed to match and were never checked.
+- macOS 27: in August Vela could not reach a server on the local network
+  (`.agents/state.md`, the entry of 2026-08-20; the app declares no
+  `NSLocalNetworkUsageDescription`); never fixed, and not seen since.
+- The Windows installers are unsigned and the macOS app is signed: the
+  owner's choice (the entry before this one).
+- How mpv is installed from Settings differs by platform (a download on
+  Windows, Homebrew on macOS, the package manager on Linux): the same
+  function by each platform's means.
+
+How to apply:
+- Treat any per-platform `cfg` that changes what a user can do as a
+  defect unless an approval of that difference is recorded here.
+- When work has to reach the platforms one at a time, say so to the owner
+  before the owner tests, and name what is missing where.

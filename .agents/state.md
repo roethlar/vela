@@ -9,6 +9,17 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Now
 
+- PLATFORM PARITY, OWNER RULING 2026-11-16 (`.agents/decisions.md`, last
+  entry; read it first). Vela works the same on Linux, macOS and Windows;
+  a feature missing on one platform is a defect, and "by design" is never
+  the answer. Known differences to fix, listed in that entry: the embedded
+  player (Linux under Wayland only; its plan's amendment of that date has
+  the macOS and Windows slices, probes first, NOT STARTED); the player
+  window's remembered screen on macOS; the macOS 27 local-network failure
+  of August. Before asking the owner to check anything on a platform, say
+  what that platform has and lacks. The agent recommended holding the
+  v1.0.67 tag until the embedded player works on macOS and Windows; the
+  tag is the owner's.
 - VELA 1.0.66 IS READY TO BE RELEASED, AS FAR AS THE AGENT CAN TAKE IT
   (2026-11-16). It is NOT tagged and NOT published; the owner verifies the
   macOS and Windows builds first. The whole account, with what was

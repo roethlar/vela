@@ -2248,3 +2248,42 @@ passed, and its own binary passed `playback`, `multiplex`,
 **Still the owner's**, unchanged: every item of "Owner checks outstanding"
 and the unruled assumptions of "For the owner" (the cropping script
 against the rule of 2026-07-05; cropping HDR video).
+
+## Amendment, 2026-11-16: macOS and Windows (owner ruling; not started)
+
+The owner ruled that Vela works the same on every platform and that a
+feature missing on one platform is a defect (`.agents/decisions.md`,
+2026-11-16, "Vela works the same on every platform"). This plan's "Linux on
+Wayland first" was an order of work; the embedded player is not done until
+it works on macOS and Windows too, with the same choice in Settings, the
+same view, keys and mouse, and the library shipped inside each package.
+
+As on Linux, the work starts with probes (throwaway code outside the repo,
+results logged here), because what decides the design is not known yet:
+
+- **W0, Windows x64.** (a) The pinned set built for Windows (mpv, FFmpeg
+  and the rest, LGPL, as separate DLLs; cross-compiled in a container from
+  the same pins, or built on a Windows runner) loads and plays from a test
+  program. (b) Drawing: mpv into a child window of Tauri's window (`wid`)
+  or through the render API into a surface of Vela's own, placed under or
+  over the WebView2 page; whether the page can draw its controls over the
+  video, and how pointer and keys reach the page. (c) HDR10 output from that
+  window. (d) Testing: `tauri-driver` works on Windows with Edge's
+  WebDriver, so the end-to-end suite may run there.
+- **M0, macOS universal.** (a) The set built for arm64 and x86_64 on a
+  macOS runner, signed and notarized inside `Vela.app`. (b) Drawing: mpv's
+  render API (OpenGL) into a layer or view under the WKWebView with a
+  transparent page, or mpv's own view embedded by `wid`; pointer and keys.
+  (c) EDR/HDR when embedded: mpv's own window gets it through gpu-next on
+  Vulkan (MoltenVK), which the render API does not offer; what can be had
+  embedded is to be measured, not assumed. (d) Testing: there is no
+  WebDriver for Tauri on macOS; checks there are by script and by eye.
+- **After the probes**: the library builds and checks in CI and in the
+  release workflow for both; the host (window embedding) for each; the
+  Settings choice offered wherever the library is present; packaging; the
+  parity rows of this plan proved on each platform where a test can run.
+
+Machines: the owner's Mac (reachable over SSH; its console may be locked,
+`.agents/machines.md`) and the Windows host `netwatch-01`. What only eyes
+can judge is listed for the owner once, at the end, with what to expect on
+each platform.
