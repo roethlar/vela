@@ -1,4 +1,4 @@
-# Vela 1.0.66
+# Vela 1.0.67
 
 This release opens each video's mpv window the way you left the last one,
 checks the certificate of HTTPS media servers when playing, saves Settings as
@@ -159,4 +159,4 @@ The macOS and Windows packages do not carry it.
 Full setup and privacy details are in the
 [README](https://github.com/roethlar/vela#readme).
 
-[Changes since 1.0.60](https://github.com/roethlar/vela/compare/v1.0.60...v1.0.66)
+[Changes since 1.0.60](https://github.com/roethlar/vela/compare/v1.0.60...v1.0.67)
