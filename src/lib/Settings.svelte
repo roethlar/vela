@@ -34,13 +34,11 @@
     qualityTiers: QualityTier[];
   };
 
-  const playerTls = $state({ loaded: false });
-
   // Each backend setting has one confirmation and one write queue for the
   // app's lifetime (pw-7). A reply must arrive before the next write starts;
   // otherwise reply order need not be the order the backend stored them.
   function createSetting<T>(initial: T) {
-    const confirmed = { saves: 0, known: false, value: initial };
+    const confirmed = $state({ saves: 0, known: false, value: initial });
     const status = $state({ pending: 0, saved: false });
     const feedback = $state({ error: null as string | null });
     let savedTimer: ReturnType<typeof setTimeout> | undefined;
@@ -244,14 +242,13 @@
     try {
       const verify = await invoke<boolean>("get_mpv_tls_verify");
       tlsSetting.loaded({ skip: !verify }, read);
-      playerTls.loaded = true;
     } catch {
       tlsLoadError = "Could not read the certificate setting. Close Settings and try again.";
     }
   }
 
   async function savePlayerTls() {
-    if (!playerTls.loaded) return;
+    if (!tlsSetting.confirmed.known) return;
     const submitted = tlsDraft.capture();
     try {
       await tlsSetting.queue(async () => {
@@ -375,6 +372,8 @@
   const tls = tlsDraft.value;
   let tlsLoadError = $state<string | null>(null);
   onDestroy(tlsDraft.unfollow);
+  // Only accepted shared values make an earlier read failure obsolete.
+  onDestroy(tlsSetting.follow(() => { tlsLoadError = null; }));
 
   // Duplicate-copy selection and the display profile used by Compatible.
   const playbackDraft = createDraft(playbackSetting);
@@ -977,7 +976,7 @@
             id="player-skip-certificate-checks"
             bind:checked={tls.skip}
             onchange={(e) => changeDraft(tlsDraft, "skip", e.currentTarget.checked, savePlayerTls)}
-            disabled={!playerTls.loaded}
+            disabled={!tlsSetting.confirmed.known}
             aria-describedby="player-certificate-help"
           />
           Skip server certificate checks

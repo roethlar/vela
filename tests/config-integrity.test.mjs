@@ -123,6 +123,12 @@ function settingsApp() {
     return `const ${name} = ${declaration.initializer.arguments[0].getText(instance)};`;
   }).join("\n");
   const actions = ["browseMpv", "clearMpvPath", "installMpv"].map((name) => `${name}: ${expression(attribute(button(name), "onclick"))}`);
+  const certificate = elements.find(({ node }) => text(attribute(node, "id")) === "player-skip-certificate-checks").node;
+  const certificateBinding = certificate.attributes.find((a) => a.type === "BindDirective").expression;
+  const certificateBound = source.slice(certificateBinding.start, certificateBinding.end);
+  const certificateChange = expression(attribute(certificate, "onchange"));
+  const certificateDisabled = expression(attribute(certificate, "disabled"));
+  const certificateError = errorRenders.find((expression) => expression.includes("tlsDraft.feedback.error"));
   const code = ts.transpileModule([
     source.slice(ast.module.content.start, ast.module.content.end),
     "return () => {",
@@ -130,6 +136,17 @@ function settingsApp() {
     ...statements.map((statement) => statement.getText(instance)),
     `return { load, ${actions.join(",")}, insertPreset, controls: { ${controls.join(",")} },`,
     `get saveStatus() { ${statusValues} return ${statusExpression}; },`,
+    `certificate: {
+      load: loadPlayerTls,
+      get checked() { return ${certificateBound}; },
+      get disabled() { return ${certificateDisabled}; },
+      get error() { return ${certificateError}; },
+      change(checked) {
+        const pending = (${certificateChange})({ currentTarget: { checked } });
+        ${certificateBound} = checked;
+        return pending;
+      }
+    },`,
     "get err() { return err; }, get qualityTiers() { return qualityTiers; }, close() { destroyed.splice(0).forEach((fn) => fn()); } }; };",
   ].join("\n"), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
   return (backend) => ({
@@ -573,6 +590,134 @@ for (const spec of settingsControls) {
     b.close();
   });
 }
+
+function certificateBackend() {
+  const backend = settingsBackend(settingsControls[0]);
+  const invoke = backend.invoke;
+  backend.certificateReads = [];
+  backend.certificateWrites = [];
+  backend.invoke = (command, args) => {
+    if (command === "get_mpv_tls_verify") return new Promise((resolve, reject) => {
+      backend.certificateReads.push({ resolve, reject });
+    });
+    if (command === "set_mpv_tls_verify") return new Promise((resolve, reject) => {
+      backend.certificateWrites.push({ verify: args.verify, resolve, reject });
+    });
+    return invoke(command, args);
+  };
+  return backend;
+}
+
+test("Settings certificate: an obsolete read never enables an uninitialized checkbox", async () => {
+  for (const newestFirst of [false, true]) for (const verify of [false, true]) {
+    const backend = certificateBackend();
+    const app = settingsApp()(backend);
+    const a = app.open();
+    const loadingA = a.certificate.load();
+    a.close();
+    const b = app.open();
+    const loadingB = b.certificate.load();
+    assert.equal(b.certificate.disabled, true);
+    if (newestFirst) {
+      backend.certificateReads[1].resolve(verify);
+      await loadingB;
+    }
+    backend.certificateReads[0].resolve(!verify);
+    await loadingA;
+    assert.equal(b.certificate.disabled, !newestFirst, "only an accepted read may enable the checkbox");
+    if (!newestFirst) {
+      backend.certificateReads[1].resolve(verify);
+      await loadingB;
+    }
+    assert.equal(b.certificate.disabled, false);
+    assert.equal(b.certificate.checked, !verify, "the enabled checkbox shows the accepted stored value");
+    assert.equal(backend.certificateWrites.length, 0);
+    // A refresh can be pending after a confirmed value is already available.
+    const refresh = b.certificate.load();
+    assert.equal(b.certificate.disabled, false);
+    const saving = b.certificate.change(verify);
+    assert.equal(backend.certificateWrites[0].verify, !verify);
+    backend.certificateWrites[0].resolve(!verify);
+    await saving;
+    backend.certificateReads[2].resolve(verify);
+    await refresh;
+    assert.equal(b.certificate.checked, verify, "a stale read cannot replace a save confirmation");
+    b.close();
+    const c = app.open();
+    assert.equal(c.certificate.disabled, false);
+    assert.equal(c.certificate.checked, verify);
+    c.close();
+  }
+});
+
+test("Settings certificate: an obsolete success cannot enable the checkbox after the current read fails", async () => {
+  const backend = certificateBackend();
+  const app = settingsApp()(backend);
+  const a = app.open();
+  const loadingA = a.certificate.load();
+  a.close();
+  const b = app.open();
+  const loadingB = b.certificate.load();
+  backend.certificateReads[1].reject(new Error("certificate read failed"));
+  await loadingB;
+  assert.equal(b.certificate.disabled, true);
+  assert.match(b.certificate.error, /Could not read the certificate setting/);
+  backend.certificateReads[0].resolve(false);
+  await loadingA;
+  assert.equal(b.certificate.disabled, true, "a discarded success does not initialize the setting");
+  b.close();
+  const c = app.open();
+  const loadingC = c.certificate.load();
+  backend.certificateReads[2].resolve(false);
+  await loadingC;
+  assert.equal(c.certificate.disabled, false);
+  assert.equal(c.certificate.checked, true);
+  assert.equal(c.certificate.error, null);
+  c.close();
+});
+
+test("Settings certificate: accepted confirmations clear read errors without hiding save failures", async () => {
+  const backend = certificateBackend();
+  const app = settingsApp()(backend);
+  const a = app.open();
+  const loadingA = a.certificate.load();
+  backend.certificateReads[0].reject(new Error("certificate read failed"));
+  await loadingA;
+  assert.match(a.certificate.error, /Could not read the certificate setting/);
+  const b = app.open();
+  const loadingB = b.certificate.load();
+  backend.certificateReads[1].resolve(false);
+  await loadingB;
+  assert.equal(a.certificate.disabled, false);
+  assert.equal(a.certificate.checked, true);
+  assert.equal(a.certificate.error, null, "an accepted shared read clears an obsolete read error");
+
+  const refresh = b.certificate.load();
+  backend.certificateReads[2].reject(new Error("certificate read failed"));
+  await refresh;
+  assert.match(b.certificate.error, /Could not read the certificate setting/);
+  const refused = a.certificate.change(false);
+  backend.certificateWrites[0].reject(new Error("certificate save refused"));
+  await refused;
+  assert.match(b.certificate.error, /certificate save refused/);
+  const reread = b.certificate.load();
+  backend.certificateReads[3].resolve(false);
+  await reread;
+  assert.match(b.certificate.error, /certificate save refused/, "a read does not erase a save failure");
+
+  const failedRefresh = b.certificate.load();
+  backend.certificateReads[4].reject(new Error("certificate read failed"));
+  await failedRefresh;
+  const saved = a.certificate.change(false);
+  backend.certificateWrites[1].resolve(true);
+  await saved;
+  for (const opening of [a, b]) {
+    assert.equal(opening.certificate.error, null, "an accepted shared save clears obsolete read errors too");
+    assert.equal(opening.certificate.checked, false);
+    assert.equal(opening.saveStatus, "Saved");
+    opening.close();
+  }
+});
 
 // The index of the brace that closes the one at `open`. Reads Rust well enough
 // to ignore the braces that are not code: those in comments, in string
