@@ -905,10 +905,15 @@ export default {
     mockA.state.viewsDelayMs = 1200; // hold the action open...
     await clickRefresh(driver);
     mockA.state.itemsDelayMs = 2400; // ...and park the scroll's page past the reset
+    // One scroll event, not two: moving the grid makes WebKit send its own a
+    // moment later, and a synthetic one on top of it is a second request for
+    // the next page whenever the first has already been answered (pagefail,
+    // b066dc0). The synthetic event is for a grid that could not move.
     await driver.exec(
       `const g = document.querySelector('main.grid');
+       const before = g.scrollTop;
        g.scrollTop = g.scrollHeight;
-       g.dispatchEvent(new Event('scroll'));`,
+       if (g.scrollTop === before) g.dispatchEvent(new Event('scroll'));`,
     );
     await settle(driver);
     mockA.state.viewsDelayMs = 0;
