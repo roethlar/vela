@@ -108,19 +108,32 @@ test('a default build packages no part of the libmpv set', () => {
   }
 
   // In the PKGBUILD the set is mentioned in two places, both under the one
-  // condition: package() installs it, and makepkg is told not to strip it.
+  // condition: package() installs it, and makepkg is told not to strip it
+  // and to name its licences.
   // Outside them the package is described as it always was.
   const { block, rest } = pkgbuildOptIn();
   has(block, '/usr/lib/Vela/libmpv/', 'package() installs the set under the condition');
-  const strip = `\n${pkgbuildCondition}\n  options+=('!strip')\nfi\n`;
-  has(rest, strip, 'makepkg must leave the set unstripped, and only when the set is packaged');
-  const untouched = code(rest.replace(strip, '\n'));
+  const withSet = `\n${pkgbuildCondition}\n  options+=('!strip')\n` +
+    "  license+=('LGPL-2.1-or-later' 'ISC' 'FTL' 'MIT-Modern-Variant' 'BSD-2-Clause' 'MPL-1.1')\nfi\n";
+  has(rest, withSet, 'makepkg must leave the set unstripped and name its licences only when the set is packaged');
+  const untouched = code(rest.replace(withSet, '\n'));
   assert.doesNotMatch(untouched, /libmpv|!strip/i);
   has(untouched, "\noptions=('!debug')\n", "the default package's options are unchanged");
+  has(untouched, "\nlicense=('MIT' 'GPL2')\n", "the default package's licences are unchanged");
 });
 
 test('the overlay adds the set, and only the set, where the loader reads it', () => {
-  assert.deepEqual(overlay, { bundle: { resources: { '../.libmpv/out/libmpv/': 'libmpv/' } } });
+  assert.deepEqual(overlay, {
+    bundle: {
+      license: `${tauriConf.bundle.license} AND LGPL-2.1-or-later AND ISC AND FTL AND MIT-Modern-Variant AND BSD-2-Clause AND MPL-1.1`,
+      resources: { '../.libmpv/out/libmpv/': 'libmpv/' },
+    },
+  });
+  assert.deepEqual(
+    pkgbuild.match(/^  license\+=\('([^()\n]+)'\)$/m)?.[1].split("' '"),
+    overlay.bundle.license.slice(`${tauriConf.bundle.license} AND `.length).split(' AND '),
+    'the overlay and PKGBUILD name the same licences for the set',
+  );
 
   // The source is the directory scripts/build-libmpv.sh fills. Tauri reads
   // the path relative to src-tauri/.
@@ -716,7 +729,7 @@ test('--with-libmpv=DIR packages the set of that directory, named from where the
   assert.notEqual(used, overlayPath, 'the committed overlay names another directory');
   // What Tauri was handed is the committed overlay with the directory replaced.
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(fixture.root, 'overlay-used.json'), 'utf8')), {
-    bundle: { resources: { [`${set}/`]: 'libmpv/' } },
+    bundle: { ...overlay.bundle, resources: { [`${set}/`]: 'libmpv/' } },
   });
   assert.equal(check, `check --set ${set} ${debAndRpm.join(' ')}`);
   // The committed overlay was not touched, and the temporary one is gone.
@@ -760,7 +773,7 @@ test('--with-libmpv=DIR takes an absolute directory as it is', { skip: posixBash
   const built = fixture.run(['--bundles', 'deb,rpm', `--with-libmpv=${set}`], { cwd: elsewhere });
   assert.equal(built.status, 0, `${built.stdout}\n${built.stderr}`);
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(fixture.root, 'overlay-used.json'), 'utf8')), {
-    bundle: { resources: { [`${set}/`]: 'libmpv/' } },
+    bundle: { ...overlay.bundle, resources: { [`${set}/`]: 'libmpv/' } },
   });
   assert.equal(fixture.log()[0], `preflight --set ${set}`);
   assert.equal(fixture.log()[3], `check --set ${set} ${debAndRpm.join(' ')}`);

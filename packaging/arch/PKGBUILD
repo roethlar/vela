@@ -29,6 +29,7 @@ options=('!debug')
 # it already.
 if [ -n "${VELA_PACKAGE_LIBMPV:-}" ]; then
   options+=('!strip')
+  license+=('LGPL-2.1-or-later' 'ISC' 'FTL' 'MIT-Modern-Variant' 'BSD-2-Clause' 'MPL-1.1')
 fi
 depends=('webkit2gtk-4.1' 'libsoup3' 'mpv' 'hicolor-icon-theme')
 source=()

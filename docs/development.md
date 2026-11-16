@@ -409,10 +409,14 @@ Not known yet:
   the set at `usr/lib/Vela/libmpv` under the AppImage's own root, as Tauri
   lays an AppImage out. If the AppImage tooling rewrites one of the set's
   libraries, the check fails the release and says which.
-- **The packages' licence field** (`bundle.license` in `tauri.conf.json`,
-  `license=` in the PKGBUILD) still names only Vela's licence and the
-  bundled script's. A package with the set carries every licence text; the
-  field has to name those licences once the set ships.
+- **The packages' licence field** names the set's licences when the set is
+  packaged: `bundle.license` in `src-tauri/tauri.libmpv.conf.json` for
+  the bundles built with that overlay, and `license` in
+  `packaging/arch/PKGBUILD` when `VELA_PACKAGE_LIBMPV` names the set.
+  A default build's licence field is unchanged. Of the bundles only the rpm
+  writes the field anywhere (its `License` tag); Tauri's deb bundler emits
+  no licence field at all and an AppImage has none. The licence texts
+  themselves are in every package that carries the set.
 
 ### Bumping a component
 

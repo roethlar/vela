@@ -1,5 +1,6 @@
 {
   "bundle": {
+    "license": "MIT AND GPL-2.0-or-later AND LGPL-2.1-or-later AND ISC AND FTL AND MIT-Modern-Variant AND BSD-2-Clause AND MPL-1.1",
     "resources": {
       "../.libmpv/out/libmpv/": "libmpv/"
     }
