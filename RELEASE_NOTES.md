@@ -1,4 +1,4 @@
-# Vela 1.0.67
+# Vela 1.0.68
 
 This release opens each video's mpv window the way you left the last one,
 checks the certificate of HTTPS media servers when playing, saves Settings as
@@ -81,6 +81,9 @@ Vela's own window on Linux with Wayland.
 
 ## Fixes
 
+- On macOS, Vela now says why it connects to servers on your local network,
+  as macOS 15 and later expect before they let an app reach them. Without it,
+  a server on your own network could be unreachable from Vela on a Mac.
 - On KDE Plasma under Wayland, Vela's window has the desktop's own title bar,
   with its usual height, buttons and Vela's icon, and KDE's window settings
   (such as hiding the title bar) apply to it. It used to have a taller one,
@@ -159,4 +162,4 @@ The macOS and Windows packages do not carry it.
 Full setup and privacy details are in the
 [README](https://github.com/roethlar/vela#readme).
 
-[Changes since 1.0.60](https://github.com/roethlar/vela/compare/v1.0.60...v1.0.67)
+[Changes since 1.0.60](https://github.com/roethlar/vela/compare/v1.0.60...v1.0.68)
