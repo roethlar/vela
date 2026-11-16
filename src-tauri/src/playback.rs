@@ -1449,6 +1449,62 @@ enum ReportRetry {
     Replayable,
 }
 
+/// The only error data a report may expose to diagnostics. Do not retain the
+/// reqwest error: even without its URL, its reason phrase or source can contain
+/// arbitrary server text, including credentials.
+#[derive(Debug)]
+enum ReportError {
+    HttpStatus(u16),
+    Timeout,
+    Connect,
+    Builder,
+    Redirect,
+    Body,
+    Decode,
+    Request,
+    Other,
+}
+
+impl From<reqwest::Error> for ReportError {
+    fn from(error: reqwest::Error) -> Self {
+        if let Some(status) = error.status() {
+            Self::HttpStatus(status.as_u16())
+        } else if error.is_timeout() {
+            Self::Timeout
+        } else if error.is_connect() {
+            Self::Connect
+        } else if error.is_builder() {
+            Self::Builder
+        } else if error.is_redirect() {
+            Self::Redirect
+        } else if error.is_body() {
+            Self::Body
+        } else if error.is_decode() {
+            Self::Decode
+        } else if error.is_request() {
+            Self::Request
+        } else {
+            Self::Other
+        }
+    }
+}
+
+impl std::fmt::Display for ReportError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::HttpStatus(status) => write!(f, "HTTP status {status}"),
+            Self::Timeout => f.write_str("timeout"),
+            Self::Connect => f.write_str("connection error"),
+            Self::Builder => f.write_str("request construction error"),
+            Self::Redirect => f.write_str("redirect error"),
+            Self::Body => f.write_str("body error"),
+            Self::Decode => f.write_str("decode error"),
+            Self::Request => f.write_str("request error"),
+            Self::Other => f.write_str("transport error"),
+        }
+    }
+}
+
 /// The current-thread runtime is idle between reports, so a pooled connection
 /// can close without reqwest noticing until send. Only replayable reports may
 /// retry a failure that could have happened after the server accepted them.
@@ -1456,7 +1512,7 @@ fn send_report_with_retry<T>(
     client: &reqwest::Client,
     retry: ReportRetry,
     mut send: impl FnMut(&reqwest::Client) -> Result<T, reqwest::Error>,
-) -> Result<T, reqwest::Error> {
+) -> Result<T, ReportError> {
     let result = match send(client) {
         // Connect errors precede delivery. Other transport errors are ambiguous;
         // never retry timeouts or HTTP status errors under either policy.
@@ -1476,9 +1532,9 @@ fn send_report_with_retry<T>(
         }
         result => result,
     };
-    // Callers log only the final error. Strip the entire URL, including any
-    // query or credentials, before it can reach those diagnostics.
-    result.map_err(reqwest::Error::without_url)
+    // Classify only after retrying, so diagnostics cannot expose any part of
+    // the raw error and the retry decision still has the original error kind.
+    result.map_err(ReportError::from)
 }
 
 /// Plex: report position on a timer, then post the authoritative final position
@@ -1942,6 +1998,193 @@ mod tests {
         .unwrap();
         assert_eq!(attempts, 2, "the stale connection required exactly one retry");
         assert_eq!(server.join().unwrap(), ["start", "stopped"]);
+    }
+
+    #[derive(Clone, Copy)]
+    enum ReportProbe {
+        PlexTimeline(&'static str),
+        PlexProgress,
+        Jellyfin(&'static str),
+    }
+
+    fn report_status_diagnostic_is_safe(
+        probe: ReportProbe,
+        status: u16,
+        retry_first: bool,
+    ) -> bool {
+        use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        listener.set_nonblocking(true).unwrap();
+        let server = std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            rt.block_on(async {
+                let listener = tokio::net::TcpListener::from_std(listener).unwrap();
+                tokio::time::timeout(Duration::from_secs(5), async {
+                    for attempt in 0..=usize::from(retry_first) {
+                        let (mut stream, _) = listener.accept().await.unwrap();
+                        let mut reader = tokio::io::BufReader::new(&mut stream);
+                        let mut length = 0;
+                        loop {
+                            let mut line = String::new();
+                            assert_ne!(reader.read_line(&mut line).await.unwrap(), 0);
+                            if line == "\r\n" {
+                                break;
+                            }
+                            if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                                length = value.trim().parse::<usize>().unwrap();
+                            }
+                        }
+                        reader.read_exact(&mut vec![0; length]).await.unwrap();
+                        if retry_first && attempt == 0 {
+                            // Fail ambiguously first, so the diagnostic also
+                            // covers a status error returned by the fresh client.
+                            stream.write_all(b"HTTP/1.1 204 No Content\r\n").await.unwrap();
+                        } else {
+                            let response = format!(
+                                "HTTP/1.1 {status} server-only-text http://server/report?token=synthetic-secret\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                            );
+                            stream.write_all(response.as_bytes()).await.unwrap();
+                        }
+                    }
+                })
+                .await
+                .expect("report reaches the server");
+            });
+        });
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .no_proxy()
+            .build()
+            .unwrap();
+        let retry = match probe {
+            ReportProbe::Jellyfin("") => ReportRetry::ConnectOnly,
+            _ => ReportRetry::Replayable,
+        };
+        let mut attempts = 0;
+        let result = send_report_with_retry(&client, retry, |client| {
+            attempts += 1;
+            rt.block_on(async {
+                match probe {
+                    ReportProbe::PlexTimeline(state) => {
+                        crate::plex_api::update_timeline(
+                            client,
+                            &base,
+                            "synthetic-token",
+                            "client-1",
+                            "42",
+                            "/library/metadata/42",
+                            state,
+                            1234,
+                            5000,
+                        )
+                        .await
+                    }
+                    ReportProbe::PlexProgress => {
+                        crate::plex_api::update_progress(
+                            client,
+                            &base,
+                            "synthetic-token",
+                            "client-1",
+                            "42",
+                            1234,
+                        )
+                        .await
+                    }
+                    ReportProbe::Jellyfin(endpoint) => client
+                        .post(format!("{base}/Sessions/Playing{endpoint}"))
+                        .json(&serde_json::json!({ "ItemId": "item-1" }))
+                        .send()
+                        .await?
+                        .error_for_status()
+                        .map(|_| ()),
+                }
+            })
+        });
+        server.join().unwrap();
+        assert_eq!(
+            attempts,
+            1 + usize::from(retry_first),
+            "HTTP status errors must not retry"
+        );
+        let error = result.expect_err("server rejected the report");
+        // Keep the unsafe diagnostic in memory: a failing assertion must not
+        // itself print a server's text, URL, or credential into the test log.
+        let display = error.to_string();
+        let debug = format!("{error:?}");
+        let has_untrusted_text = |text: &str| {
+            text.contains("server-only-text")
+                || text.contains("synthetic-secret")
+                || text.contains("://")
+        };
+        if has_untrusted_text(&display) {
+            return false;
+        }
+        assert!(
+            !has_untrusted_text(&debug),
+            "debug formatting must also be safe"
+        );
+        assert!(
+            display == format!("HTTP status {status}"),
+            "diagnostic preserves the numeric status"
+        );
+        true
+    }
+
+    #[test]
+    fn plex_report_diagnostics_exclude_server_text() {
+        let mut unsafe_diagnostics = 0;
+        for probe in [
+            ReportProbe::PlexTimeline("playing"),
+            ReportProbe::PlexTimeline("stopped"),
+            ReportProbe::PlexProgress,
+        ] {
+            for status in [400, 503] {
+                for retry_first in [false, true] {
+                    unsafe_diagnostics += usize::from(!report_status_diagnostic_is_safe(
+                        probe,
+                        status,
+                        retry_first,
+                    ));
+                }
+            }
+        }
+        assert_eq!(
+            unsafe_diagnostics, 0,
+            "Plex report errors must expose only a category and numeric status"
+        );
+    }
+
+    #[test]
+    fn jellyfin_report_diagnostics_exclude_server_text() {
+        let mut unsafe_diagnostics = 0;
+        for endpoint in ["", "/Progress", "/Stopped"] {
+            for status in [400, 503] {
+                for retry_first in [false, true] {
+                    if endpoint.is_empty() && retry_first {
+                        continue; // Start must not replay an ambiguous failure.
+                    }
+                    unsafe_diagnostics += usize::from(!report_status_diagnostic_is_safe(
+                        ReportProbe::Jellyfin(endpoint),
+                        status,
+                        retry_first,
+                    ));
+                }
+            }
+        }
+        assert_eq!(
+            unsafe_diagnostics, 0,
+            "Jellyfin/Emby report errors must expose only a category and numeric status"
+        );
     }
 
     // Review finding sel-4. Handed an embedded play and nothing to start it
