@@ -44,6 +44,31 @@ jobs:
       - run: cargo +stable clippy --all-targets --locked -- -D warnings
       - run: cargo +stable test --locked
 
+  other-platforms:
+    name: Rust compiles (${{ matrix.os }})
+    # The release builds for macOS and Windows, and nothing else compiled the
+    # backend there between releases: a break was found at the tag, after the
+    # fact. This is `cargo check` of what the release compiles, on both. It
+    # runs no test and builds no bundle; a warning does not fail it.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: src-tauri
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: cargo +stable check --locked
+
   frontend:
     name: Frontend
     runs-on: ubuntu-latest
