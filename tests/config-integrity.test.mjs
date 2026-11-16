@@ -48,8 +48,7 @@ const settingsControls = [
   { label: "HDR override", id: "playback-hdr-override", group: "preferences", key: "hdrOverride", initial: "enabled", choice: "", newer: "disabled" },
 ];
 
-function settingsApp() {
-  const source = fs.readFileSync("src/lib/Settings.svelte", "utf8");
+function settingsApp(source = fs.readFileSync("src/lib/Settings.svelte", "utf8")) {
   const ast = parse(source, { modern: true });
   const elements = [];
   const errorRenders = [];
@@ -100,7 +99,8 @@ function settingsApp() {
     assert.equal(errors.length, 1, `${spec.label} renders its error once`);
     return `${JSON.stringify(spec.label)}: {
       get value() { return ${bound}; },
-      edit(value) { ${bound} = value; this.pending = (${edit})({ currentTarget: { value, checked: value } }); },
+      // Svelte runs the explicit handler before its binding listener.
+      edit(value) { this.pending = (${edit})({ currentTarget: { value, checked: value } }); ${bound} = value; },
       leave() { return ${blur ? `(${blur})()` : "this.pending"}; },
       get busy() { return ${setting}.status.pending > 0; },
       get error() { return ${errors[0]}; }
@@ -224,6 +224,28 @@ function settingsBackend(spec) {
 }
 
 const settingsTurn = () => new Promise((resolve) => setImmediate(resolve));
+
+test("Settings choices use the new DOM value before binding (assignment-removal red-proof)", async () => {
+  const source = fs.readFileSync("src/lib/Settings.svelte", "utf8");
+  const mutant = source.replace("    draft.value[key] = value;\n", "");
+  assert.notEqual(mutant, source, "the mutation must remove the handler's binding assignment");
+  for (const spec of settingsControls.filter((control) => control.id !== "mpv-path" && control.id !== "mpv-extra")) {
+    const savesChoice = async (source) => {
+      const backend = settingsBackend(spec);
+      const a = settingsApp(source)(backend).open();
+      try {
+        await a.load();
+        a.controls[spec.label].edit(spec.choice);
+        await a.controls[spec.label].leave();
+        assert.equal(backend.value(), spec.choice, `${spec.label}: the handler must save the new DOM value`);
+      } finally {
+        a.close();
+      }
+    };
+    await savesChoice(source);
+    await assert.rejects(() => savesChoice(mutant), { name: "AssertionError", message: /new DOM value/ });
+  }
+});
 
 const groupedSettings = [
   { group: "advanced", first: "Use my own mpv config", second: "Black-bar cropping", sibling: "Advanced mpv options" },
