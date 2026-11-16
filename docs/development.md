@@ -121,7 +121,7 @@ system's `mpv` program as described under Architecture.
 The embedded player will not use whichever mpv library a machine happens to
 have. Vela builds one pinned set of libraries (mpv, FFmpeg, libplacebo,
 libass, FreeType, HarfBuzz, FriBidi, dav1d, Lua and uchardet) and ships it
-inside its Linux packages and Windows installers. The set is always an LGPL
+inside its Linux packages, Windows installers and universal macOS app. The set is always an LGPL
 build, with mpv and its media libraries separate from Vela's executable.
 
 ```bash
@@ -167,7 +167,8 @@ CoreText. mpv uses the OpenGL render API (`plain-gl`) and CoreAudio, with
 Swift and its own macOS windows disabled. This mpv pin cannot enable
 VideoToolbox GL interop without Swift, so hardware decoding uses the copy
 path. Every install name/reference uses `@rpath`, with `@loader_path` on
-each dylib; the set can move to either app location chosen by packaging.
+each dylib; in the app they resolve siblings in `Contents/Frameworks` without
+adding a run path to Vela's executable.
 CI's `libmpv-macos` job caches the set by all recipe inputs and the recorded
 runner/toolchain, checks native and Rosetta playback with
 `/usr/bin/python3 -I -B packaging/libmpv/check-libmpv-macos.py DIR`, and
@@ -177,9 +178,13 @@ library paths. Its strict path rule also covers Python's libraries, so
 an Xcode Python outside `/System` or `/usr/lib` is reported as a failure.
 The manual `libmpv-macos` probe retains diagnostic evidence. See
 `packaging/libmpv/macos/NOTES.txt` for the build-file patch and limitations.
-App integration/signing and visual/hardware/HTTPS checks are separate;
-`tauri.conf.json` currently has no macOS minimum override (the installed
-schema defaults to 10.13), which packaging must reconcile with this 11.0 set.
+The packaging overlay declares macOS 11.0, and the build sets
+`MACOSX_DEPLOYMENT_TARGET=11.0` for both Rust targets. This raises the app's
+`LSMinimumSystemVersion` from Tauri's default 10.13 to the set's 11.0 floor;
+it does not prove runtime compatibility on macOS 11. See "macOS app with
+the set" below for local builds and the signed-app check. The first cold
+set build on a hosted Mac is still unproven (CI's job is manual until it
+passes); visual/hardware/HTTPS checks remain separate.
 
 How the set is put together:
 
@@ -408,6 +413,93 @@ fails and copies nothing. If makepkg
 writes its packages under an ending the check does not know (it knows
 `.pkg.tar.zst` and `.pkg.tar.xz`), the check fails the package and says so.
 
+#### macOS app with the set
+
+On an Apple Silicon Mac with Xcode tools, Rust, the repo's Node/npm versions,
+Homebrew and Rosetta, build the universal set once from the repo root:
+
+```sh
+bash packaging/libmpv/macos/prepare-tools.sh
+bash scripts/build-libmpv-macos.sh
+bash scripts/build-macos.sh
+```
+
+Or download a checked `libmpv-macos-universal` CI/release artifact into
+`.libmpv/out/libmpv-macos-universal/` and run only the last command. The
+wrapper installs npm dependencies and both Rust targets, validates the set,
+builds `src-tauri/target/universal-apple-darwin/release/bundle/macos/Vela.app`
+and its DMG, mounts the finished DMG read-only, and checks that app's actual
+set natively and under Rosetta.
+It uses an unsigned local app by default. For a signed/notarized build,
+provide `APPLE_SIGNING_IDENTITY` for an installed Developer ID certificate
+and `APPLE_API_ISSUER`, `APPLE_API_KEY`, `APPLE_API_KEY_PATH` for notarization,
+then run `bash scripts/build-macos.sh --signed`. That mode requires the
+signatures, stapled ticket and Gatekeeper assessment to pass. The older
+`build-signed-macos.sh` uses the general build without this set; use this
+wrapper for an embedded-player package.
+
+`scripts/prepare-macos-package.sh` runs
+`packaging/libmpv/write-macos-overlay.py`, which validates the set's original
+MANIFEST against its files and the pins, and writes
+`.libmpv/tauri.libmpv-macos.conf.json`. Every versioned dylib name comes from
+the MANIFEST, as an absolute path in `bundle.macOS.frameworks`. Only
+`licenses/` and `MANIFEST` are resource mappings to
+`Contents/Resources/libmpv/`; the map merges with the base `mpv-scripts/`.
+The overlay sets `minimumSystemVersion` to `11.0` and `hardenedRuntime` to
+true. It is passed explicitly to Tauri; the ordinary base config is unchanged.
+
+Tauri CLI 2.11.4 copies dylib framework entries to `Contents/Frameworks`,
+then signs them before the app with its identity and temporary CI keychain.
+Its `sign.rs` requests runtime flags only for executable sign targets, so
+preparation also writes `.libmpv/sign-tools/codesign`. The build puts this
+launcher on PATH; `packaging/libmpv/macos-codesign.py` forwards Tauri's exact
+identity/keychain arguments to `/usr/bin/codesign`, adding
+`--options runtime --timestamp` only for signing dylibs inside an app's
+`Contents/Frameworks`. Signing completes before Tauri notarizes/staples the
+app and builds the DMG. Verification uses Apple's tool directly. There is
+no signing after notarization and no disabled library validation.
+
+The player selects `<executable directory>/../Frameworks/libmpv.2.dylib`.
+Development builds may use an absolute `VELA_LIBMPV_DIR`; release builds
+ignore it. Exact name, absolute path and loaded-image checks remain in force.
+The dylibs' `@rpath` dependencies and `@loader_path` run paths resolve within
+Frameworks; Vela's executable needs no install-name or run-path edits.
+
+After notarization the release leg runs:
+
+```sh
+bash scripts/check-macos-package.sh \
+  src-tauri/target/universal-apple-darwin/release/bundle true
+```
+
+`check-macos-package.sh` mounts the final DMG read-only and calls
+`check-libmpv-macos.py SET --app MOUNT/Vela.app`; the mount is detached even
+on a failed check. `check-package-macos.py`, called by that checker, requires
+exactly the set's
+dylibs in Frameworks and its original notices and MANIFEST in Resources.
+It verifies both architecture signatures of the app and every dylib, requiring
+the same Developer ID Team ID, hardened runtime and secure timestamps. It
+extracts temporary thin copies of both the input and shipped dylibs, removes
+both signatures with `codesign --remove-signature`, and compares every
+remaining byte for each architecture. This proves the shipped code, data and
+load commands are the manifest-checked set's while allowing the signatures
+and universal-file padding to change. Neither original is modified, and the
+shipped MANIFEST is not rewritten to bless new code.
+
+Only then do fresh native arm64 and Rosetta x86_64 workers repeat the checks
+and load the **untouched app's Frameworks/libmpv.2.dylib**. Playback must reach
+clean EOF; dyld/vmmap audits permit only that set or system libraries. The
+existing strict Python-image rule also remains. Gatekeeper must still accept
+the app after the check. `--unsigned-app` is only for local/secretless builds:
+it omits Developer ID requirements but keeps code/notices/architecture checks
+and both playback workers. A signed release never passes that flag.
+
+These gates are implemented and exercised with portable test doubles on
+Linux; real Tauri signing, signature removal, notarization and native/Rosetta
+playback of this bundle still require the reviewer's manual release run.
+Null-output playback does not test Vela's GL layer, visible controls, hardware
+decoding, HDR/EDR, audio output, network playback or an actual macOS 11 host.
+
 #### Windows installers with the set
 
 On x64 Windows, install the usual Tauri prerequisites (MSVC Build Tools,
@@ -500,7 +592,16 @@ builds (the owner's ruling of 2026-11-16, `.agents/decisions.md`):
   before uploading `vela-windows`. As for Linux, only `inventory` attaches
   these checked installers to a tagged draft. Manual runs publish nothing.
   The Windows installers remain unsigned.
-- macOS packaging of its library set is still pending.
+- The `libmpv-macos` job runs on `macos-latest` after the audits. It records
+  the Apple toolchain before restoring the exact CI cache key, builds on a
+  miss, checks native/Rosetta playback and uploads the universal set. CI's
+  manual-only condition is not copied to releases: a failed set stops them.
+- The macOS bundle leg downloads the set, generates the overlay and scoped
+  signing launcher, prepares Rosetta, and builds the universal app/DMG with
+  Tauri. After signing/notarization it checks the app's signatures, staple,
+  local-network declaration and DMG signature, then proves and plays the set
+  inside the app mounted from the final DMG as above and reassesses
+  Gatekeeper before artifact upload.
 
 `tests/libmpv-packaging.test.mjs` holds those lines of the workflow as far as
 words can: a step that brought the set in, or left it out, without the names

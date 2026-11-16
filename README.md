@@ -140,13 +140,20 @@ included under
 [`src-tauri/resources/mpv-scripts/`](src-tauri/resources/mpv-scripts/PROVENANCE.md).
 
 The experimental embedded player uses an mpv library that comes with Vela
-rather than the system's. Vela's Linux packages and Windows NSIS/MSI
-installers (x86_64) carry it: an LGPL build of mpv and the libraries it
+rather than the system's. Vela's Linux packages, Windows NSIS/MSI
+installers (x86_64), and universal macOS app (macOS 11+) carry it: an LGPL build of mpv and the libraries it
 needs, as separate shared libraries, with each component's licence text
 and a file-hash `MANIFEST`. On Windows the set is in `libmpv/` beside
-Vela.exe. It is built from the sources pinned in
+Vela.exe. On macOS the dylibs are in `Vela.app/Contents/Frameworks`, signed
+with the app; the licences and MANIFEST are in `Contents/Resources/libmpv`.
+It is built from the sources pinned in
 [`packaging/libmpv/versions.txt`](packaging/libmpv/versions.txt) by
-[`scripts/build-libmpv.sh`](scripts/build-libmpv.sh) and
-[`scripts/build-libmpv-windows.sh`](scripts/build-libmpv-windows.sh).
+[`scripts/build-libmpv.sh`](scripts/build-libmpv.sh),
+[`scripts/build-libmpv-windows.sh`](scripts/build-libmpv-windows.sh), and
+[`scripts/build-libmpv-macos.sh`](scripts/build-libmpv-macos.sh).
 For local Windows installers with the set, see
 [the development guide](docs/development.md#windows-installers-with-the-set).
+
+For a local macOS app/DMG with the set, use `bash scripts/build-macos.sh`;
+see [the development guide](docs/development.md#macos-app-with-the-set) for
+set preparation, signing and the checks still awaiting a release run.

@@ -15,7 +15,8 @@ name: Release
 # packages put it in, and each then proves it is whole in every package it
 # made. The `libmpv-windows` job likewise builds the Windows DLL set once;
 # the Windows leg packages and checks it in both NSIS and MSI installers.
-# macOS packaging of its library set is still pending.
+# The macOS universal set travels through the same path: framework dylibs
+# are signed inside out by Tauri and checked inside the notarized app.
 #
 # Code signing: the macOS app is signed with a Developer ID certificate and
 # notarized through App Store Connect when the secrets for it are set, and
@@ -122,8 +123,59 @@ jobs:
           if-no-files-found: error
           path: .libmpv/out/libmpv-windows-x86_64
 
+  libmpv-macos:
+    name: Shipped libmpv set (macOS universal)
+    # CI's job is still held to manual runs pending its first cold proof.
+    # Releases always require it; use the identical toolchain/cache key.
+    needs: [npm-audit, cargo-audit]
+    runs-on: macos-latest
+    timeout-minutes: 150
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - name: Prepare host tools and record the Apple toolchain
+        run: bash packaging/libmpv/macos/prepare-tools.sh
+      - name: Restore the universal set
+        id: cache
+        uses: actions/cache@v6
+        with:
+          path: .libmpv/out/libmpv-macos-universal
+          key: libmpv-macos-universal-${{ hashFiles('scripts/build-libmpv-macos.sh', 'packaging/libmpv/versions.txt', 'packaging/libmpv/macos/**', 'packaging/libmpv/check-libmpv-macos.py', '.github/workflows/ci.yml', '.libmpv/toolchain-macos.txt') }}
+      - name: Build the universal set
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p .libmpv/logs-macos
+          bash scripts/build-libmpv-macos.sh 2>&1 | tee .libmpv/logs-macos/build.log
+      - name: Prepare Rosetta
+        run: |
+          if ! /usr/bin/arch -x86_64 /usr/bin/python3 -I -c 'import platform; assert platform.machine() == "x86_64"'; then
+            /usr/sbin/softwareupdate --install-rosetta --agree-to-license
+          fi
+      - name: Load and play both architectures
+        run: |
+          set -euo pipefail
+          mkdir -p .libmpv/logs-macos
+          /usr/bin/python3 -I -B packaging/libmpv/check-libmpv-macos.py .libmpv/out/libmpv-macos-universal --log-dir .libmpv/logs-macos 2>&1 | tee .libmpv/logs-macos/check.log
+      - name: Upload the universal set
+        uses: actions/upload-artifact@v7
+        with:
+          name: libmpv-macos-universal
+          if-no-files-found: error
+          path: .libmpv/out/libmpv-macos-universal
+      - name: Keep macOS build and check logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: libmpv-macos-logs
+          path: |
+            .libmpv/logs-macos
+            .libmpv/toolchain-macos.txt
+
   bundle:
-    needs: [npm-audit, cargo-audit, libmpv, libmpv-windows]
+    needs: [npm-audit, cargo-audit, libmpv, libmpv-windows, libmpv-macos]
     permissions:
       contents: write
     strategy:
@@ -177,6 +229,27 @@ jobs:
         with:
           name: libmpv-windows-x86_64
           path: .libmpv/out/libmpv-windows-x86_64
+
+      - name: Fetch the libmpv set (macOS)
+        if: runner.os == 'macOS'
+        uses: actions/download-artifact@v8
+        with:
+          name: libmpv-macos-universal
+          path: .libmpv/out/libmpv-macos-universal
+
+      - name: Prepare macOS packaging
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/prepare-macos-package.sh
+          # Tauri owns the temporary signing keychain. This wrapper adds
+          # runtime + timestamp to its framework dylib signing calls only.
+          echo "$GITHUB_WORKSPACE/.libmpv/sign-tools" >> "$GITHUB_PATH"
+          echo 'MACOSX_DEPLOYMENT_TARGET=11.0' >> "$GITHUB_ENV"
+          if ! /usr/bin/arch -x86_64 /usr/bin/python3 -I -c 'import platform; assert platform.machine() == "x86_64"'; then
+            /usr/sbin/softwareupdate --install-rosetta --agree-to-license
+          fi
 
       - uses: actions/setup-python@v6
         if: runner.os == 'Windows'
@@ -304,8 +377,8 @@ jobs:
           NO_STRIP: '1'
           APPIMAGE_EXTRACT_AND_RUN: '1'
         with:
-          # Each platform's overlay maps its own set into libmpv/.
-          args: ${{ matrix.target && format('--target {0}', matrix.target) || (matrix.os == 'windows-latest' && '--bundles nsis,msi --config src-tauri/tauri.libmpv-windows.conf.json' || (matrix.os == 'ubuntu-22.04' && '--config src-tauri/tauri.libmpv.conf.json' || '')) }}
+          # macOS dylibs are framework sign targets; notices stay resources.
+          args: ${{ matrix.target && format('--target {0} --bundles app,dmg --config .libmpv/tauri.libmpv-macos.conf.json', matrix.target) || (matrix.os == 'windows-latest' && '--bundles nsis,msi --config src-tauri/tauri.libmpv-windows.conf.json' || (matrix.os == 'ubuntu-22.04' && '--config src-tauri/tauri.libmpv.conf.json' || '')) }}
           # Only create/attach a release when triggered by a v* tag, and never
           # from the Linux or Windows legs (see above).
           tagName: ${{ startsWith(github.ref, 'refs/tags/') && matrix.os == 'macos-latest' && github.ref_name || '' }}
@@ -348,6 +421,16 @@ jobs:
 
           codesign --verify --strict --verbose=2 "$dmg"
           codesign -dv --verbose=4 "$dmg" 2>&1 | grep 'Authority=Developer ID Application'
+
+      - name: Require the libmpv set in the macOS app
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          VELA_MACOS_SIGNED: ${{ steps.macos_signing.outputs.signing }}
+        run: |
+          set -euo pipefail
+          # Mount the final DMG read-only; prove and play its untouched app.
+          bash scripts/check-macos-package.sh '${{ matrix.bundle_dir }}' "$VELA_MACOS_SIGNED"
 
       - name: Require every Linux bundle
         if: runner.os == 'Linux'

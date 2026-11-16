@@ -4,7 +4,7 @@
 //! the machine happens to have (owner ruling D7 and licence rule D4 of
 //! `.agents/plans/embedded-player.md`): the one library opened is the file at
 //! the absolute path the caller names, which is the copy inside Vela's own
-//! resources. If it cannot be opened the embedded player is unavailable and
+//! bundle (Frameworks on macOS). If it cannot be opened the embedded player is unavailable and
 //! the play goes to the external player.
 //!
 //! The functions are called through a hand-written table. Their signatures
@@ -340,8 +340,9 @@ unsafe impl Sync for LibMpv {}
 
 /// Where the shipped set is.
 ///
-/// A release build looks in exactly one place, the `libmpv` directory of
-/// Vela's own resources. A development build may be pointed at a set built
+/// A release build looks in exactly one place: beside the executable in
+/// `../Frameworks` on macOS, or `libmpv` in Vela's resources elsewhere.
+/// A development build may be pointed at a set built
 /// somewhere else (`VELA_LIBMPV_DIR`) so a developer does not have to install
 /// one into the build tree; a release build ignores that variable, so no
 /// environment can make a shipped Vela load a library that is not its own.
@@ -350,10 +351,40 @@ pub(crate) fn set_directory(
     development_build: bool,
     development_override: Option<&std::ffi::OsStr>,
 ) -> PathBuf {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = resource_dir;
+        macos_set_directory(std::env::current_exe().ok().as_deref(), development_build, development_override)
+    }
+    #[cfg(not(target_os = "macos"))]
+    resource_set_directory(resource_dir, development_build, development_override)
+}
+
+#[cfg(any(not(target_os = "macos"), test))]
+fn resource_set_directory(
+    resource_dir: &Path,
+    development_build: bool,
+    development_override: Option<&std::ffi::OsStr>,
+) -> PathBuf {
     match development_override.filter(|dir| !dir.is_empty()) {
         Some(dir) if development_build => PathBuf::from(dir),
         _ => resource_dir.join("libmpv"),
     }
+}
+
+#[cfg(any(target_os = "macos", all(test, unix)))]
+fn macos_set_directory(
+    executable: Option<&Path>,
+    development_build: bool,
+    development_override: Option<&std::ffi::OsStr>,
+) -> PathBuf {
+    if let Some(dir) = development_override.filter(|dir| development_build && !dir.is_empty()) {
+        return PathBuf::from(dir);
+    }
+    // No resource/system/CWD fallback if current_exe fails: the resulting
+    // relative library name is rejected by refuse_unless_exact before dlopen.
+    executable.filter(|path| path.is_absolute()).and_then(Path::parent)
+        .map(|dir| dir.join("../Frameworks")).unwrap_or_default()
 }
 
 /// Why a path cannot be handed to the system's loader as it is.
@@ -1209,6 +1240,10 @@ mod tests {
 #[cfg(test)]
 mod windows_tests {
     use super::*;
+    // Exercise the Windows resource rule on macOS too, where the public
+    // entry point intentionally selects Frameworks from current_exe.
+    #[cfg(target_os = "macos")]
+    use super::resource_set_directory as set_directory;
 
     #[test]
     fn windows_library_is_an_exact_dll_in_the_selected_set() {
@@ -1235,16 +1270,36 @@ mod macos_tests {
     use super::*;
     #[test]
     fn macos_library_is_an_exact_absolute_dylib_in_the_shipped_set() {
-        let resources = Path::new("/Applications/Vela.app/Contents/Resources");
-        let path = set_directory(resources, false, Some("/other".as_ref()))
+        let executable = Path::new("/Applications/Vela.app/Contents/MacOS/vela");
+        let path = macos_set_directory(Some(executable), false, Some("/other".as_ref()))
             .join(MACOS_LIBRARY_FILE);
-        assert_eq!(path, resources.join("libmpv/libmpv.2.dylib"));
+        assert_eq!(path, Path::new("/Applications/Vela.app/Contents/MacOS/../Frameworks/libmpv.2.dylib"));
         assert!(refuse_unless_named(&path, MACOS_LIBRARY_FILE).is_ok());
         for bad in ["libmpv.2.dylib", "./libmpv.2.dylib", "/tmp/libmpv.dylib", "/tmp/libmpv.so.2"] {
             assert!(refuse_unless_named(Path::new(bad), MACOS_LIBRARY_FILE).is_err(), "{bad}");
         }
-        assert_eq!(set_directory(resources, true, Some("/dev/set".as_ref()))
+        assert_eq!(macos_set_directory(Some(executable), true, Some("/dev/set".as_ref()))
             .join(MACOS_LIBRARY_FILE), Path::new("/dev/set/libmpv.2.dylib"));
+        for development in [false, true] {
+            for empty in [None, Some("".as_ref())] {
+                assert_eq!(macos_set_directory(Some(executable), development, empty)
+                    .join(MACOS_LIBRARY_FILE), path);
+            }
+        }
+        for missing in [None, Some(Path::new("vela"))] {
+            let path = macos_set_directory(missing, false, Some("/other".as_ref()))
+                .join(MACOS_LIBRARY_FILE);
+            assert!(refuse_unless_named(&path, MACOS_LIBRARY_FILE).is_err());
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_production_lookup_uses_the_executable_not_resources() {
+        let expected = std::env::current_exe().unwrap().parent().unwrap().join("../Frameworks");
+        assert_eq!(set_directory(Path::new("/unrelated/resources"), false, None), expected);
+        assert_eq!(set_directory(Path::new("/unrelated/resources"), true, Some("/dev/set".as_ref())),
+            Path::new("/dev/set"));
     }
 }
 

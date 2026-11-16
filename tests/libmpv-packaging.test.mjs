@@ -1,4 +1,4 @@
-// Packaging the embedded player's libmpv sets into Linux and Windows packages
+// Packaging the embedded player's libmpv sets into Linux, Windows and macOS packages
 // (.agents/plans/embedded-player.md, "libmpv is shipped with Vela" and
 // Slice 3).
 //
@@ -47,6 +47,53 @@ const checkLibmpv = read('packaging/libmpv/check-libmpv.py');
 const buildLibmpv = read('scripts/build-libmpv.sh');
 const versions = read('packaging/libmpv/versions.txt');
 const loader = read('src-tauri/src/player/embedded/libmpv.rs');
+
+test('macOS overlay, signed payload, and app playback reject broken contracts', () => {
+  const python = process.platform === 'win32' ? 'python' : 'python3';
+  const run = spawnSync(python, ['-I', '-B', 'tests/libmpv-macos-package.py', '-v'], {
+    cwd: repoRoot, encoding: 'utf8', timeout: 90_000,
+  });
+  assert.equal(run.status, 0, `${run.error ?? ''}\n${run.stdout}\n${run.stderr}`);
+});
+
+function macosBuildContracts(script, prepare, rust) {
+  const steps = [
+    'bash scripts/prepare-macos-package.sh',
+    'PATH="$repo/.libmpv/sign-tools:$PATH" MACOSX_DEPLOYMENT_TARGET=11.0',
+    'npm run tauri -- build --target universal-apple-darwin --bundles app,dmg',
+    '--config .libmpv/tauri.libmpv-macos.conf.json',
+    'bash scripts/check-macos-package.sh "$bundle" "$signed"',
+  ];
+  let last = -1;
+  for (const step of steps) {
+    const index = script.indexOf(step);
+    assert.ok(index > last, `local macOS build must run in order: ${step}`);
+    last = index;
+  }
+  has(prepare, 'packaging/libmpv/write-macos-overlay.py \\\n  .libmpv/out/libmpv-macos-universal .libmpv/tauri.libmpv-macos.conf.json', 'prepare generates the overlay from the set');
+  has(prepare, 'exec /usr/bin/python3 -I -B "$repo/packaging/libmpv/macos-codesign.py" "$@"', 'prepare installs the scoped signer');
+  has(prepare, 'chmod +x .libmpv/sign-tools/codesign', 'signer must be executable');
+  assert.match(rust, /#\[cfg\(target_os = "macos"\)\]\s*\{\s*let _ = resource_dir;\s*macos_set_directory\(std::env::current_exe\(\)\.ok\(\)\.as_deref\(\), development_build, development_override\)/, 'production macOS lookup is wired to current_exe');
+}
+
+test('local macOS build prepares, signs through Tauri and checks the app before success', () => {
+  macosBuildContracts(code(read('scripts/build-macos.sh')), code(read('scripts/prepare-macos-package.sh')), loader);
+});
+
+test('local macOS wiring guards reject omitted overlay, signer, app check and lookup (red proof)', () => {
+  const script = code(read('scripts/build-macos.sh'));
+  const prepare = code(read('scripts/prepare-macos-package.sh'));
+  for (const token of ['bash scripts/prepare-macos-package.sh', 'PATH="$repo/.libmpv/sign-tools:$PATH"',
+    '--config .libmpv/tauri.libmpv-macos.conf.json', 'bash scripts/check-macos-package.sh']) {
+    assert.ok(script.includes(token));
+    assert.throws(() => macosBuildContracts(script.replace(token, 'REMOVED'), prepare, loader), /local macOS build/);
+  }
+  for (const token of ['write-macos-overlay.py', 'macos-codesign.py', 'chmod +x']) {
+    assert.ok(prepare.includes(token));
+    assert.throws(() => macosBuildContracts(script, prepare.replace(token, 'REMOVED'), loader), /prepare|signer/);
+  }
+  assert.throws(() => macosBuildContracts(script, prepare, loader.replace('macos_set_directory(std::env::current_exe()', 'unused(std::env::current_exe()')), /production macOS lookup/);
+});
 
 // Shell and PKGBUILD text without its comment lines.
 const code = (source) =>
@@ -352,7 +399,7 @@ test('the release workflow puts the set into every Linux package and checks each
   // The bundles: only the Linux leg fetches the set and is given the
   // overlay, and every bundle it makes is checked for the whole set.
   const bundle = jobOf(release, 'bundle');
-  assert.match(bundle, /^    needs: \[npm-audit, cargo-audit, libmpv, libmpv-windows\]$/m);
+  assert.match(bundle, /^    needs: \[npm-audit, cargo-audit, libmpv, libmpv-windows, libmpv-macos\]$/m);
   assert.match(
     bundle,
     /- name: Fetch the libmpv set \(Linux\)\n\s+if: matrix\.os == 'ubuntu-22\.04'\n\s+uses: actions\/download-artifact@v8\n\s+with:\n\s+name: libmpv-linux-x86_64\n\s+path: \.libmpv\/out\/libmpv\n/,

@@ -69,7 +69,7 @@ test("release artifacts fail closed through a final inventory", () => {
   // (tests/libmpv-packaging.test.mjs also holds the Linux part).
   assert.match(
     workflow,
-    /  bundle:\n    needs: \[npm-audit, cargo-audit, libmpv, libmpv-windows\]\n    permissions:\n      contents: write/,
+    /  bundle:\n    needs: \[npm-audit, cargo-audit, libmpv, libmpv-windows, libmpv-macos\]\n    permissions:\n      contents: write/,
   );
   assert.match(workflow, /  arch:\n    name: Arch package\n    needs: \[npm-audit, cargo-audit, libmpv\]\n/);
   // A known vulnerability fails the release as it fails CI, in either ecosystem.
@@ -111,7 +111,7 @@ function windowsReleaseContracts(source) {
   assert.doesNotMatch(set, /continue-on-error|tauri-action/, 'Windows set must pass before packaging');
 
   const bundle = releaseJob(source, 'bundle');
-  assert.match(bundle, /^    needs: \[npm-audit, cargo-audit, libmpv, libmpv-windows\]$/m, 'bundle waits for both sets');
+  assert.match(bundle, /^    needs: \[npm-audit, cargo-audit, libmpv, libmpv-windows, libmpv-macos\]$/m, 'bundle waits for all three sets');
   const download = '- name: Fetch the libmpv set (Windows)';
   assert.match(bundle, /- name: Fetch the libmpv set \(Windows\)\n        if: matrix\.os == 'windows-latest'\n        uses: actions\/download-artifact@v8\n        with:\n          name: libmpv-windows-x86_64\n          path: \.libmpv\/out\/libmpv-windows-x86_64\n/, 'Windows download feeds overlay source');
   assert.match(bundle, /- uses: actions\/setup-python@v6\n        if: runner\.os == 'Windows'\n        with:\n          python-version: '3\.13'\n          architecture: x64\n/, 'Windows playback requires x64 Python');
@@ -138,12 +138,72 @@ test('Windows release builds once, packages both installers, and checks them bef
   windowsReleaseContracts(workflow);
 });
 
+function macosReleaseContracts(source) {
+  const set = releaseJob(source, 'libmpv-macos');
+  const ciSet = releaseJob(ci, 'libmpv-macos');
+  assert.match(set, /^    needs: \[npm-audit, cargo-audit\]$/m, 'macOS set waits for audits');
+  assert.match(set, /^    runs-on: macos-latest$/m, 'macOS set builds on macOS');
+  const cache = (job) => job.match(/^          key: (.+)$/m)?.[1];
+  assert.ok(cache(set), 'macOS cache exists');
+  assert.equal(cache(set), cache(ciSet), 'macOS cache matches CI including toolchain');
+  for (const token of ['bash packaging/libmpv/macos/prepare-tools.sh',
+    'path: .libmpv/out/libmpv-macos-universal',
+    "if: steps.cache.outputs.cache-hit != 'true'", 'bash scripts/build-libmpv-macos.sh',
+    '/usr/sbin/softwareupdate --install-rosetta --agree-to-license',
+    '/usr/bin/python3 -I -B packaging/libmpv/check-libmpv-macos.py .libmpv/out/libmpv-macos-universal --log-dir',
+    'name: libmpv-macos-universal\n          if-no-files-found: error\n          path: .libmpv/out/libmpv-macos-universal']) {
+    assert.ok(set.includes(token), `macOS set requirement: ${token}`);
+  }
+  assert.ok(set.indexOf('prepare-tools.sh') < set.indexOf('uses: actions/cache@'), 'toolchain recorded before cache');
+  assert.ok(set.indexOf('check-libmpv-macos.py .libmpv') < set.indexOf('uses: actions/upload-artifact@'), 'macOS set checked before handoff');
+  assert.doesNotMatch(set, /if: github\.event_name|continue-on-error/, 'release always requires a checked macOS set');
+  const bundle = releaseJob(source, 'bundle');
+  assert.match(bundle, /^    needs: \[npm-audit, cargo-audit, libmpv, libmpv-windows, libmpv-macos\]$/m, 'bundle waits for macOS too');
+  assert.match(bundle, /- name: Fetch the libmpv set \(macOS\)\n        if: runner\.os == 'macOS'\n        uses: actions\/download-artifact@v8\n        with:\n          name: libmpv-macos-universal\n          path: \.libmpv\/out\/libmpv-macos-universal\n/, 'macOS download feeds overlay');
+  for (const token of ['bash scripts/prepare-macos-package.sh',
+    'echo "$GITHUB_WORKSPACE/.libmpv/sign-tools" >> "$GITHUB_PATH"',
+    "echo 'MACOSX_DEPLOYMENT_TARGET=11.0' >> \"$GITHUB_ENV\"",
+    "format('--target {0} --bundles app,dmg --config .libmpv/tauri.libmpv-macos.conf.json', matrix.target)",
+    "if: runner.os == 'macOS' && steps.macos_signing.outputs.signing == 'true'",
+    'codesign --verify --deep --strict --verbose=2 "$app"', 'xcrun stapler validate "$app"',
+    'VELA_MACOS_SIGNED: ${{ steps.macos_signing.outputs.signing }}',
+    `bash scripts/check-macos-package.sh '\${{ matrix.bundle_dir }}' "$VELA_MACOS_SIGNED"`]) {
+    assert.ok(bundle.includes(token), `macOS bundle requirement: ${token}`);
+  }
+  const order = ['- name: Fetch the libmpv set (macOS)', '- name: Prepare macOS packaging',
+    '- uses: tauri-apps/tauri-action@v1', '- name: Require a signed and notarized macOS bundle',
+    '- name: Require the libmpv set in the macOS app', '- name: Upload the macOS bundle'];
+  for (let i = 1; i < order.length; i++) {
+    assert.ok(bundle.indexOf(order[i - 1]) < bundle.indexOf(order[i]), `macOS order: ${order[i]}`);
+  }
+  assert.doesNotMatch(bundle, /continue-on-error:|if:.*always\(/, 'macOS failures fail the leg');
+}
+
+test('macOS release builds once, generates framework overlay, and proves notarized app before upload', () => {
+  macosReleaseContracts(workflow);
+});
+
+test('macOS release guards reject broken set, signing, overlay and app check wiring (red proof)', () => {
+  for (const token of ['bash packaging/libmpv/macos/prepare-tools.sh',
+    'bash scripts/build-libmpv-macos.sh',
+    '/usr/bin/python3 -I -B packaging/libmpv/check-libmpv-macos.py .libmpv/out/libmpv-macos-universal --log-dir',
+    'libmpv, libmpv-windows, libmpv-macos]', '- name: Fetch the libmpv set (macOS)',
+    'bash scripts/prepare-macos-package.sh', 'echo "$GITHUB_WORKSPACE/.libmpv/sign-tools"',
+    "echo 'MACOSX_DEPLOYMENT_TARGET=11.0'", '--config .libmpv/tauri.libmpv-macos.conf.json',
+    'xcrun stapler validate "$app"',
+    'bash scripts/check-macos-package.sh', '"$VELA_MACOS_SIGNED"' ]) {
+    assert.ok(workflow.includes(token), `mutation applies: ${token}`);
+    assert.throws(() => macosReleaseContracts(workflow.replace(token, 'REMOVED')), /macOS|cache|toolchain/);
+  }
+  assert.throws(() => macosReleaseContracts(workflow.replace('key: libmpv-macos-universal-', 'key: wrong-macos-')), /cache matches CI/);
+});
+
 test('Windows release guards reject a missing overlay, download, check or dependency (red proof)', () => {
   const breaks = [
     ["--bundles nsis,msi --config src-tauri/tauri.libmpv-windows.conf.json", '--bundles nsis,msi', /must pass overlay/],
     ['- name: Fetch the libmpv set (Windows)', '- name: Removed Windows download', /download feeds/],
     ['python -B packaging/libmpv/check-package-windows.py --set .libmpv/out/libmpv-windows-x86_64 --bundle-dir', 'echo skipped --bundle-dir', /installer must be checked/],
-    ['needs: [npm-audit, cargo-audit, libmpv, libmpv-windows]', 'needs: [npm-audit, cargo-audit, libmpv]', /waits for both sets/],
+    ['needs: [npm-audit, cargo-audit, libmpv, libmpv-windows, libmpv-macos]', 'needs: [npm-audit, cargo-audit, libmpv]', /waits for all three sets/],
     ["matrix.os == 'macos-latest' && github.ref_name", "matrix.os != 'ubuntu-22.04' && github.ref_name", /only macOS may attach/],
     ['            "${windows[@]}" \\\n', '', /attaches checked Windows/],
   ];
