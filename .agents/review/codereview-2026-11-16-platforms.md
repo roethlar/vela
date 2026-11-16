@@ -1,17 +1,18 @@
 # Codereview 2026-11-16 — the embedded player on Windows and macOS
 
-Outcome: five codereview codex hunts so far: one per slice over the
-Windows host (`8c40ff8..6b206ec`) and the macOS host
-(`4fe60b8..623ec17`), a third over the fixes `c49be2a` and `ca07bfa`, a
-fourth over the macOS HDR slice (`ad65c4d..49f2c3c`), and a fifth over
-the macOS packaging (below); a sixth, over the Windows packaging, is
-running. **findings**: ten candidates, ten admitted (eight MEDIUM, two
-LOW), none declined. pl-1 to pl-7 and pl-10 are repaired and closed:
-codex wrote pl-1 to pl-6's repairs as coding tasks and the working
-agent's review closed them (adding the Windows half of pl-5); the working
-agent wrote pl-7's and pl-10's, which codex's next hunt over the fixes
-reads. pl-8 is being repaired (codex). pl-9 is about tests alone and
-waits for the release's test pass (`.agents/decisions.md`, 2026-11-14).
+Outcome: six codereview codex hunts: one per slice over the Windows host
+(`8c40ff8..6b206ec`) and the macOS host (`4fe60b8..623ec17`), a third
+over the fixes `c49be2a` and `ca07bfa`, a fourth over the macOS HDR slice
+(`ad65c4d..49f2c3c`), a fifth over the macOS packaging and a sixth over
+the Windows packaging (below). **findings**: thirteen candidates,
+thirteen admitted (one HIGH, nine MEDIUM, three LOW), none declined.
+pl-1 to pl-8, pl-10 and pl-13 are repaired and closed: codex wrote pl-1
+to pl-6's and pl-8's repairs as coding tasks and the working agent's
+review closed them (adding the Windows half of pl-5); the working agent
+wrote pl-7's, pl-10's and pl-13's, which codex's next hunt over the fixes
+reads. pl-11 and pl-12 are being repaired (codex). pl-9 is about tests
+alone and waits for the release's test pass (`.agents/decisions.md`,
+2026-11-14).
 
 ## Dispatch record
 
@@ -45,9 +46,12 @@ waits for the release's test pass (`.agents/decisions.md`, 2026-11-14).
 | pl-5 | MEDIUM   | Linux: a numeric `--fs-screen`/`--screen` from the user outranks the remembered name | `[x]` | `9833fc1` |
 | pl-6 | MEDIUM   | Windows: an explicitly empty MPV_HOME is read as unset, so config files are read mpv would not read | `[x]` | `e93402e` |
 | pl-7 | MEDIUM   | macOS: a draw begun under a colour hold can flush the old range's frame if the hold ends mid-render | `[x]` | `e1cf5f2` |
-| pl-8 | MEDIUM   | release: on a tag, the macOS DMG reaches the draft release before its checks run | `[ ]` | in repair (codex) |
+| pl-8 | MEDIUM   | release: on a tag, the macOS DMG reaches the draft release before its checks run | `[x]` | `9dc0b0e` |
 | pl-9 | LOW      | tests: no guard holds the mpv patch's `utils-mac.c` hunk | deferred | the release's test pass |
 | pl-10 | LOW     | docs: the macOS audit and its CI job described as they were before the fixes | `[x]` | `e740bf4` |
+| pl-11 | HIGH    | Windows: a later bare-name DLL load (libplacebo's d3d11.dll) can resolve beside Vela.exe | `[ ]` | in repair (codex) |
+| pl-12 | MEDIUM  | Windows set: the dependency checks miss delay imports and forwarders; the audit passes a foreign DLL | `[ ]` | in repair (codex) |
+| pl-13 | LOW     | docs: the embedded player described as Linux-only, Windows and macOS packages as without the library | `[x]` | `34fd3a3` |
 
 ### pl-1 (whost)
 
@@ -224,12 +228,13 @@ Create the draft and upload the macOS DMG only after its checks pass,
 alongside the other checked packages."
 
 Admitted: the Linux and Windows legs already attach nothing and leave it
-to the `inventory` job; the macOS leg was left creating the draft. In
-repair (codex): no leg of `bundle` attaches; on a tag the `inventory` job
-creates the draft if there is none, refuses a published release, and
-uploads the checked DMG with the rest. The `.app.tar.gz` that
-tauri-action used to add goes (the same app, undocumented, never in
-SHA256SUMS).
+to the `inventory` job; the macOS leg was left creating the draft. Repair
+(`9dc0b0e`, codex): no leg of `bundle` gives tauri-action a tag; on a tag
+push the `inventory` job requires one DMG, reuses or creates the draft,
+refuses a published release, and uploads the checked DMG with the rest.
+The `.app.tar.gz` that tauri-action used to add goes (the same app,
+undocumented, never in SHA256SUMS). Guards seen failing with each of
+eleven injected regressions.
 
 ### pl-9 (mpkg)
 
@@ -263,3 +268,69 @@ pushes do not run the macOS set job."
 Admitted. Repair (`e740bf4`, written by the working agent): both
 documents state the one exemption and the job on every push; the guide
 also names the AVFoundation audio output the set gained in `ad65c4d`.
+
+## A sixth hunt: the Windows packaging
+
+Dispatched by the working agent over `e54b302..4fe60b8`, limited to three
+commits: the Windows set's cross build (`3dad7a8`), its container on
+GitHub's runner (`8c40ff8`) and the installers carrying the set
+(`4fe60b8`). Same harness and reviewer as above. **findings**: three
+candidates, three admitted, as pl-11 (HIGH), pl-12 (MEDIUM) and pl-13
+(LOW).
+
+### pl-11 (wpkg)
+
+Reviewer, verbatim, evidence: "scripts/build-libmpv-windows.sh:322 enables
+libplacebo's D3D11 backend, whose pinned source later calls bare
+LoadLibraryW for d3d11.dll and dxgi.dll.
+src-tauri/src/player/embedded/libmpv.rs:342 restricts only the initial
+load; the process-wide restrictions in
+packaging/libmpv/check-libmpv-windows.py:202 are absent from Vela. A
+headless Wine harness using the actual set and Vela's flags executed a
+canary d3d11.dll beside the executable; applying the checker's process
+restrictions prevented it." Predicted failure: "An unmanifested DLL beside
+Vela.exe can execute inside Vela during embedded playback or break
+rendering. The successful installer checks do not detect this because
+they use a stricter loading policy and null video output."
+
+Admitted. Context: the installers put the set beside Vela.exe, so the
+application directory is the set's; writing there needs the rights that
+installed Vela. In repair (codex): the process's default DLL directories
+restricted to System32 (as the checker does), so later bare-name loads
+cannot resolve beside Vela.exe; what stays reachable through loaders that
+name the application directory explicitly (FFmpeg's `win32_dlopen`) is to
+be stated with the repair.
+
+### pl-12 (wpkg)
+
+Reviewer, verbatim, evidence: "scripts/build-libmpv-windows.sh:357
+extracts only objdump's 'DLL Name:' lines. Real PE fixtures containing
+either a delayed libwinpthread-1.dll import or an export forwarded to
+libwinpthread-1.pthread_create both produced an empty dependency list.
+packaging/libmpv/check-libmpv-windows.py:139 also accepts an unlisted
+libwinpthread-1.dll loaded outside the set. Replacing needed() with an
+empty implementation still passed all 186 selected Windows policy tests."
+Predicted failure: "The checks can certify a set with an unshipped runtime
+dependency. Playback that subsequently reaches the affected function can
+fail to resolve it or load a foreign DLL; the null-output playback check
+need not exercise that function."
+
+Admitted (the checks are release gates, not tests alone). In repair
+(codex): the closure covers delay imports and forwarded exports, and the
+runtime audit reports a newly loaded module outside both the set and
+Windows' own directories.
+
+### pl-13 (wpkg)
+
+Reviewer, verbatim, evidence: "RELEASE_NOTES.md:142 still states that
+Windows packages do not carry the library, contradicting the Windows
+overlay and release workflow introduced by 4fe60b8. README.md:118 and
+docs/development.md:227 also describe embedded playback as
+Linux-on-Wayland-only." Predicted failure: "Users receive incorrect
+information about the Windows installer's contents and the availability
+of embedded playback."
+
+Admitted. Repair (`34fd3a3`, written by the working agent): the release
+notes, README, `docs/usage.md` and the development guide describe the
+embedded player on all three platforms, per platform where they differ,
+and every package carrying the library.

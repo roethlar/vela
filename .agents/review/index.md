@@ -1158,12 +1158,12 @@ under `tests/` gates nothing until it is added there.
 
 ## 2026-11-16 — the embedded player on Windows and macOS (codereview codex)
 
-Record: `codereview-2026-11-16-platforms.md`. Five hunts so far (a
-sixth, the Windows packaging, running): the Windows host
-(`8c40ff8..6b206ec`), the macOS host (`4fe60b8..623ec17`), the fixes
-`c49be2a` and `ca07bfa`, the macOS HDR slice (`ad65c4d..49f2c3c`), the
-macOS packaging (six commits in `9ec9991..bffc3a4`). 10 candidates, 10
-admitted (8 MEDIUM, 2 LOW), 0 declined; pl-1 to pl-7 and pl-10 closed
-(`ca07bfa`, `49f2c3c`, `41d47c4`, `9833fc1`, `e93402e`, `e1cf5f2`,
-`e740bf4`); pl-8 in repair; pl-9 (tests only) waits for the release's
-test pass.
+Record: `codereview-2026-11-16-platforms.md`. Six hunts: the Windows
+host (`8c40ff8..6b206ec`), the macOS host (`4fe60b8..623ec17`), the
+fixes `c49be2a` and `ca07bfa`, the macOS HDR slice (`ad65c4d..49f2c3c`),
+the macOS packaging (six commits in `9ec9991..bffc3a4`), the Windows
+packaging (three commits in `e54b302..4fe60b8`). 13 candidates, 13
+admitted (1 HIGH, 9 MEDIUM, 3 LOW), 0 declined; pl-1 to pl-8, pl-10 and
+pl-13 closed (`ca07bfa`, `49f2c3c`, `41d47c4`, `9833fc1`, `e93402e`,
+`e1cf5f2`, `9dc0b0e`, `e740bf4`, `34fd3a3`); pl-11 and pl-12 in repair;
+pl-9 (tests only) waits for the release's test pass.
