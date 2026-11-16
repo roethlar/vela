@@ -364,12 +364,14 @@ and the owner had the SvelteKit removal landed (`dee0f8b`;
 landed", has its verification: the full check, both end-to-end suites
 with the parity verdict PASS, the plan's red-proofs, a codex hunt). The
 Windows installers are no longer signed (`fc991a8`, the owner's decision).
-Where this section says 1.0.65, 1.0.66 is what would be tagged, unless the
-title-bar change in flight lands first and makes it 1.0.67
-(`.agents/state.md`, the handoff of 2026-11-16). The package for
-`continuum` is `~/dev/vela-agent-keep/pkg/vela-1.0.66-1-x86_64.pkg.tar.zst`
-(sha256 `be81c99f348508ccdaed1c2e7e196f241826561cd92550215f6ce828ebf00e94`), and the run by hand for the owner's macOS and Windows
-builds is 43914914442, at `dee0f8b`.
+Where this section says 1.0.65, read 1.0.67: the title bar on KDE was
+fixed the same evening (`6b62e21`, `f6f22cd`) and the version bumped
+(`b163241`). The macOS side works again: run 43914914442 at `dee0f8b`
+notarized and stapled the app. The run for the owner's macOS and Windows
+builds is 43921694491, at `b163241`; the package for `continuum` is
+`~/dev/vela-agent-keep/pkg/vela-1.0.67-1-x86_64.pkg.tar.zst` once
+`final-b163241/summary.log` says it was built and checked
+(`.agents/state.md`, the handoff).
 
 Prepared by the working agent on the owner's word of 2026-11-16
 (`.agents/decisions.md`): "you have permission to update whatever you need
