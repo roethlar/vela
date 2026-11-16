@@ -21,7 +21,11 @@ if [ "${1:-}" = --container ]; then
   mkdir -p "$LIBMPV_ROOT"
   LIBMPV_ROOT="$(cd "$LIBMPV_ROOT" && pwd)"
   "$engine" build -t vela-libmpv-windows-build -f "$recipe/Containerfile.windows" "$recipe"
-  exec "$engine" run --rm --security-opt label=disable \
+  # seccomp=unconfined: trixie's glibc changes modes with fchmodat2, which the
+  # seccomp profile of older engines (podman 3.4 on GitHub's ubuntu-22.04)
+  # does not know and refuses with EPERM, so tar could not extract a source.
+  # This container only runs the compilers.
+  exec "$engine" run --rm --security-opt label=disable --security-opt seccomp=unconfined \
     -v "$repo":/repo:ro -v "$LIBMPV_ROOT":/libmpv -e LIBMPV_ROOT=/libmpv \
     vela-libmpv-windows-build bash /repo/scripts/build-libmpv-windows.sh "$@"
 fi
