@@ -64,7 +64,11 @@ for variant in wid wid-gpu; do
     fi
   ) &
   watchdog=$!
-  sleep 8
+  # An early picture too: the first run crashed about 3 s in, just after
+  # mpv showed its first frame.
+  sleep 2.4
+  screencapture -x "$out/screen-$variant-early.png" 2>> "$out/screencapture-$variant.err" || true
+  sleep 5.6
   if screencapture -x "$out/screen-$variant.png" 2> "$out/screencapture-$variant.err"; then
     capture=ok
   else
@@ -78,5 +82,11 @@ for variant in wid wid-gpu; do
   wait "$watchdog" 2>/dev/null || true
   watchdog=''
   echo "$variant: exit=$status screencapture=$capture" >> "$out/result.txt"
+  # macOS writes a crash report for a process that died of a signal.
+  sleep 3
+  for report in "$HOME"/Library/Logs/DiagnosticReports/m0-embed*; do
+    [[ -f "$report" ]] && mv "$report" "$out/crash-$variant-$(basename "$report")"
+  done
 done
 cat "$out/result.txt"
+ls "$out" | grep -E '^crash-' || echo 'no crash reports'
