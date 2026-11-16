@@ -90,6 +90,21 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
        `vela-windows` artifacts (`gh run download 43921694491 --repo
        roethlar/vela`), check them, install the 1.0.67 package on
        `continuum`, and tag `v1.0.67` when satisfied.
+  - QUEUED FOR 1.0.68, held off `main` on purpose: the owner, verifying
+    the 1.0.67 builds (2026-11-16): "for the next rev, the "EXPERIMENTAL"
+    tag in settings next to Video player is incorrect. the experimental
+    feature was the embedded player, not the setting." Fixed on the LOCAL
+    branch `next` (not pushed; worktree `~/dev/vela-agent-keep/wt/next` on
+    `continuum`), commit `793021e`: the heading's badge is gone, the
+    "Vela's window (experimental)" choice keeps the word, a guard holds
+    both (red-proved); `npm run check` (738) and the build pass. It is kept
+    off `main` so that `main` stays exactly the 1.0.67 the owner is
+    verifying, and tagging `main` stays safe. To land it once `v1.0.67` is
+    tagged (or at once, if the owner decides the fix goes into this
+    release instead): merge `next` into `main`, bump to 1.0.68, write the
+    notes (changes since 1.0.67 if 1.0.67 was published), run the usual
+    checks, push, and a run by hand of the release workflow for the
+    owner's builds.
   - NOT verified by anyone: this version running on macOS or Windows (CI
     compiles it there, nothing more), and everything that takes eyes.
 - THE FRONT END IS PLAIN SVELTE 5 AND VITE SINCE 2026-11-16 (`dee0f8b`;
