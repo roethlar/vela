@@ -1068,3 +1068,402 @@ test('Windows build refuses unknown steps before changing output', { skip: noBas
   assert.equal(run.status, 1);
   assert.match(run.stderr, /unknown step 'ffmpeg-gpl'/);
 });
+
+// macOS: policy checks run on every host, without an Apple SDK or downloads.
+const macScript = read('scripts/build-libmpv-macos.sh');
+const macHelperPath = path.join(root, 'packaging/libmpv/macos/macho.py');
+const macHelper = read('packaging/libmpv/macos/macho.py');
+const macCheckerPath = path.join(root, 'packaging/libmpv/check-libmpv-macos.py');
+const macChecker = read('packaging/libmpv/check-libmpv-macos.py');
+const macJob = job(ci, 'libmpv-macos');
+const macCode = (source) => source.split('\n').filter((line) => !/^\s*#/.test(line)).join('\n');
+
+function macRequired(label, source, tokens) {
+  for (const token of tokens) {
+    test(`macOS ${label}: ${token} (green and red)`, () => {
+      const guard = (candidate) => assert.ok(macCode(candidate).includes(token), `${label}: missing ${token}`);
+      guard(source);
+      assert.throws(() => guard(source.replaceAll(token, 'REMOVED_FOR_RED_PROOF')), /missing/);
+    });
+  }
+}
+
+const macConfiguration = {
+  freetype: ['-Dzlib=system -Dharfbuzz=disabled -Dmmap=enabled'],
+  fribidi: ['-Ddocs=false -Dbin=false -Dtests=false'],
+  harfbuzz: ['-Dfreetype=enabled -Dtests=disabled -Dutilities=disabled', '-Dsubset=disabled -Draster=disabled -Dvector=disabled -Dgpu=disabled'],
+  libass: ['-Dcoretext=enabled -Dfontconfig=disabled -Ddirectwrite=disabled -Dasm=enabled'],
+  dav1d: ['-Denable_asm=true -Denable_tools=false -Denable_tests=false -Denable_examples=false'],
+  lua: ['-DLUA_COMPAT_ALL -DLUA_USE_MACOSX', '-dynamiclib', '-Wl,-install_name,@rpath/liblua5.2.0.dylib', 'lua5.2.pc'],
+  uchardet: ['-DCMAKE_TOOLCHAIN_FILE="$WORK/macos.cmake"', '-DFETCHCONTENT_FULLY_DISCONNECTED=ON', '-DBUILD_BINARY=OFF -DBUILD_STATIC=OFF -DBUILD_SHARED_LIBS=ON'],
+  ffmpeg: ['env -u CFLAGS -u CXXFLAGS -u OBJCFLAGS -u LDFLAGS', '--target-os=darwin --arch="$CPU_FAMILY" --cpu=generic --enable-cross-compile',
+    '--cc="$CC" --cxx="$CXX" --objcc="$OBJC"', '--pkg-config="$WORK/pkg-config" --install-name-dir=@rpath',
+    '--enable-shared --disable-static --enable-pic', '--disable-autodetect', '--disable-gpl --disable-nonfree --disable-version3',
+    '--enable-zlib --enable-iconv --enable-securetransport --enable-libdav1d', '--enable-videotoolbox --enable-audiotoolbox --enable-pthreads',
+    '--disable-indevs --disable-outdevs --enable-indev=lavfi', '--extra-libs=-liconv',
+    'grep -qx \'#define FFMPEG_LICENSE "LGPL version 2.1 or later"\' config.h',
+    'ZLIB ICONV SECURETRANSPORT LIBDAV1D VIDEOTOOLBOX AUDIOTOOLBOX', 'LAVFI_INDEV TESTSRC2_FILTER HTTPS_PROTOCOL TLS_PROTOCOL',
+    'grep -qx "#define CONFIG_$feature 1" config.h || die', 'grep -qx "#define CONFIG_$feature 1" config_components.h || die'],
+  libplacebo: ['$(unpack vulkan-headers)', '-Dopengl=disabled -Dvulkan=disabled -Dd3d11=disabled',
+    '-Dshaderc=disabled -Dglslang=disabled -Ddemos=false -Dtests=false -Dbench=false -Dfuzz=false'],
+  mpv: ['-Dgpl=false -Dlibmpv=true -Dcplayer=false -Dbuild-date=false',
+    '-Dlua=lua5.2 -Diconv=enabled -Dzlib=enabled -Duchardet=enabled -Dvector=enabled',
+    '-Dlibavdevice=enabled -Dcoreaudio=enabled -Dgl=enabled -Dplain-gl=enabled',
+    '-Dcocoa=disabled -Dgl-cocoa=disabled -Dvideotoolbox-gl=disabled -Dvideotoolbox-pl=disabled',
+    '-Dswift-build=disabled -Dmacos-cocoa-cb=disabled -Dmacos-media-player=disabled',
+    '-Dmacos-touchbar=disabled -Davfoundation=disabled -Dvulkan=disabled',
+    'patch -d "$src" -p1 < "$recipe/macos/mpv-sdk-only.patch"',
+    "grep -qx '#define HAVE_SWIFT 0'", 'grep -qx "#define HAVE_$feature 1"'],
+};
+for (const [name, tokens] of Object.entries(macConfiguration)) macRequired(name, body(macScript, `build_${name}`), tokens);
+macRequired('isolation and universal build', macScript, [
+  'for ARCH in arm64 x86_64; do', 'CPU_FAMILY=aarch64', 'export MACOSX_DEPLOYMENT_TARGET=11.0',
+  'export PATH="$VELA_LIBMPV_TOOLS/bin:/usr/bin:/bin:/usr/sbin:/sbin"',
+  'unset PKG_CONFIG_PATH PKG_CONFIG_SYSROOT_DIR PKG_CONFIG_DIR',
+  'unset CPATH C_INCLUDE_PATH CPLUS_INCLUDE_PATH OBJC_INCLUDE_PATH LIBRARY_PATH CPPFLAGS',
+  'unset CMAKE_PREFIX_PATH CMAKE_TOOLCHAIN_FILE CMAKE_INCLUDE_PATH CMAKE_LIBRARY_PATH CMAKE_FRAMEWORK_PATH',
+  'export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"', "export PKG_CONFIG_LIBDIR='$PREFIX/lib/pkgconfig'",
+  '--cross-file "$WORK/macos.ini"', '--wrap-mode=nodownload', '-Ddefault_library=shared -Dauto_features=disabled',
+  "system = 'darwin'", "cpu_family = '$CPU_FAMILY'", 'needs_exe_wrapper = true',
+  "pkg_config_libdir = ['$PREFIX/lib/pkgconfig']", "cmake_toolchain_file = '$WORK/macos.cmake'",
+  'set(CMAKE_SYSTEM_NAME Darwin)', 'set(CMAKE_OSX_ARCHITECTURES $ARCH CACHE STRING "" FORCE)',
+  'set(CMAKE_OSX_DEPLOYMENT_TARGET 11.0 CACHE STRING "" FORCE)', 'set(CMAKE_OSX_SYSROOT "$SDKROOT" CACHE PATH "" FORCE)',
+  'set(CMAKE_FIND_ROOT_PATH "$PREFIX" "$SDKROOT")', 'set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)',
+  'set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)', 'set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)',
+  'set(CMAKE_IGNORE_PREFIX_PATH /opt/homebrew /usr/local)',
+  'python3 -B "$recipe/macos/macho.py" collect "$PREFIX" "$WORK/stage" "$ARCH"',
+  'python3 -B "$recipe/macos/macho.py" merge "$WORK_ROOT" "$OUT" "$recipe"',
+  'python3 -B "$recipe/check-libmpv-macos.py" "$OUT" --manifest-only',
+  'file="$(fetch "$name")" || exit 1',
+]);
+for (const language of ['c', 'cpp', 'objc', 'objcpp']) {
+  macRequired('Meson architecture flags', macScript, [
+    `${language}_args = ['-arch', '$ARCH', '-isysroot', '$SDKROOT', '-mmacosx-version-min=11.0'`,
+    `${language}_link_args = ['-arch', '$ARCH', '-isysroot', '$SDKROOT', '-mmacosx-version-min=11.0'`,
+  ]);
+}
+
+test('macOS sources and notices cover exactly the Linux components plus Vulkan headers (green and red)', () => {
+  const expected = pins.filter((p) => p[2] === 'ship' || p[0] === 'vulkan-headers');
+  const guard = (candidate, helper, entries = expected) => {
+    const fetched = [...candidate.matchAll(/"\$\((?:unpack|fetch) ([a-z0-9-]+)\)"/g)].map((m) => m[1]);
+    assert.deepEqual([...new Set(fetched)].sort(), entries.map((p) => p[0]).sort(), 'source graph equals selected pins');
+    assert.equal((macCode(candidate).match(/\bcurl\b/g) ?? []).length, 1, 'one download boundary');
+    assert.doesNotMatch(macCode(candidate), /\b(wget|git clone|pip3? install|brew install)\b/, 'no unpinned target source');
+    const steps = candidate.match(/^steps="\$\{\*:-(.*?)\}"$/m)?.[1].split(' ');
+    assert.deepEqual(steps, [...Object.keys(macConfiguration), 'collect'], 'all components built in dependency order');
+    for (const [name, version, role, sha, url] of entries) {
+      assert.match(sha, /^[0-9a-f]{64}$/, `${name}: checksum`);
+      assert.match(role, /^(ship|build)$/, `${name}: role`);
+      assert.ok(url?.startsWith('https://') && url.includes(version), `${name}: versioned source URL`);
+      assert.ok(helper.includes(`"${name}": [`) || (name === 'lua' && helper.includes('licence lua licenses/lua/LICENSE')), `${name}: licence`);
+    }
+  };
+  guard(macScript, macHelper);
+  for (const [name] of expected) {
+    assert.throws(() => guard(macScript.replaceAll(`$(unpack ${name})`, '$(unpack UNPINNED)'), macHelper), /source graph/);
+    assert.throws(() => guard(macScript, macHelper.replaceAll(`"${name}": [`, '"MISSING": [').replaceAll(`licence ${name} licenses/${name}/LICENSE`, 'REMOVED')), /licence/);
+    for (const [index, bad, message] of [[2, 'bad', /role/], [3, 'bad', /checksum/], [4, 'https://unpinned.invalid', /versioned source URL/]]) {
+      assert.throws(() => guard(macScript, macHelper, expected.map((p) => p[0] === name ? p.map((v, i) => i === index ? bad : v) : p)), message);
+    }
+  }
+  assert.throws(() => guard(macScript + '\ncurl https://unpinned.invalid\n', macHelper), /download boundary/);
+  assert.throws(() => guard(macScript + '\nwget https://unpinned.invalid\n', macHelper), /unpinned target source/);
+  assert.throws(() => guard(macScript.replace('dav1d lua uchardet', 'dav1d uchardet'), macHelper), /dependency order/);
+});
+
+test('macOS LGPL switches and SDK-only build patch reject regressions (green and red)', () => {
+  const licence = (candidate) => {
+    assert.doesNotMatch(macCode(body(candidate, 'build_mpv')), /-Dgpl=true/, 'mpv GPL');
+    assert.doesNotMatch(macCode(body(candidate, 'build_ffmpeg')), /--enable-(gpl|nonfree|version3)/, 'FFmpeg LGPL');
+  };
+  licence(macScript);
+  assert.throws(() => licence(macScript.replace('-Dgpl=false', '-Dgpl=true')), /mpv GPL/);
+  for (const flag of ['gpl', 'nonfree', 'version3']) {
+    assert.throws(() => licence(macScript.replace(`--disable-${flag}`, `--enable-${flag}`)), /FFmpeg LGPL/);
+  }
+  const patch = read('packaging/libmpv/macos/mpv-sdk-only.patch');
+  const guard = (candidate) => {
+    assert.deepEqual([...candidate.matchAll(/^\+\+\+ b\/(.*)$/gm)].map((m) => m[1]), ['meson.build'], 'build description only');
+    assert.match(candidate, /^\+    objc_link_flags = \['-isysroot', macos_sdk_path\]$/m, 'SDK only');
+    assert.doesNotMatch(candidate.split('\n').filter((l) => l.startsWith('+')).join('\n'), /\/usr\/local|\/opt\/homebrew/, 'no host search path');
+  };
+  guard(patch);
+  assert.throws(() => guard(patch.replace('+++ b/meson.build', '+++ b/player/main.c')), /build description/);
+  assert.throws(() => guard(patch.replace("+    objc_link_flags = ['-isysroot', macos_sdk_path]", "+    objc_link_flags = ['-L/usr/local/lib']")), /SDK only/);
+  assert.throws(() => guard(patch + '\n+    link_flags += ["-L/opt/homebrew/lib"]\n'), /host search path/);
+});
+
+macRequired('CI', macJob, [
+  'runs-on: macos-latest', 'timeout-minutes: 150', 'run: bash packaging/libmpv/macos/prepare-tools.sh',
+  'defaults:\n      run:\n        shell: bash',
+  'path: .libmpv/out/libmpv-macos-universal', 'bash scripts/build-libmpv-macos.sh',
+  '/usr/bin/python3 -I -B packaging/libmpv/check-libmpv-macos.py .libmpv/out/libmpv-macos-universal',
+  'softwareupdate --install-rosetta --agree-to-license', 'name: libmpv-macos-universal',
+  'uses: actions/upload-artifact@v7', 'if-no-files-found: error',
+]);
+test('macOS CI hashes every build input and always checks cached sets (green and red)', () => {
+  const inputs = ['scripts/build-libmpv-macos.sh', 'packaging/libmpv/versions.txt', 'packaging/libmpv/macos/**',
+    'packaging/libmpv/check-libmpv-macos.py', '.github/workflows/ci.yml', '.libmpv/toolchain-macos.txt'];
+  const guard = (candidate) => {
+    const key = candidate.match(/key: libmpv-macos-universal-\$\{\{ hashFiles\(([^)]*)\) \}\}/)?.[1];
+    assert.ok(key, 'cache key');
+    for (const input of inputs) assert.ok(key.includes(`'${input}'`), `key missing ${input}`);
+    const check = candidate.match(/- name: Load and play both architectures\n([\s\S]*?)(?=\n      - |$)/)?.[1];
+    assert.ok(check, 'separate check step');
+    assert.doesNotMatch(check, /^\s+if:/m, 'cached sets must be checked');
+    assert.ok(candidate.indexOf('Prepare host tools') < candidate.indexOf('Restore the universal set'), 'fingerprint before cache');
+  };
+  guard(macJob);
+  for (const input of inputs) assert.throws(() => guard(macJob.replace(`'${input}'`, "'missing'")), /key missing/);
+  assert.throws(() => guard(macJob.replace('libmpv-macos-universal-${{ hashFiles', 'constant-${{ hashFiles')), /cache key/);
+  assert.throws(() => guard(macJob.replace('- name: Load and play both architectures\n', '- name: Load and play both architectures\n        if: false\n')), /cached sets/);
+  assert.throws(() => guard(macJob.replace('- name: Load and play both architectures\n', '- name: no check\n')), /separate check step/);
+  assert.throws(() => guard(macJob.replace('Prepare host tools', 'TEMP').replace('Restore the universal set', 'Prepare host tools').replace('TEMP', 'Restore the universal set')), /fingerprint before cache/);
+});
+macRequired('probe', read('probes/libmpv-macos/run.sh'), [
+  'trap keep_evidence EXIT', 'bash packaging/libmpv/macos/prepare-tools.sh',
+  'bash scripts/build-libmpv-macos.sh', '/usr/bin/python3 -I -B packaging/libmpv/check-libmpv-macos.py',
+  'cp "$set_dir/MANIFEST" "$PROBE_OUT/MANIFEST"', '/usr/bin/otool -arch all -L "$dylib"',
+  'tee "$PROBE_OUT/build.log"', 'tee "$PROBE_OUT/check.log"', 'exit "$status"',
+]);
+macRequired('checker wiring', macChecker, [
+  'problems = macho.check_manifest(directory, args.pins)', 'skip load: manifest check failed',
+  'macho.validate(directory)', 'for arch in ("arm64", "x86_64"):',
+  '["/usr/bin/arch", f"-{arch}", "/usr/bin/python3", "-I", "-B"',
+  'environment = clean_environment(os.environ)', 'timeout=90, check=False',
+  'ctypes.CDLL(str(directory / "libmpv.2.dylib"), mode=os.RTLD_NOW | os.RTLD_LOCAL)',
+  '["/usr/bin/vmmap", "-w", str(os.getpid())]', 'snapshots.update(loaded_images())',
+  'check_loaded(directory, files, snapshots, executable, require_mpv)',
+  'lib.mpv_client_api_version()', '("vo", "null"), ("ao", "null")',
+  'b"av://lavfi:testsrc2=duration=2"', 'end.reason != 0 or end.error != 0 or not loaded',
+  'time.monotonic() + 25', 'lib.mpv_terminate_destroy(handle)',
+]);
+macRequired('Mach-O collector', macHelper, [
+  'queue, seen = ["libmpv.2.dylib"], set()', 'architectures(apple("lipo", "-archs", source), {arch})',
+  'edits = ["-id", f"@rpath/{name}"]', 'edits.extend(["-change", dep, f"@rpath/{child}"])',
+  'edits.extend(["-add_rpath", "@loader_path"])', 'apple("install_name_tool", *edits, target)',
+  'apple("lipo", "-create", arm / name, intel / name, "-output", dest / name)',
+  '"/usr/bin/codesign", "--force", "--sign", "-", "--timestamp=none"',
+  'system = validate(dest)', 'no licence text collected for a component',
+  'hashlib.sha256(content).hexdigest()', 'files, components = read_manifest(directory)',
+]);
+
+function macCall(module, name, ...args) {
+  const run = spawnSync(python, ['-B', '-c', [
+    'import importlib.util, json, sys',
+    "s = importlib.util.spec_from_file_location('mac_check', sys.argv[1])",
+    'm = importlib.util.module_from_spec(s); s.loader.exec_module(m)',
+    'try:',
+    '    result = getattr(m, sys.argv[2])(*json.loads(sys.argv[3]))',
+    '    print(json.dumps(sorted(result) if isinstance(result, set) else result))',
+    'except ValueError as e:',
+    '    print(json.dumps({"error": str(e)}))',
+  ].join('\n'), module, name, JSON.stringify(args)], { encoding: 'utf8' });
+  assert.equal(run.status, 0, run.stderr);
+  return JSON.parse(run.stdout);
+}
+
+test('macOS Mach-O audit rejects foreign links, wrong IDs/rpaths/floors and thin libraries (green and red)', () => {
+  const name = 'libmpv.2.dylib';
+  const names = [name, 'libavcodec.63.dylib'];
+  const info = { id: ['@rpath/libmpv.2.dylib'], rpaths: ['@loader_path'], minimum: ['11.0'],
+    needed: ['@rpath/libavcodec.63.dylib', '/usr/lib/libSystem.B.dylib', '/System/Library/Frameworks/CoreAudio.framework/Versions/A/CoreAudio'] };
+  const judge = (change = {}) => macCall(macHelperPath, 'judge', name, { ...info, ...change }, names);
+  assert.deepEqual(judge(), []);
+  for (const dep of ['/opt/homebrew/lib/libz.dylib', '/usr/local/lib/libz.dylib', '/tmp/prefix/lib/libavcodec.63.dylib',
+    '/usr/library/libz.dylib', '/System-fake/libz.dylib', '/System/../opt/libz.dylib',
+    '@rpath/libmissing.dylib', '@loader_path/libavcodec.63.dylib', '@rpath/../libavcodec.63.dylib']) {
+    assert.match(judge({ needed: [...info.needed, dep] }).join(), /outside the set\/system/);
+  }
+  assert.match(judge({ id: ['/tmp/libmpv.2.dylib'] }).join(), /install name/);
+  assert.match(judge({ rpaths: [] }).join(), /rpaths/);
+  assert.match(judge({ rpaths: ['@loader_path', '/opt/homebrew/lib'] }).join(), /rpaths/);
+  assert.match(judge({ minimum: ['11.1'] }).join(), /above 11.0/);
+  assert.match(judge({ minimum: [] }).join(), /deployment/);
+  assert.equal(macCall(macHelperPath, 'architectures', 'x86_64 arm64\n'), null);
+  for (const archs of ['arm64', 'x86_64', '', 'arm64 arm64', 'arm64 x86_64 arm64e']) {
+    assert.match(macCall(macHelperPath, 'architectures', archs).error, /wrong architectures/);
+  }
+});
+
+test('macOS otool and vmmap parsers read real-shaped records and fail closed (green and red)', () => {
+  const commands = `file (architecture arm64):\nLoad command 0\n          cmd LC_ID_DYLIB\n         name @rpath/libmpv.2.dylib (offset 24)\nLoad command 1\n          cmd LC_LOAD_DYLIB\n         name /usr/lib/libSystem.B.dylib (offset 24)\nLoad command 2\n          cmd LC_RPATH\n         path @loader_path (offset 12)\nLoad command 3\n          cmd LC_BUILD_VERSION\n     platform 1\n        minos 11.0\n          sdk 15.0\n`;
+  assert.deepEqual(macCall(macHelperPath, 'parse_load_commands', commands), {
+    id: ['@rpath/libmpv.2.dylib'], needed: ['/usr/lib/libSystem.B.dylib'], rpaths: ['@loader_path'], minimum: ['11.0'],
+  });
+  for (const [old, replacement, reason] of [['LC_ID_DYLIB', 'LC_UUID', /install name/],
+    ['platform 1', 'platform 2', /not a macOS/], ['minos 11.0', 'minos garbage', /deployment/],
+    ['name /usr/lib', 'BROKEN /usr/lib', /has no name/], ['path @loader_path', 'BROKEN @loader_path', /has no path/]]) {
+    assert.match(macCall(macHelperPath, 'parse_load_commands', commands.replace(old, replacement)).error, reason);
+  }
+  const text = '__TEXT 100000-200000 [16K] r-x/r-x SM=COW /set with spaces/libmpv.2.dylib\n__TEXT 300000-400000 [16K] r-x/r-x SM=COW /usr/lib/libSystem.B.dylib\n';
+  assert.deepEqual(macCall(macCheckerPath, 'parse_vmmap', text), ['/set with spaces/libmpv.2.dylib', '/usr/lib/libSystem.B.dylib']);
+  assert.match(macCall(macCheckerPath, 'parse_vmmap', 'vmmap: permission denied').error, /no image paths/);
+});
+
+test('macOS loaded-image audit rejects every foreign or unlisted library, including the harness (green and red)', () => {
+  const set = path.resolve(os.tmpdir(), 'vela-mac-set');
+  const names = ['libmpv.2.dylib', 'libavcodec.63.dylib'];
+  const modules = names.map((n) => path.join(set, n)).concat(['/usr/lib/libSystem.B.dylib', '/System/Library/Frameworks/CoreAudio.framework/Versions/A/CoreAudio']);
+  const judge = (paths, required = true) => macCall(macCheckerPath, 'check_loaded', set, names, paths, '/usr/bin/python3', required);
+  assert.deepEqual(judge(modules), []);
+  assert.deepEqual(judge([...modules, '/usr/bin/python3']), []);
+  for (const file of ['/opt/homebrew/lib/libffi.dylib', '/usr/local/lib/libz.dylib', '/tmp/libavcodec.63.dylib',
+    '/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/Python3',
+    `${set}-other/libmpv.2.dylib`, `${set}/nested/libavcodec.63.dylib`]) {
+    assert.match(judge([...modules, file]).join(), /outside set\/system/);
+  }
+  assert.match(judge([...modules, path.join(set, 'unlisted.dylib')]).join(), /not in MANIFEST/);
+  assert.match(judge(modules.slice(1)).join(), /not mapped/);
+  assert.deepEqual(judge([], false), []);
+  const clean = macCall(macCheckerPath, 'clean_environment', {
+    DYLD_LIBRARY_PATH: '/bad', DYLD_INSERT_LIBRARIES: '/bad', DYLD_FUTURE_VARIABLE: '/bad',
+    PYTHONPATH: '/bad', LD_PRELOAD: '/bad', PATH: '/usr/bin', KEEP: 'yes',
+  });
+  assert.deepEqual(clean, { PATH: '/usr/bin', KEEP: 'yes' });
+});
+
+function macFixture(t) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vela-macos-check-'));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const dir = path.join(tmp, 'set');
+  const pinfile = path.join(tmp, 'versions.txt');
+  fs.mkdirSync(dir);
+  fs.writeFileSync(pinfile, 'mpv 0.42.0 ship\nvulkan-headers 1.4.368 build\nshaderc 2026.4 build\n');
+  const files = { 'libmpv.2.dylib': 'universal library', 'libavcodec.63.dylib': 'dependency',
+    'licenses/mpv/LICENSE': 'LGPL', 'licenses/vulkan-headers/LICENSE': 'MIT', 'licenses/mpv/mpv-sdk-only.patch': 'build patch' };
+  const lines = ['arch universal', 'platform macos', 'minimum-macos 11.0',
+    'component mpv 0.42.0', 'component vulkan-headers 1.4.368',
+    'licence mpv licenses/mpv/LICENSE', 'licence vulkan-headers licenses/vulkan-headers/LICENSE',
+    'patch mpv licenses/mpv/mpv-sdk-only.patch'];
+  for (const [name, data] of Object.entries(files)) {
+    fs.mkdirSync(path.dirname(path.join(dir, name)), { recursive: true });
+    fs.writeFileSync(path.join(dir, name), data);
+    lines.push(`file ${createHash('sha256').update(data).digest('hex')} ${Buffer.byteLength(data)} ${name}`);
+  }
+  const manifest = lines.join('\n') + '\n';
+  const manifestPath = path.join(dir, 'MANIFEST');
+  fs.writeFileSync(manifestPath, manifest);
+  return { tmp, dir, pinfile, manifest, manifestPath,
+    problems: () => macCall(macHelperPath, 'check_manifest', dir, pinfile) };
+}
+
+test('macOS MANIFEST rejects corruption before loading (each case green and red)', async (t) => {
+  const changes = [
+    ['missing dylib', (f) => fs.unlinkSync(path.join(f.dir, 'libavcodec.63.dylib')), /missing/],
+    ['changed dylib', (f) => fs.writeFileSync(path.join(f.dir, 'libmpv.2.dylib'), 'UNIVERSAL library'), /modified/],
+    ['extra dylib', (f) => fs.writeFileSync(path.join(f.dir, 'extra.dylib'), 'x'), /not in MANIFEST/],
+    ['missing licence', (f) => fs.unlinkSync(path.join(f.dir, 'licenses/mpv/LICENSE')), /missing/],
+    ['changed licence', (f) => fs.appendFileSync(path.join(f.dir, 'licenses/mpv/LICENSE'), 'x'), /modified/],
+    ['no licence role', (f) => fs.writeFileSync(f.manifestPath, f.manifest.replace('licence mpv licenses/mpv/LICENSE\n', '')), /no licence text/],
+    ['patch not licence', (f) => fs.writeFileSync(f.manifestPath, f.manifest.replace('licence mpv licenses/mpv/LICENSE', 'licence mpv licenses/mpv/mpv-sdk-only.patch')), /no licence text/],
+    ['missing patch', (f) => fs.writeFileSync(f.manifestPath, f.manifest.replace('patch mpv licenses/mpv/mpv-sdk-only.patch\n', '')), /omits the mpv build patch/],
+    ['wrong version', (f) => fs.writeFileSync(f.manifestPath, f.manifest.replace('component mpv 0.42.0', 'component mpv 0.41.0')), /versions differ/],
+    ['wrong architecture', (f) => fs.writeFileSync(f.manifestPath, f.manifest.replace('arch universal', 'arch arm64')), /must name macOS universal/],
+    ['wrong floor', (f) => fs.writeFileSync(f.manifestPath, f.manifest.replace('minimum-macos 11.0', 'minimum-macos 12.0')), /must name macOS universal/],
+    ['hash malformed', (f) => fs.writeFileSync(f.manifestPath, f.manifest.replace(/file [a-f0-9]{64}/, 'file bad')), /invalid file/],
+    ['duplicate record', (f) => fs.appendFileSync(f.manifestPath, f.manifest.match(/^file .* libmpv\.2\.dylib$/m)[0] + '\n'), /duplicate file/],
+    ['system exemption', (f) => fs.appendFileSync(f.manifestPath, 'system /opt/homebrew/lib/libz.dylib\n'), /invalid MANIFEST/],
+    ['escape', (f) => fs.writeFileSync(f.manifestPath, f.manifest.replace('libavcodec.63.dylib', '../escape.dylib')), /unsafe file/],
+    ['no primary library', (f) => fs.writeFileSync(f.manifestPath, f.manifest.replace(/^file .* libmpv\.2\.dylib\n/m, '')), /does not list/],
+  ];
+  for (const [label, change, expected] of changes) {
+    await t.test(label, (t) => {
+      const f = macFixture(t);
+      assert.deepEqual(f.problems(), [], 'green');
+      change(f);
+      assert.match(f.problems().join('\n'), expected, 'red');
+      const run = spawnSync(python, ['-B', macCheckerPath, f.dir, '--pins', f.pinfile], { encoding: 'utf8' });
+      assert.equal(run.status, 1, run.stderr);
+      assert.match(run.stdout, /skip load: manifest check failed/);
+    });
+  }
+  await t.test('manifest-only check succeeds without Apple tools', (t) => {
+    const f = macFixture(t);
+    const run = spawnSync(python, ['-B', macCheckerPath, f.dir, '--pins', f.pinfile, '--manifest-only'], { encoding: 'utf8' });
+    assert.equal(run.status, 0, run.stderr);
+    assert.match(run.stdout, /ok: MANIFEST/);
+  });
+  await t.test('symlinked library', { skip: process.platform === 'win32' && 'link creation requires privileges' }, (t) => {
+    const f = macFixture(t);
+    assert.deepEqual(f.problems(), []);
+    fs.renameSync(path.join(f.dir, 'libmpv.2.dylib'), path.join(f.tmp, 'foreign.dylib'));
+    fs.symlinkSync(path.join(f.tmp, 'foreign.dylib'), path.join(f.dir, 'libmpv.2.dylib'));
+    assert.match(f.problems().join(), /symbolic link/);
+  });
+});
+
+test('macOS fetch/unpack stops at a bad checksum even without inherit_errexit (green and red)', { skip: noBash }, (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vela-macos-fetch-'));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(tmp, 'src')); fs.mkdirSync(path.join(tmp, 'tree/lua-1.0'), { recursive: true });
+  fs.writeFileSync(path.join(tmp, 'tree/lua-1.0/source'), 'valid archive, wrong source');
+  const packed = spawnSync('tar', ['-czf', path.join(tmp, 'src/lua-1.0.tar.gz'), '-C', path.join(tmp, 'tree'), 'lua-1.0']);
+  assert.equal(packed.status, 0);
+  fs.writeFileSync(path.join(tmp, 'pins'), `lua 1.0 ship ${'0'.repeat(64)} https://example.invalid/lua-1.0.tar.gz\n`);
+  const functions = ['die', 'field', 'sources', 'fetch', 'unpack'].map((name) => {
+    const match = macScript.match(new RegExp(`^${name}\\(\\) \\{[^\\n]*\\}$|^${name}\\(\\) \\{\\n[\\s\\S]*?\\n\\}`, 'm'));
+    assert.ok(match, name); return match[0];
+  }).join('\n');
+  const invoke = (source) => spawnSync('bash', ['-c', `set -euo pipefail\n${source}\nsrc="$(unpack lua)" || exit 1\nprintf extracted`, 'test'], {
+    env: { ...process.env, VERSIONS: path.join(tmp, 'pins'), SRC_DIR: path.join(tmp, 'src'), WORK: path.join(tmp, 'work') }, encoding: 'utf8',
+  });
+  const guard = (run) => {
+    assert.equal(run.status, 1, 'checksum must stop the build');
+    assert.match(run.stderr.trim().split('\n').at(-1), /checksum mismatch: .*lua-1.0/, 'stop at mismatch');
+    assert.equal(run.stdout, '', 'nothing extracted');
+  };
+  guard(invoke(functions));
+  assert.equal(fs.existsSync(path.join(tmp, 'work/src/lua')), false);
+  const broken = functions.replace(/^  echo "\$sha  \$file" \| shasum .*\n/m, '');
+  assert.notEqual(broken, functions);
+  assert.throws(() => guard(invoke(broken)), /checksum must stop/);
+});
+
+test('macOS refuses an unknown step before requiring macOS or touching output', { skip: noBash }, () => {
+  const run = spawnSync('bash', [path.join(root, 'scripts/build-libmpv-macos.sh'), 'ffmpeg-gpl'], { encoding: 'utf8' });
+  assert.equal(run.status, 1);
+  assert.match(run.stderr, /unknown step 'ffmpeg-gpl'/);
+});
+
+test('macOS controller actually runs both workers and fails for either architecture or a timeout', async (t) => {
+  for (const failure of ['none', 'arm64', 'x86_64', 'timeout']) {
+    await t.test(failure, (t) => {
+      const f = macFixture(t);
+      const harness = [
+        'import importlib.util, json, os, sys, types',
+        "s = importlib.util.spec_from_file_location('check', sys.argv[1])",
+        'm = importlib.util.module_from_spec(s); s.loader.exec_module(m)',
+        'failure, directory, pins = sys.argv[2:5]',
+        'm.sys.platform = "darwin"',
+        'calls = []',
+        'm.macho.validate = lambda p: calls.append({"validate": str(p)})',
+        'os.environ["DYLD_LIBRARY_PATH"] = "/bad"',
+        'os.environ["DYLD_INSERT_LIBRARIES"] = "/bad"',
+        'def run(command, env, timeout, check):',
+        '    calls.append({"command": command, "env": {k: v for k, v in env.items() if k.startswith("DYLD_") or k == "PATH"}, "timeout": timeout, "check": check})',
+        '    if failure == "timeout": raise m.subprocess.TimeoutExpired(command, timeout)',
+        '    return types.SimpleNamespace(returncode=7 if command[-1] == failure else 0)',
+        'm.subprocess.run = run',
+        'sys.argv = [s.origin, directory, "--pins", pins]',
+        'result = m.main()',
+        'print(json.dumps({"status": result, "calls": calls}))',
+      ].join('\n');
+      const run = spawnSync(python, ['-B', '-c', harness, macCheckerPath, failure, f.dir, f.pinfile], { encoding: 'utf8' });
+      assert.equal(run.status, 0, run.stderr);
+      const result = JSON.parse(run.stdout.trim().split('\n').at(-1));
+      assert.equal(result.status, failure === 'none' ? 0 : 1);
+      assert.deepEqual(result.calls[0], { validate: fs.realpathSync(f.dir) });
+      assert.equal(result.calls.length, 3, 'validate, native, Rosetta; neither worker is skipped');
+      for (const [i, arch] of ['arm64', 'x86_64'].entries()) {
+        const call = result.calls[i + 1];
+        assert.deepEqual(call.command, ['/usr/bin/arch', `-${arch}`, '/usr/bin/python3', '-I', '-B', macCheckerPath,
+          fs.realpathSync(f.dir), '--pins', fs.realpathSync(f.pinfile), '--worker', arch]);
+        assert.deepEqual(call.env, { PATH: '/usr/bin:/bin:/usr/sbin:/sbin' });
+        assert.equal(call.timeout, 90);
+        assert.equal(call.check, false);
+      }
+    });
+  }
+});

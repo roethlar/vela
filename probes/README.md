@@ -17,3 +17,4 @@ answer is in that log and product code has replaced it.
 - `m0-embed`: can macOS mpv `wid`/macvk draw beneath transparent Wry HTML, with `gpu-next` or `gpu`?
 - `w0-embed`: compare mpv in a tao HWND versus a child HWND beneath a transparent WebView2 page on Windows.
 - `m1-render`: can macOS mpv's OpenGL render API draw in a CAOpenGLLayer beneath transparent Wry HTML, with accelerated or software OpenGL?
+- `libmpv-macos`: build the pinned macOS 11+ universal set on `macos-latest`, load/play/audit both architectures (Intel under Rosetta), and retain build/configure/check logs, MANIFEST and every dylib's `otool -L`. Budget estimate: 30–60 minutes cold, unmeasured; the workflow allows 170 minutes.

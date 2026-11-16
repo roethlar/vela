@@ -378,7 +378,7 @@ test('the release workflow puts the set into every Linux package and checks each
   assert.match(inventory, /uses: actions\/download-artifact@v8\n\s+with:\n\s+pattern: vela-\*\n\s+path: artifacts\n/);
   assert.doesNotMatch(inventory, /libmpv-linux/);
 
-  // Only the three named set jobs may mention it. They build/check libraries;
+  // Only the four named set jobs may mention it. They build/check libraries;
   // none of them may package Vela, and no other CI job may acquire the set.
   assertCiSetJobs(ci);
 });
@@ -388,7 +388,7 @@ function assertCiSetJobs(ci) {
   let job = null;
   let inJobs = false;
   const outside = [];
-  const setJobs = new Map(['libmpv', 'libmpv-windows', 'libmpv-windows-check'].map((name) => [name, []]));
+  const setJobs = new Map(['libmpv', 'libmpv-windows', 'libmpv-windows-check', 'libmpv-macos'].map((name) => [name, []]));
   for (const line of ci.split('\n')) {
     if (/^\S/.test(line)) inJobs = /^jobs:\s*$/.test(line);
     const header = inJobs && line.match(/^ {2}([A-Za-z0-9_-]+):\s*(#.*)?$/);
@@ -411,7 +411,7 @@ test('the CI set-job boundary rejects each escape (red proof)', () => {
   assert.throws(() => assertCiSetJobs(ci + '\n  libmpv-unapproved:\n    run: true\n'), /outside its named/);
   assert.throws(() => assertCiSetJobs(ci + '\n# libmpv outside jobs\n'), /outside its named/);
   assert.throws(() => assertCiSetJobs(ci.replace('jobs:', 'jobs:\n  app:\n    run: scripts/build.sh --with-libmpv')), /must not package/);
-  for (const name of ['libmpv', 'libmpv-windows', 'libmpv-windows-check']) {
+  for (const name of ['libmpv', 'libmpv-windows', 'libmpv-windows-check', 'libmpv-macos']) {
     assert.throws(() => assertCiSetJobs(ci.replace(`  ${name}:\n`, `  ${name}:\n    run: makepkg\n`)), /must not build a package/);
     const absent = ci.replace(new RegExp(`^  ${name}:\\n[\\s\\S]*?(?=\\n  [a-z][a-z0-9_-]*:\\n|$)`, 'm'), '');
     assert.throws(() => assertCiSetJobs(absent), /must keep|outside its named/);

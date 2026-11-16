@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  # By hand too: one job runs only so until its first build passes (see its condition).
+  workflow_dispatch:
 
 jobs:
   backend:
@@ -186,6 +188,57 @@ jobs:
       - name: Load and play to EOF
         shell: pwsh
         run: python -B packaging/libmpv/check-libmpv-windows.py .libmpv/out/libmpv-windows-x86_64
+
+  libmpv-macos:
+    name: Shipped libmpv set (macOS universal)
+    # Held to runs by hand (gh workflow run ci.yml) until its first cold build
+    # and check pass on a hosted Mac; then this condition goes.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: macos-latest
+    timeout-minutes: 150
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - name: Prepare host tools and record the Apple toolchain
+        run: bash packaging/libmpv/macos/prepare-tools.sh
+      - name: Restore the universal set
+        id: cache
+        uses: actions/cache@v6
+        with:
+          path: .libmpv/out/libmpv-macos-universal
+          key: libmpv-macos-universal-${{ hashFiles('scripts/build-libmpv-macos.sh', 'packaging/libmpv/versions.txt', 'packaging/libmpv/macos/**', 'packaging/libmpv/check-libmpv-macos.py', '.github/workflows/ci.yml', '.libmpv/toolchain-macos.txt') }}
+      - name: Build the universal set
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p .libmpv/logs-macos
+          bash scripts/build-libmpv-macos.sh 2>&1 | tee .libmpv/logs-macos/build.log
+      - name: Prepare Rosetta
+        run: |
+          if ! /usr/bin/arch -x86_64 /usr/bin/python3 -I -c 'import platform; assert platform.machine() == "x86_64"'; then
+            /usr/sbin/softwareupdate --install-rosetta --agree-to-license
+          fi
+      - name: Load and play both architectures
+        run: |
+          set -euo pipefail
+          mkdir -p .libmpv/logs-macos
+          /usr/bin/python3 -I -B packaging/libmpv/check-libmpv-macos.py .libmpv/out/libmpv-macos-universal --log-dir .libmpv/logs-macos 2>&1 | tee .libmpv/logs-macos/check.log
+      - name: Upload the universal set
+        uses: actions/upload-artifact@v7
+        with:
+          name: libmpv-macos-universal
+          if-no-files-found: error
+          path: .libmpv/out/libmpv-macos-universal
+      - name: Keep macOS build and check logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: libmpv-macos-logs
+          path: |
+            .libmpv/logs-macos
+            .libmpv/toolchain-macos.txt
 
   audit:
     name: cargo audit

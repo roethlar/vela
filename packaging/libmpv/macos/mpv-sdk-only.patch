@@ -1,0 +1,14 @@
+Vela: use the selected Apple SDK, never the runner's /usr/local libraries.
+
+mpv adds these linker paths even with cocoa/Swift disabled. Dependencies are
+resolved through the private pkg-config directory and the SDK instead. Only
+meson.build changes. Re-check this hunk when bumping mpv.
+--- a/meson.build
++++ b/meson.build
+@@ -1598,5 +1598,5 @@
+     message('Detected macOS SDK: ' + macos_sdk_version)
+     add_languages('objc', native: false)
+-    objc_link_flags = ['-isysroot', macos_sdk_path, '-L/usr/lib', '-L/usr/local/lib']
++    objc_link_flags = ['-isysroot', macos_sdk_path]
+     add_project_link_arguments(objc_link_flags, language: ['c', 'objc'])
+ endif

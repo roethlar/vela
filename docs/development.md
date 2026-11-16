@@ -156,6 +156,29 @@ plays a two-second lavfi pattern to EOF with null outputs. It does not
 exercise D3D11 drawing, HDR, hardware decoding or HTTPS, nor does this build
 recipe wire the embedded player into the Windows app or installer.
 
+For macOS 11+, run `bash packaging/libmpv/macos/prepare-tools.sh`, then
+`bash scripts/build-libmpv-macos.sh` on Apple Silicon. The same Linux pins
+produce `.libmpv/out/libmpv-macos-universal/`: separate arm64/x86_64 dylibs
+joined with `lipo`, licences and a MANIFEST. FFmpeg uses system
+SecureTransport, VideoToolbox, AudioToolbox, zlib and iconv; libass uses
+CoreText. mpv uses the OpenGL render API (`plain-gl`) and CoreAudio, with
+Swift and its own macOS windows disabled. This mpv pin cannot enable
+VideoToolbox GL interop without Swift, so hardware decoding uses the copy
+path. Every install name/reference uses `@rpath`, with `@loader_path` on
+each dylib; the set can move to either app location chosen by packaging.
+CI's `libmpv-macos` job caches the set by all recipe inputs and the recorded
+runner/toolchain, checks native and Rosetta playback with
+`/usr/bin/python3 -I -B packaging/libmpv/check-libmpv-macos.py DIR`, and
+uploads `libmpv-macos-universal`. The check audits MANIFEST integrity,
+architectures, deployment versions, dependencies, clean EOF and loaded
+library paths. Its strict path rule also covers Python's libraries, so
+an Xcode Python outside `/System` or `/usr/lib` is reported as a failure.
+The manual `libmpv-macos` probe retains diagnostic evidence. See
+`packaging/libmpv/macos/NOTES.txt` for the build-file patch and limitations.
+App integration/signing and visual/hardware/HTTPS checks are separate;
+`tauri.conf.json` currently has no macOS minimum override (the installed
+schema defaults to 10.13), which packaging must reconcile with this 11.0 set.
+
 How the set is put together:
 
 - **Pins.** `packaging/libmpv/versions.txt` is the only place a version or

@@ -1,0 +1,74 @@
+Vela's macOS libmpv set
+
+The ten shipped components use the same pins as Linux, as separate,
+replaceable dylibs: mpv and FFmpeg (LGPL-2.1-or-later), libplacebo
+(LGPL-2.1-or-later), libass (ISC), FreeType (FTL, the permissive choice),
+HarfBuzz (MIT-Modern-Variant), FriBidi (LGPL-2.1-or-later), dav1d
+(BSD-2-Clause), Lua (MIT), and uchardet (MPL-1.1 or GPL-2.0-or-later or
+LGPL-2.1-or-later; the LGPL choice). Their original notices accompany this
+file. Vela stays MIT. No GPL-only/nonfree/version3 FFmpeg option is enabled.
+Vulkan-Headers is the existing build-only pin required by libplacebo's
+stub generation, as on Linux; its MIT and Apache-2.0 notices are included.
+No new component pin, shader compiler, TLS library or font provider is
+needed. Apple supplies zlib, iconv, libc++, frameworks and the trust store.
+
+FFmpeg's configure in this pin still has SecureTransport, including its
+Security/CoreFoundation framework probe. HTTPS/TLS, VideoToolbox and
+AudioToolbox are explicitly enabled and their config macros checked.
+With --disable-autodetect, FFmpeg tries iconv in the C library only. The
+recipe explicitly links the SDK's -liconv, so SDKs that expose it as a
+separate system library work too, without discovering Homebrew libiconv.
+
+libass discovers fonts with CoreText, not fontconfig. As on Linux,
+libplacebo has no GPU backend; mpv implements the render API's OpenGL
+renderer. Lua 5.2 enables POSIX/dlopen through upstream LUA_USE_MACOSX.
+
+mpv uses gl + plain-gl, coreaudio, libavdevice, Lua, iconv, zlib, uchardet
+and vector. Its cocoa, gl-cocoa, swift-build, macos-cocoa-cb,
+macos-media-player, macos-touchbar, avfoundation and vulkan options are
+disabled. In this pin cocoa unconditionally includes clipboard-mac.m
+(which imports the generated Swift header), and player/main.c calls
+Swift bridge functions guarded only by HAVE_COCOA. Thus selecting
+gl-cocoa + cocoa + videotoolbox-gl with swift-build disabled would not
+build. The recipe leaves videotoolbox-gl/pl off instead of changing mpv's
+player sources. FFmpeg's VideoToolbox decoding, including mpv's
+videotoolbox-copy path, remains available. Zero-copy GL interop is absent.
+The application's CAOpenGLLayer/context and presentation are separate work.
+
+The one build-description patch, mpv-sdk-only.patch, removes mpv's
+unconditional /usr/local/lib linker search path; the selected SDK supplies
+system libraries. No other upstream source is patched. The patch is carried
+with the licences and hashed in both the MANIFEST and CI cache key.
+
+The recipe targets macOS 11.0 for both architectures. At implementation
+time src-tauri/tauri.conf.json had no bundle.macOS.minimumSystemVersion;
+the installed Tauri schema defaulted to 10.13. Aligning the app's declared
+floor is packaging work, outside this library-only slice.
+
+Build and check:
+  source packaging/libmpv/macos/prepare-tools.sh
+  bash scripts/build-libmpv-macos.sh
+  /usr/bin/python3 -I -B packaging/libmpv/check-libmpv-macos.py DIR
+On a runner without Rosetta, first run:
+  softwareupdate --install-rosetta --agree-to-license
+The script's pinned sources and checksums are in ../versions.txt; host
+tools are recorded by prepare-tools.sh. Preserve those inputs, this build
+recipe and the patch when distributing the set, so the LGPL libraries can
+be rebuilt/replaced. All install names and non-system references use
+@rpath, and each dylib has only @loader_path as its LC_RPATH. Final lipo
+outputs receive ad-hoc signatures before their hashes are recorded;
+release packaging must sign/notarize with the app's identity later.
+
+The check verifies every file and licence before loading, every dylib's
+two architectures, deployment floor and dependency closure, then runs
+Apple's Python natively and under Rosetta with no DYLD_* overrides. It
+reports the client API, compares the mpv version with the pin, plays a
+two-second lavfi pattern to clean EOF and audits vmmap/dyld image paths.
+The executable itself is excluded; all libraries, including Python's,
+must be in the set's MANIFEST or /usr/lib or /System. If the runner's
+Apple Python framework/extensions live under Xcode in /Applications or
+/Library/Developer, this strict requested rule fails at startup and
+reports their paths. There is intentionally no silent harness exemption.
+Null-output playback does not prove GL drawing, fonts, Lua execution,
+VideoToolbox hardware decoding, audio output, HTTPS, or macOS 11 runtime
+compatibility. Those remain first-run/on-device checks for the reviewer.

@@ -24,7 +24,7 @@ permissions:
 jobs:
   probe:
     runs-on: ${{ inputs.os }}
-    timeout-minutes: 75
+    timeout-minutes: 170
     steps:
       - uses: actions/checkout@v7
 

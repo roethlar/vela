@@ -1,0 +1,7 @@
+# Host build tools only; none of these packages enters the library set.
+# Meson matches the Linux build environment. Jinja is used by libplacebo's
+# source generator. Native tools (cmake, ninja, nasm, pkgconf) come from the
+# runner's Homebrew; their versions and the Apple SDK enter the cache key.
+meson==1.6.1
+Jinja2==3.1.6
+MarkupSafe==3.0.3

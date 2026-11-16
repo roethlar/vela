@@ -2,7 +2,7 @@
 #
 #   name  version  role  sha256  url  [mirror-url ...]
 #
-# role: ship  = built as separate shared libraries by both platform recipes
+# role: ship  = built as separate shared libraries by all three platform recipes
 #       build = headers or static support archives, not separate shipped DLLs
 # Windows also records and carries licences for its statically linked inputs.
 # A mirror is tried when the first URL fails. It must serve the same bytes: a
