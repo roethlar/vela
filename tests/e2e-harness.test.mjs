@@ -92,7 +92,8 @@ test('Windows: exact WebView2 version and valid Microsoft signature precede driv
   assert.match(ps, /\$signature\.Status -ne 'Valid'/);
   assert.match(ps, /O=Microsoft Corporation/);
   assert.ok(ps.indexOf('Get-AuthenticodeSignature') < ps.indexOf('& $driver --version'));
-  assert.match(ps, /MSEdgeDriver \$\(\[regex\]::Escape\(\$version\)\)/);
+  // The driver's own version line must name exactly the runtime's version.
+  assert.match(ps, /\(MSEdgeDriver\|Microsoft Edge WebDriver\) \$\(\[regex\]::Escape\(\$version\)\)\(\\s\|\$\)/);
   const run = harnessText('run.mjs');
   assert.match(run, /nativeDriver = windowsDriver\.driver/);
   assert.match(run, /WEBVIEW2_BROWSER_EXECUTABLE_FOLDER = windowsDriver\.runtimeDir/);
