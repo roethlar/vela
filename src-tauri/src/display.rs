@@ -652,8 +652,27 @@ fn mac_display_id(screen: &objc2_app_kit::NSScreen) -> Option<u32> {
     Some(unsafe { msg_send![&*number, unsignedIntValue] })
 }
 
-#[cfg(target_os = "macos")]
-fn mac_mpv_name(product_name: &str, serial: u32) -> String {
+/// mpv 0.42.0's NSScreen.name removes one trailing ` (<digits>)` suffix.
+/// Its NSRegularExpression `\d` also matches Unicode decimal digits, but
+/// macOS's duplicate-screen suffixes use ASCII digits.
+#[cfg(any(target_os = "macos", test))]
+fn mac_mpv_product_name(localized_name: &str) -> &str {
+    let Some((product_name, suffix)) = localized_name
+        .strip_suffix(')')
+        .and_then(|name| name.rsplit_once(" ("))
+    else {
+        return localized_name;
+    };
+    if !suffix.is_empty() && suffix.bytes().all(|byte| byte.is_ascii_digit()) {
+        product_name
+    } else {
+        localized_name
+    }
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn mac_mpv_name(localized_name: &str, serial: u32) -> String {
+    let product_name = mac_mpv_product_name(localized_name);
     format!("{product_name} ({serial})")
 }
 
@@ -2050,9 +2069,62 @@ mod tests {
         }
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
     fn mac_screen_name_matches_mpv_product_and_serial_contract() {
         assert_eq!(mac_mpv_name("Studio Display", 1234), "Studio Display (1234)");
+        assert_eq!(
+            mac_mpv_name("LG HDR 4K (2)", 16843010),
+            "LG HDR 4K (16843010)"
+        );
+    }
+
+    #[test]
+    fn mac_screen_name_preserves_unsuffixed_name() {
+        assert_eq!(mac_mpv_product_name("Studio Display"), "Studio Display");
+    }
+
+    #[test]
+    fn mac_screen_name_strips_single_digit_suffix() {
+        assert_eq!(mac_mpv_product_name("LG HDR 4K (1)"), "LG HDR 4K");
+    }
+
+    #[test]
+    fn mac_screen_name_strips_multiple_digit_suffix() {
+        assert_eq!(mac_mpv_product_name("LG HDR 4K (12)"), "LG HDR 4K");
+    }
+
+    #[test]
+    fn mac_screen_name_preserves_digits_in_middle() {
+        assert_eq!(mac_mpv_product_name("LG (1) HDR 4K"), "LG (1) HDR 4K");
+    }
+
+    #[test]
+    fn mac_screen_name_requires_space_before_suffix() {
+        assert_eq!(mac_mpv_product_name("LG HDR 4K(1)"), "LG HDR 4K(1)");
+    }
+
+    #[test]
+    fn mac_screen_name_preserves_nondigit_suffix() {
+        assert_eq!(mac_mpv_product_name("LG HDR 4K (1a)"), "LG HDR 4K (1a)");
+    }
+
+    #[test]
+    fn mac_screen_name_preserves_empty_name() {
+        assert_eq!(mac_mpv_product_name(""), "");
+    }
+
+    #[test]
+    fn mac_screen_name_requires_at_least_one_digit() {
+        assert_eq!(mac_mpv_product_name("LG HDR 4K ()"), "LG HDR 4K ()");
+    }
+
+    #[test]
+    fn mac_screen_name_preserves_unicode_digits() {
+        assert_eq!(mac_mpv_product_name("LG HDR 4K (١)"), "LG HDR 4K (١)");
+    }
+
+    #[test]
+    fn mac_screen_name_strips_only_one_suffix() {
+        assert_eq!(mac_mpv_product_name("LG HDR 4K (1) (12)"), "LG HDR 4K (1)");
     }
 }
