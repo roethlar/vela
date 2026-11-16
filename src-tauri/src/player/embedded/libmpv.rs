@@ -488,6 +488,17 @@ fn last_loader_error() -> String {
     }
 }
 
+/// Do not run any library initialisers unless later bare-name DLL loads are
+/// restricted too. Keep the failure decision testable without Windows.
+#[cfg(any(target_os = "windows", test))]
+fn load_after_dll_policy<T>(
+    restrict: impl FnOnce() -> Result<(), String>,
+    load: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    restrict().map_err(|error| format!("could not restrict Windows DLL search directories: {error}"))?;
+    load()
+}
+
 impl LibMpv {
     /// Open the library at exactly `path` and resolve every function used.
     pub(crate) fn load(path: &Path) -> Result<Self, String> {
@@ -535,8 +546,9 @@ impl LibMpv {
             use windows::{
                 core::PCWSTR,
                 Win32::System::LibraryLoader::{
-                    LoadLibraryExW, LOAD_LIBRARY_SEARCH_DEFAULT_DIRS,
-                    LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR,
+                    LoadLibraryExW, SetDefaultDllDirectories, LOAD_LIBRARY_SEARCH_DEFAULT_DIRS,
+                    LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR, LOAD_LIBRARY_SEARCH_SYSTEM32,
+                    LOAD_LIBRARY_SEARCH_USER_DIRS,
                 },
             };
             let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();
@@ -544,16 +556,37 @@ impl LibMpv {
                 return Err("its path contains a NUL byte".into());
             }
             wide.push(0);
-            // SAFETY: absolute, terminated path. Dependencies search this DLL's
-            // directory and Windows' safe defaults, never PATH or the CWD.
-            unsafe {
-                LoadLibraryExW(
-                    PCWSTR(wide.as_ptr()),
-                    None,
-                    LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS,
-                )
-            }
-            .map_err(|error| error.to_string())?
+            load_after_dll_policy(
+                || {
+                    // The per-load flags below do not govern later DLL loads.
+                    // libplacebo later loads D3D11/DXGI by bare name: exclude
+                    // the application directory, CWD and PATH process-wide,
+                    // before even the set's initialisers run. Vela adds no
+                    // user DLL directories. Keep this policy for the process's
+                    // lifetime; external mpv is a separate process.
+                    // SAFETY: documented search flags, no pointer arguments.
+                    unsafe {
+                        SetDefaultDllDirectories(
+                            LOAD_LIBRARY_SEARCH_SYSTEM32 | LOAD_LIBRARY_SEARCH_USER_DIRS,
+                        )
+                    }
+                    .map_err(|error| error.to_string())
+                },
+                || {
+                    // SAFETY: absolute, terminated path. Static imports still
+                    // search this DLL's own directory and Windows' defaults.
+                    // Explicit flags override the process policy: FFmpeg's
+                    // own dynamic loader also opts into APPLICATION_DIR.
+                    unsafe {
+                        LoadLibraryExW(
+                            PCWSTR(wide.as_ptr()),
+                            None,
+                            LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS,
+                        )
+                    }
+                    .map_err(|error| error.to_string())
+                },
+            )?
         };
 
         macro_rules! symbol {
@@ -1322,6 +1355,41 @@ mod windows_tests {
     // entry point intentionally selects Frameworks from current_exe.
     #[cfg(target_os = "macos")]
     use super::resource_set_directory as set_directory;
+
+    #[test]
+    fn windows_dll_policy_precedes_loading() {
+        let restricted = std::cell::Cell::new(false);
+        let loaded = load_after_dll_policy(
+            || {
+                restricted.set(true);
+                Ok(())
+            },
+            || {
+                assert!(restricted.get(), "the policy must precede library initialisers");
+                Ok("loaded")
+            },
+        );
+        assert_eq!(loaded, Ok("loaded"));
+    }
+
+    #[test]
+    fn windows_dll_policy_failure_refuses_loading() {
+        let refused: Result<(), String> = load_after_dll_policy(
+            || Err("access denied".into()),
+            || panic!("a failed DLL policy must refuse the embedded library"),
+        );
+        assert_eq!(
+            refused,
+            Err("could not restrict Windows DLL search directories: access denied".into())
+        );
+    }
+
+    #[test]
+    fn windows_dll_policy_preserves_loader_failure() {
+        let refused: Result<(), String> =
+            load_after_dll_policy(|| Ok(()), || Err("missing library".into()));
+        assert_eq!(refused, Err("missing library".into()));
+    }
 
     #[test]
     fn windows_library_is_an_exact_dll_in_the_selected_set() {

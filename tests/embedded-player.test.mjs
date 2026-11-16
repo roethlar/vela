@@ -249,6 +249,16 @@ test("only Vela's own copy of the mpv library is ever loaded", () => {
   }
 });
 
+test('Windows library loading requires the process DLL search policy', () => {
+  // The portable Rust tests exercise ordering and refusal. This holds their
+  // connection to the Windows APIs and the exact directories allowed there;
+  // the hosted Windows suite exercises the real loader and playback.
+  const load = methodBody(code(libmpv), '    pub(crate) fn load(', 'LibMpv::load');
+  const windows = load.slice(load.indexOf('#[cfg(target_os = "windows")]'));
+  assert.match(windows, /load_after_dll_policy\(\s+\|\| \{\s+unsafe \{\s+SetDefaultDllDirectories\(\s+LOAD_LIBRARY_SEARCH_SYSTEM32 \| LOAD_LIBRARY_SEARCH_USER_DIRS,\s+\)\s+\}\s+\.map_err\(\|error\| error\.to_string\(\)\)\s+\},\s+\|\| \{\s+unsafe \{\s+LoadLibraryExW\(\s+PCWSTR\(wide\.as_ptr\(\)\),\s+None,\s+LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR \| LOAD_LIBRARY_SEARCH_DEFAULT_DIRS,\s+\)\s+\}\s+\.map_err\(\|error\| error\.to_string\(\)\)\s+\},\s+\)\?/);
+  assert.equal(count(windows, 'LoadLibraryExW('), 1);
+});
+
 test('a running embedded play is asked to stop, and waited for, before its window can go', () => {
   // The play draws into a child of Vela's window. Dropping its handle (the
   // exit sweep, a replaced play that is reaped) must not return while the
