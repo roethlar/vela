@@ -132,7 +132,7 @@ pub(crate) fn steps(args: &[LaunchArg]) -> Vec<Step> {
 /// embedded player. The user's scripts folder, per-script option files and
 /// key bindings are not loaded: the first two would run before Vela's options
 /// could be asserted over them, and no key press reaches an embedded mpv.
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) fn user_config_files(
     mpv_home: Option<&std::ffi::OsStr>,
     xdg_config_home: Option<&std::ffi::OsStr>,
@@ -160,7 +160,7 @@ pub(crate) fn windows_window_options(hwnd: usize) -> Vec<LaunchArg> {
 }
 
 pub(crate) fn current_user_config_files() -> Vec<std::path::PathBuf> {
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     {
         user_config_files(
             std::env::var_os("MPV_HOME").as_deref(),

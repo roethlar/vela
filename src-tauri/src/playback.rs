@@ -947,7 +947,7 @@ pub fn play(
     // the external player, from the start or after falling back, has no view
     // and never gets the notifier. Non-fatal like the watcher above: the play
     // goes on, its view without controls.
-    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
     if started_player == crate::player::PlayerKind::Embedded {
         if let Some(notify) = on_state {
             if let Err(e) = crate::player::report::spawn_reporter(
@@ -961,7 +961,7 @@ pub fn play(
             }
         }
     }
-    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+    #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
     let _ = (on_state, state_session);
 
     // Automatic only. Like the EOF watcher, failing to spawn is non-fatal:

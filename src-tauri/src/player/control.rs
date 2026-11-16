@@ -30,13 +30,13 @@ pub(crate) const NOT_A_COMMAND: &str = "Not a player command.";
 pub(crate) const NOT_RUNNING: &str = "The player is not running.";
 // The other three come only from a player's socket, which only Linux has.
 /// Another command to the same play has not been answered yet.
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 pub(crate) const BUSY: &str = "The player is busy.";
 /// The player did not answer in time, or has not answered a command lately.
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 pub(crate) const NO_ANSWER: &str = "The player did not answer.";
 /// The player answered with anything but success.
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 pub(crate) const REFUSED: &str = "The player refused.";
 
 /// The farthest a relative seek may go, in seconds, either way.
@@ -172,7 +172,7 @@ pub(crate) fn parse(name: &Value, args: &Value) -> Result<PlayerCommand, &'stati
     command.ok_or(NOT_A_COMMAND)
 }
 
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 impl PlayerCommand {
     /// The one mpv command each stands for, as the array of mpv's JSON IPC.
     /// `stop` has none: it never reaches mpv (see [`command`]).
@@ -248,21 +248,21 @@ pub(crate) fn is_running_embedded_play(slot: &mut Option<PlayerHandle>, session_
         .is_some_and(|player| player.is_running_embedded_play(session_id))
 }
 
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 pub(crate) use channel::Channel;
 
-/// No system but Linux has an embedded play, and so nothing to send to.
-#[cfg(not(any(target_os = "linux", target_os = "windows")))]
+/// A platform without an embedded player has nothing to send to.
+#[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
 pub(crate) enum Channel {}
 
-#[cfg(not(any(target_os = "linux", target_os = "windows")))]
+#[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
 impl Channel {
     fn send(&self, _command: PlayerCommand) -> Result<(), &'static str> {
         match *self {}
     }
 }
 
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 mod channel {
     use crate::playback::IpcStream;
     use std::io::Write;
@@ -387,7 +387,7 @@ mod channel {
             if is_timeout(&error) || error.kind() == std::io::ErrorKind::Interrupted {
                 return NO_ANSWER;
             }
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
             if matches!(error.raw_os_error(), Some(libc::EAGAIN) | Some(libc::EINTR)) {
                 return NO_ANSWER;
             }

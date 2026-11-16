@@ -10,7 +10,7 @@
 
 #[cfg(target_os = "linux")]
 use std::ffi::{c_void, CStr};
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::sync::Mutex;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -23,7 +23,7 @@ use tauri::{Emitter, Manager};
 use super::egl;
 use super::libmpv::{self, LibMpv};
 use super::options;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 use super::session::Rect;
 use super::session::{self, Lifecycle, MarkerPayload, Session, Start, VideoTarget};
 use super::startup::{self, WindowMode};
@@ -39,6 +39,9 @@ mod windows;
 pub(crate) use windows::follow_fullscreen;
 #[cfg(target_os = "windows")]
 use windows::window_id;
+
+#[cfg(target_os = "macos")]
+pub(crate) use super::macos_host::follow_fullscreen;
 
 /// Environment variable naming a directory that holds a shipped library set,
 /// for development builds only (see [`libmpv::set_directory`]).
@@ -286,7 +289,7 @@ pub(crate) struct Host {
     /// the external player instead of failing the same way.
     start_failed: std::sync::atomic::AtomicBool,
     /// The rectangle the page last reported, relative to the page.
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     reported: Mutex<Option<Rect>>,
 }
 
@@ -295,7 +298,7 @@ impl Host {
         Host {
             checked: OnceLock::new(),
             start_failed: std::sync::atomic::AtomicBool::new(false),
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
             reported: Mutex::new(None),
         }
     }
@@ -406,7 +409,7 @@ impl Host {
     ) -> Result<Prepared, String> {
         #[cfg(target_os = "linux")]
         let Ready { lib, guest } = self.library(app).map_err(|reason| reason.notice())?;
-        #[cfg(target_os = "windows")]
+        #[cfg(any(target_os = "windows", target_os = "macos"))]
         let Ready { lib } = self.library(app).map_err(|reason| reason.notice())?;
         #[cfg(target_os = "linux")]
         let surface = {
@@ -441,6 +444,17 @@ impl Host {
             move || window_id(&app)
         })?
         .map_err(|reason| reason.notice())?;
+        #[cfg(target_os = "macos")]
+        let surface = {
+            // Driver work on this worker. AppKit insertion on main, BEFORE
+            // the caller locks the player slot. No Vela lock crosses the wait.
+            let drawing = super::macos_gl::DrawingState::new()?;
+            let reported = *self.reported.lock().unwrap_or_else(|e| e.into_inner());
+            on_window_thread(app, {
+                let app = app.clone();
+                move || super::macos_host::Surface::create(app, drawing, reported)
+            })??
+        };
         Ok(Prepared {
             host: self.clone(),
             app: app.clone(),
@@ -468,6 +482,12 @@ impl Host {
     pub(crate) fn place(&self, app: &tauri::AppHandle, reported: Rect, session: Option<&Session>) {
         *self.reported.lock().unwrap_or_else(|e| e.into_inner()) = Some(reported);
         self.place_again(app, session);
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(crate) fn place(&self, _app: &tauri::AppHandle, reported: Rect, session: Option<&Session>) {
+        *self.reported.lock().unwrap_or_else(|e| e.into_inner()) = Some(reported);
+        if let Some(session) = session { session.place(reported); }
     }
 
     /// Put the running play where the page last said. Must run on the
@@ -530,6 +550,20 @@ impl Prepared {
                         let _ = app.emit(name, serde_json::json!({ "sessionId": session_id }));
                     },
                 );
+                #[cfg(target_os = "macos")]
+                if event == Lifecycle::Opened {
+                    let on_window = app.clone();
+                    let _ = app.run_on_main_thread(move || {
+                        let state = on_window.state::<crate::AppState>();
+                        let reported = *state.embedded.reported.lock().unwrap_or_else(|e| e.into_inner());
+                        if let Some(reported) = reported {
+                            let slot = state.current_child.lock().unwrap_or_else(|e| e.into_inner());
+                            if let Some(crate::player::PlayerHandle::Embedded(session)) = slot.as_ref() {
+                                session.place(reported);
+                            }
+                        }
+                    });
+                }
                 // Appearing and disappearing both take effect with the
                 // window's next draw, and a play that has just appeared is
                 // put where the page last said.

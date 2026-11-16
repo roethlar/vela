@@ -1173,7 +1173,7 @@ pub struct PlayerDto {
 /// Keep the choice visible on supported hosts even when this installation
 /// lacks the library; `note` explains availability and restart requirements.
 fn player_offered(platform: &str) -> bool {
-    matches!(platform, "linux" | "windows")
+    matches!(platform, "linux" | "windows" | "macos")
 }
 
 #[tauri::command]
@@ -1188,7 +1188,7 @@ pub async fn get_player(
     })
     .await
     .map_err(|_| "could not read Vela settings".to_string())??;
-    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
     let note = {
         let probe_app = app.clone();
         let known = tauri::async_runtime::spawn_blocking(move || {
@@ -1210,7 +1210,7 @@ pub async fn get_player(
             known,
         )
     };
-    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+    #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
     let note = {
         let _ = (app, state);
         (saved == PlayerKind::Embedded)
@@ -6497,7 +6497,7 @@ pub fn player_set_rect(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) {
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     {
         // `as` saturates and turns a NaN into 0; the host cuts the result to
         // the page.
@@ -6520,7 +6520,7 @@ pub fn player_set_rect(
     // Windows mpv 0.42's w32_common.c installs a parent window hook and
     // fits the disabled child to the entire client area. There is no separate
     // placement operation: the page currently covers that whole area.
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
         let _ = (x, y, width, height, app, state);
     }
@@ -6531,7 +6531,7 @@ pub fn player_set_rect(
 /// `player::embedded::startup`); otherwise it means nothing.
 #[tauri::command]
 pub fn player_window_ready() {
-    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
     crate::player::embedded::startup::window_came_up();
 }
 
@@ -11259,7 +11259,8 @@ mod windows_player_choice_tests {
     fn windows_offers_the_same_video_player_choice_as_linux() {
         assert!(super::player_offered("windows"));
         assert!(super::player_offered("linux"));
-        assert!(!super::player_offered("macos"));
+        assert!(super::player_offered("macos"));
+        assert!(!super::player_offered("ios"));
         // Label and experimental marking belong to the shared page.
         let page = include_str!("../../src/lib/Settings.svelte");
         assert!(page.contains("Vela's window"));

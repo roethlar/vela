@@ -22,6 +22,11 @@ pub(crate) const LIBRARY_FILE: &str = WINDOWS_LIBRARY_FILE;
 #[cfg(any(target_os = "windows", test))]
 const WINDOWS_LIBRARY_FILE: &str = "libmpv-2.dll";
 
+#[cfg(target_os = "macos")]
+pub(crate) const LIBRARY_FILE: &str = MACOS_LIBRARY_FILE;
+#[cfg(any(target_os = "macos", all(test, unix)))]
+const MACOS_LIBRARY_FILE: &str = "libmpv.2.dylib";
+
 /// The client API this code was written against. A library with a different
 /// major number has changed incompatibly; a lower minor number lacks
 /// something used here.
@@ -33,42 +38,42 @@ pub(crate) struct RawHandle {
     _opaque: [u8; 0],
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[repr(C)]
 pub(crate) struct RawRenderContext {
     _opaque: [u8; 0],
 }
 
 /// `mpv_render_param`.
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[repr(C)]
 pub(crate) struct RenderParam {
     pub(crate) kind: c_int,
     pub(crate) data: *mut c_void,
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) const RENDER_PARAM_END: c_int = 0;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) const RENDER_PARAM_API_TYPE: c_int = 1;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) const RENDER_PARAM_OPENGL_INIT_PARAMS: c_int = 2;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) const RENDER_PARAM_OPENGL_FBO: c_int = 3;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) const RENDER_PARAM_FLIP_Y: c_int = 4;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) const RENDER_PARAM_DEPTH: c_int = 5;
 #[cfg(target_os = "linux")]
 pub(crate) const RENDER_PARAM_DRM_DISPLAY_V2: c_int = 16;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) const RENDER_API_TYPE_OPENGL: &CStr = c"opengl";
 /// `MPV_RENDER_UPDATE_FRAME`.
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) const RENDER_UPDATE_FRAME: u64 = 1;
 
 /// `mpv_opengl_init_params`.
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[repr(C)]
 pub(crate) struct OpenGlInitParams {
     pub(crate) get_proc_address:
@@ -77,7 +82,7 @@ pub(crate) struct OpenGlInitParams {
 }
 
 /// `mpv_opengl_fbo`.
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[repr(C)]
 pub(crate) struct OpenGlFbo {
     pub(crate) fbo: c_int,
@@ -224,19 +229,19 @@ pub(crate) struct LibMpv {
     terminate_destroy: unsafe extern "C" fn(*mut RawHandle),
     error_string: unsafe extern "C" fn(c_int) -> *const c_char,
     free: unsafe extern "C" fn(*mut c_void),
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     render_context_create:
         unsafe extern "C" fn(*mut *mut RawRenderContext, *mut RawHandle, *mut RenderParam) -> c_int,
     #[cfg(target_os = "linux")]
     render_context_set_update_callback:
         unsafe extern "C" fn(*mut RawRenderContext, Callback, *mut c_void),
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     render_context_update: unsafe extern "C" fn(*mut RawRenderContext) -> u64,
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     render_context_render: unsafe extern "C" fn(*mut RawRenderContext, *mut RenderParam) -> c_int,
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     render_context_report_swap: unsafe extern "C" fn(*mut RawRenderContext),
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     render_context_free: unsafe extern "C" fn(*mut RawRenderContext),
 }
 
@@ -282,7 +287,7 @@ fn refuse_unless_named(path: &Path, name: &str) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn last_loader_error() -> String {
     // SAFETY: dlerror returns NULL or a NUL-terminated string owned by the
     // loader, valid until the next loader call on this thread.
@@ -300,7 +305,7 @@ impl LibMpv {
     /// Open the library at exactly `path` and resolve every function used.
     pub(crate) fn load(path: &Path) -> Result<Self, String> {
         refuse_unless_exact(path)?;
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         let handle = {
             use std::os::unix::ffi::OsStrExt;
             let c_path = CString::new(path.as_os_str().as_bytes())
@@ -311,7 +316,13 @@ impl LibMpv {
             // its own set first. Vela's process already holds the system's
             // FreeType, HarfBuzz, FriBidi and dav1d (the web view needs them);
             // without this the shipped copies would be bypassed.
+            #[cfg(target_os = "linux")]
             let flags = libc::RTLD_NOW | libc::RTLD_LOCAL | libc::RTLD_DEEPBIND;
+            // Mach-O's two-level namespace binds references to their linked
+            // dylib, so the shipped @rpath/@loader_path set needs no DEEPBIND.
+            // Apple: Porting Unix / Compiling Your Code in OS X, "Namespaces".
+            #[cfg(target_os = "macos")]
+            let flags = libc::RTLD_NOW | libc::RTLD_LOCAL;
             // SAFETY: `c_path` is a valid C string. Loading runs the library's
             // initialisers; the file is Vela's own shipped library.
             let handle = unsafe { libc::dlopen(c_path.as_ptr(), flags) };
@@ -352,7 +363,7 @@ impl LibMpv {
             ($name:literal) => {{
                 // SAFETY: `handle` is a live library handle and the name is a
                 // C string literal.
-                #[cfg(target_os = "linux")]
+                #[cfg(any(target_os = "linux", target_os = "macos"))]
                 let address = unsafe { libc::dlsym(handle, concat!($name, "\0").as_ptr().cast()) };
                 #[cfg(target_os = "windows")]
                 let address = unsafe {
@@ -390,20 +401,20 @@ impl LibMpv {
             terminate_destroy: symbol!("mpv_terminate_destroy"),
             error_string: symbol!("mpv_error_string"),
             free: symbol!("mpv_free"),
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
             render_context_create: symbol!("mpv_render_context_create"),
             #[cfg(target_os = "linux")]
             render_context_set_update_callback: symbol!("mpv_render_context_set_update_callback"),
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
             render_context_update: symbol!("mpv_render_context_update"),
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
             render_context_render: symbol!("mpv_render_context_render"),
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
             render_context_report_swap: symbol!("mpv_render_context_report_swap"),
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
             render_context_free: symbol!("mpv_render_context_free"),
         };
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         lib.refuse_another_file(path)?;
         #[cfg(target_os = "windows")]
         {
@@ -432,7 +443,7 @@ impl LibMpv {
     /// with the same name. Vela loads no other mpv, but if anything in the
     /// process ever did, this is where it would be caught: the functions must
     /// come from the file that was asked for.
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     fn refuse_another_file(&self, asked: &Path) -> Result<(), String> {
         let mut info: libc::Dl_info = unsafe { std::mem::zeroed() };
         // SAFETY: `info` is a valid out-parameter; the address is a function
@@ -638,12 +649,12 @@ impl Player {
         unsafe { (self.lib.set_wakeup_callback)(self.raw, Some(callback), context) };
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     pub(crate) fn lib(&self) -> &std::sync::Arc<LibMpv> {
         &self.lib
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     pub(crate) fn raw(&self) -> *mut RawHandle {
         self.raw
     }
@@ -714,16 +725,17 @@ impl Drop for Player {
     }
 }
 
-/// mpv drawing through OpenGL into a framebuffer its owner provides. Must be
-/// created, used and dropped on the thread whose OpenGL context it uses, and
-/// dropped before its [`Player`].
-#[cfg(target_os = "linux")]
+/// mpv drawing through OpenGL into a framebuffer its owner provides. Its
+/// context must be current for creation, use and drop, before its [`Player`]
+/// is dropped. Linux confines it to one thread; macOS's private wrapper
+/// migrates it only with that same CGL context locked and current.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) struct Renderer {
     lib: std::sync::Arc<LibMpv>,
     raw: *mut RawRenderContext,
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 impl Renderer {
     /// # Safety
     /// An OpenGL context must be current on this thread, `get_proc_address`
@@ -732,13 +744,14 @@ impl Renderer {
     pub(crate) unsafe fn create(
         player: &Player,
         get_proc_address: unsafe extern "C" fn(*mut c_void, *const c_char) -> *mut c_void,
-        render_fd: c_int,
+        #[cfg(target_os = "linux")] render_fd: c_int,
     ) -> Result<Self, String> {
         let lib = player.lib().clone();
         let mut gl = OpenGlInitParams {
             get_proc_address: Some(get_proc_address),
             get_proc_address_ctx: std::ptr::null_mut(),
         };
+        #[cfg(target_os = "linux")]
         let mut drm = OpenGlDrmParamsV2 {
             fd: -1,
             crtc_id: -1,
@@ -756,6 +769,7 @@ impl Renderer {
                 data: (&mut gl as *mut OpenGlInitParams).cast(),
             },
         ];
+        #[cfg(target_os = "linux")]
         if render_fd >= 0 {
             // Hardware decoding needs to know which GPU to use. mpv would
             // normally learn that from its own window; here it is told.
@@ -779,6 +793,7 @@ impl Renderer {
     ///
     /// # Safety
     /// As for [`Player::set_wakeup`].
+    #[cfg(target_os = "linux")]
     pub(crate) unsafe fn set_update(
         &self,
         callback: unsafe extern "C" fn(*mut c_void),
@@ -795,6 +810,7 @@ impl Renderer {
 
     /// Draw the current frame into the default framebuffer, `width` by
     /// `height` pixels with `depth` bits per channel, bottom row first.
+    #[cfg(target_os = "linux")]
     pub(crate) fn draw(&self, width: i32, height: i32, depth: i32) {
         let mut fbo = OpenGlFbo {
             fbo: 0,
@@ -827,6 +843,39 @@ impl Renderer {
         unsafe { (self.lib.render_context_render)(self.raw, params.as_mut_ptr()) };
     }
 
+    #[cfg(target_os = "macos")]
+    pub(crate) fn draw_into(&self, target: i32, width: i32, height: i32) -> Result<(), String> {
+        let mut fbo = OpenGlFbo {
+            fbo: target,
+            w: width,
+            h: height,
+            internal_format: 0,
+        };
+        let mut flip: c_int = 1;
+        let mut depth: c_int = 8;
+        let mut params = [
+            RenderParam {
+                kind: RENDER_PARAM_OPENGL_FBO,
+                data: (&mut fbo as *mut OpenGlFbo).cast(),
+            },
+            RenderParam {
+                kind: RENDER_PARAM_FLIP_Y,
+                data: (&mut flip as *mut c_int).cast(),
+            },
+            RenderParam {
+                kind: RENDER_PARAM_DEPTH,
+                data: (&mut depth as *mut c_int).cast(),
+            },
+            RenderParam {
+                kind: RENDER_PARAM_END,
+                data: std::ptr::null_mut(),
+            },
+        ];
+        // SAFETY: a live render context whose OpenGL context is current, and
+        // parameters that outlive the call.
+        self.lib.check(unsafe { (self.lib.render_context_render)(self.raw, params.as_mut_ptr()) })
+    }
+
     /// Tell mpv the frame it drew has been dealt with; it times the next one
     /// from this. Called for every frame drawn, presented or held: after a
     /// frame, mpv's video thread waits up to 200 ms for this call.
@@ -836,7 +885,7 @@ impl Renderer {
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 impl Drop for Renderer {
     fn drop(&mut self) {
         // SAFETY: live, never used again, and the OpenGL context it was
@@ -1035,5 +1084,24 @@ mod windows_tests {
             assert!(refuse_unless_named(Path::new(name), WINDOWS_LIBRARY_FILE).is_err());
         }
         assert!(refuse_unless_named(&resources.join("mpv.exe"), WINDOWS_LIBRARY_FILE).is_err());
+    }
+}
+
+
+#[cfg(all(test, unix))]
+mod macos_tests {
+    use super::*;
+    #[test]
+    fn macos_library_is_an_exact_absolute_dylib_in_the_shipped_set() {
+        let resources = Path::new("/Applications/Vela.app/Contents/Resources");
+        let path = set_directory(resources, false, Some("/other".as_ref()))
+            .join(MACOS_LIBRARY_FILE);
+        assert_eq!(path, resources.join("libmpv/libmpv.2.dylib"));
+        assert!(refuse_unless_named(&path, MACOS_LIBRARY_FILE).is_ok());
+        for bad in ["libmpv.2.dylib", "./libmpv.2.dylib", "/tmp/libmpv.dylib", "/tmp/libmpv.so.2"] {
+            assert!(refuse_unless_named(Path::new(bad), MACOS_LIBRARY_FILE).is_err(), "{bad}");
+        }
+        assert_eq!(set_directory(resources, true, Some("/dev/set".as_ref()))
+            .join(MACOS_LIBRARY_FILE), Path::new("/dev/set/libmpv.2.dylib"));
     }
 }

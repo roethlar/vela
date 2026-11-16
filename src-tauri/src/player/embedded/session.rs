@@ -41,8 +41,14 @@ mod windows;
 #[cfg(target_os = "windows")]
 use windows::{set_up, Live};
 
+#[cfg(target_os = "macos")]
+#[path = "macos_session.rs"]
+mod macos;
+#[cfg(target_os = "macos")]
+use macos::{set_up, Live};
+
 /// Where the video is, in the window's own units, relative to the window.
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos", test))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Rect {
     pub(crate) x: i32,
@@ -360,9 +366,11 @@ pub(crate) fn wait_for_unfinished_plays(limit: Duration) -> bool {
 pub(crate) type VideoTarget = VideoSurface;
 #[cfg(target_os = "windows")]
 pub(crate) type VideoTarget = usize;
+#[cfg(target_os = "macos")]
+pub(crate) type VideoTarget = super::macos_host::Surface;
 
 struct Shared {
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
     wake: (Mutex<bool>, std::sync::Condvar),
     /// Written to wake the thread: by mpv (a frame or an event is waiting)
     /// and by Vela (stop, or the rectangle changed).
@@ -380,7 +388,7 @@ struct Shared {
 }
 
 impl Shared {
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
     fn new() -> Result<Arc<Self>, String> {
         Ok(Arc::new(Self {
             wake: (Mutex::new(false), std::sync::Condvar::new()),
@@ -389,13 +397,13 @@ impl Shared {
         }))
     }
 
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
     fn wake(&self) {
         *self.wake.0.lock().unwrap_or_else(|e| e.into_inner()) = true;
         self.wake.1.notify_one();
     }
 
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
     fn wait(&self, timeout_ms: i32) {
         let pending = self.wake.0.lock().unwrap_or_else(|e| e.into_inner());
         let (mut pending, _) = self
@@ -410,7 +418,7 @@ impl Shared {
         *pending = false;
     }
 
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
     fn drain_wake(&self) {}
 
     fn forget_surface(&self) {
@@ -540,7 +548,7 @@ fn private_options_file(text: &str) -> Result<PathBuf, String> {
         std::process::id(),
         uuid::Uuid::new_v4().simple()
     );
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     let path = crate::player::launch::private_runtime_dir()?.join(name);
     #[cfg(target_os = "windows")]
     let path = crate::storage::config_dir_file(&name)
@@ -844,6 +852,8 @@ impl PlayLoop for Live {
 
 /// A started embedded play, as the rest of the app holds it.
 pub(crate) struct Session {
+    #[cfg(target_os = "macos")]
+    placement: super::macos_host::PlacementTarget,
     /// The playback session this play belongs to. A player is told apart
     /// from the one that replaced it by this and nothing else.
     session_id: String,
@@ -865,6 +875,8 @@ impl Session {
     /// Start a play on `surface` and wait until mpv has been given its file,
     /// or until something on the way there failed.
     pub(crate) fn start(mut start: Start, surface: VideoTarget) -> Result<Self, String> {
+        #[cfg(target_os = "macos")]
+        let placement = surface.placement_target();
         let shared = Shared::new()?;
         let header_include = start.header_include.take();
         let session_id = std::mem::take(&mut start.session_id);
@@ -917,6 +929,8 @@ impl Session {
             session_id,
             channel,
             shared,
+            #[cfg(target_os = "macos")]
+            placement,
             thread: Some(thread),
             header_include,
             patience: STOP_PATIENCE,
@@ -1095,6 +1109,11 @@ impl Session {
         *self.shared.resize_to.lock().unwrap_or_else(|e| e.into_inner()) =
             Some((rect.width, rect.height));
         self.shared.wake();
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(crate) fn place(&self, rect: Rect) {
+        self.placement.place(rect);
     }
 
     /// mpv read the stream-auth include when it was configured. Remove it

@@ -17,7 +17,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["protocol-asset"] }
+tauri = { version = "2", features = ["protocol-asset", "macos-private-api"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.13", default-features = false, features = ["json", "query", "charset", "http2", "system-proxy", "native-tls-no-alpn"] }
@@ -45,9 +45,14 @@ libc = "0.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSGraphics", "NSScreen", "objc2-core-foundation"] }
-objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGDirectDisplay", "CGDisplayConfiguration"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSDictionary", "NSEnumerator", "NSObject", "NSString"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSGraphics", "NSScreen", "NSColor", "NSResponder", "NSView", "NSWindow", "objc2-core-foundation", "objc2-core-graphics", "objc2-quartz-core"] }
+objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGDirectDisplay", "CGDisplayConfiguration", "CGColorSpace"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSDictionary", "NSEnumerator", "NSObject", "NSString", "NSGeometry"] }
+
+objc2-core-foundation = { version = "=0.3.2", default-features = false, features = ["std", "CFCGTypes", "CFDate", "objc2"] }
+objc2-core-video = { version = "=0.3.2", default-features = false, features = ["std", "CVBase", "objc2"] }
+objc2-quartz-core = { version = "=0.3.2", default-features = false, features = ["std", "CALayer", "CAOpenGLLayer", "objc2-core-foundation", "objc2-core-graphics", "objc2-core-video", "objc2-open-gl"] }
+objc2-open-gl = { version = "=0.3.2", default-features = false, features = ["std", "CGLTypes", "CGLCurrent", "CGLRenderers"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.61", features = [

@@ -190,12 +190,12 @@ impl AppState {
 /// WebKit's GPU renderer must be left on; every other run is started exactly
 /// as it always was. The reasoning is in `player::embedded::startup`.
 pub fn prepare_startup() -> bool {
-    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
     {
         use player::embedded::startup;
         startup::prepare() == startup::WindowMode::Embedded
     }
-    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+    #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
     {
         false
     }
@@ -274,11 +274,11 @@ pub fn run() {
     });
 
     #[cfg_attr(
-        not(any(target_os = "linux", target_os = "windows")),
+        not(any(target_os = "linux", target_os = "windows", target_os = "macos")),
         allow(unused_mut)
     )]
     let mut context = tauri::generate_context!();
-    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
     {
         use player::embedded::startup;
         if startup::decision().mode == startup::WindowMode::Embedded {
@@ -326,7 +326,7 @@ pub fn run() {
             durable::register_app_handle(app.handle().clone());
 
             // What the window's fullscreen really is, for the player view.
-            #[cfg(any(target_os = "linux", target_os = "windows"))]
+            #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
             player::embedded::follow_fullscreen(app.handle());
 
             // Automatic's step-down dispatcher. Deliberately NOT folded into the
@@ -531,7 +531,7 @@ pub fn run() {
                 // Dropping one above waited for it; any that would not end
                 // when Vela stopped waiting for it earlier gets one more
                 // moment here, bounded, before the process goes.
-                #[cfg(any(target_os = "linux", target_os = "windows"))]
+                #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
                 player::embedded::wait_for_unfinished_plays(std::time::Duration::from_secs(2));
                 // How the last play in mpv's own window left it, for the
                 // next run: a play still showing now never reaches its own

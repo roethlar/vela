@@ -14,17 +14,17 @@
 //! track from a file of its own goes without a title, which mpv may have made
 //! from that file's name).
 //!
-//! Linux and Windows share the reporter and its limits; the payload and the notifier's type are built
-//! everywhere, for `commands.rs` and `crate::playback`.
+//! Linux, Windows and macOS share the reporter and its limits; the payload
+//! and notifier's type are built everywhere, for commands and playback.
 
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 use std::io::{BufRead, ErrorKind, Read};
 use std::sync::Arc;
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 use serde_json::Value;
 
 /// Hands a state to the page. Built in `commands.rs`, where the app is.
@@ -34,11 +34,11 @@ pub(crate) type StateNotify = Arc<dyn Fn(&PlayerState) + Send + Sync>;
 pub(crate) const EVENT: &str = "player-state";
 
 /// The most characters of a track's title or language that are sent.
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 const TEXT_LIMIT: usize = 200;
 
 /// The properties observed, in the order they are asked for.
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 const OBSERVED: [&str; 8] = [
     "time-pos",
     "duration",
@@ -84,7 +84,7 @@ pub(crate) struct PlayerState {
 }
 
 /// What mpv has said about the observed properties, each checked for type.
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 #[derive(Debug, Default, Clone, PartialEq)]
 pub(crate) struct Seen {
     position: Option<f64>,
@@ -98,7 +98,7 @@ pub(crate) struct Seen {
     crop: Option<&'static str>,
 }
 
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 fn finite(value: Option<&Value>) -> Option<f64> {
     value
         .and_then(Value::as_f64)
@@ -106,7 +106,7 @@ fn finite(value: Option<&Value>) -> Option<f64> {
 }
 
 /// A text cut to [`TEXT_LIMIT`] characters.
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 fn short_text(value: Option<&Value>) -> Option<String> {
     value
         .and_then(Value::as_str)
@@ -114,7 +114,7 @@ fn short_text(value: Option<&Value>) -> Option<String> {
 }
 
 /// One entry of mpv's `track-list`, when it is an audio or subtitle track.
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 fn track(entry: &Value) -> Option<(bool, Track)> {
     let audio = match entry.get("type")?.as_str()? {
         "audio" => true,
@@ -144,7 +144,7 @@ fn track(entry: &Value) -> Option<(bool, Track)> {
     ))
 }
 
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 impl Seen {
     /// Take in one line from mpv. Returns whether anything changed. Only a
     /// property-change event for an observed name is read.
@@ -218,23 +218,23 @@ impl Seen {
 }
 
 /// The shortest time between two states sent: at most four a second.
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 pub(crate) const MIN_GAP: Duration = Duration::from_millis(250);
 /// The longest time without one: at least one a second.
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 pub(crate) const MAX_GAP: Duration = Duration::from_secs(1);
 
 /// When to send. A change is sent at once when [`MIN_GAP`] has passed since
 /// the last state sent, otherwise when it has; with no change, a state goes
 /// every [`MAX_GAP`]. Nothing is sent before mpv has said anything.
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 #[derive(Debug, Default)]
 pub(crate) struct Throttle {
     last_sent: Option<Instant>,
     changed: bool,
 }
 
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 impl Throttle {
     pub(crate) fn note_change(&mut self) {
         self.changed = true;
@@ -270,11 +270,11 @@ impl Throttle {
 /// The most one line may hold. A longer one is passed over: no observed
 /// property comes near it, but any script can make mpv send every client a
 /// message of any size.
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 const LINE_CAP: usize = 1 << 20;
 
 /// What one read gave.
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Read1 {
     /// A whole line, without its newline.
@@ -298,7 +298,7 @@ pub(crate) enum Read1 {
 /// most once from the connection and then returns, whole line or not, so a
 /// line that keeps coming in pieces never keeps the caller from its own
 /// deadline or stop flag.
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 pub(crate) struct Lines<R> {
     reader: std::io::BufReader<R>,
     partial: Vec<u8>,
@@ -307,7 +307,7 @@ pub(crate) struct Lines<R> {
     dropping: bool,
 }
 
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 impl<R: Read> Lines<R> {
     pub(crate) fn new(reader: R) -> Self {
         Lines {
@@ -403,6 +403,63 @@ pub(crate) fn connect(path: &str, limit: Duration) -> std::io::Result<crate::pla
     }
 }
 
+/// Darwin has no SOCK_CLOEXEC and does not use Linux's blocking-connect
+/// timeout rule. Connect nonblocking, poll only to the original deadline,
+/// inspect SO_ERROR, then restore blocking I/O with the shared timeouts.
+#[cfg(target_os = "macos")]
+pub(crate) fn connect(path: &str, limit: Duration) -> std::io::Result<crate::playback::IpcStream> {
+    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+    use std::os::unix::net::UnixStream;
+    let deadline = Instant::now() + limit;
+    let bytes = path.as_bytes();
+    let mut address: libc::sockaddr_un = unsafe { std::mem::zeroed() };
+    if bytes.is_empty() || bytes.contains(&0) || bytes.len() >= address.sun_path.len() {
+        return Err(ErrorKind::InvalidInput.into());
+    }
+    let length = std::mem::offset_of!(libc::sockaddr_un, sun_path) + bytes.len() + 1;
+    address.sun_len = length as u8;
+    address.sun_family = libc::AF_UNIX as libc::sa_family_t;
+    for (slot, byte) in address.sun_path.iter_mut().zip(bytes) { *slot = *byte as libc::c_char; }
+    let fd = unsafe { libc::socket(libc::AF_UNIX, libc::SOCK_STREAM, 0) };
+    if fd < 0 { return Err(std::io::Error::last_os_error()); }
+    let stream = UnixStream::from(unsafe { OwnedFd::from_raw_fd(fd) });
+    let one: libc::c_int = 1;
+    // A fresh socket has no descriptor flags. Suppress SIGPIPE as std's own
+    // Darwin UnixStream constructor does, since this one starts from a raw fd.
+    if unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) } < 0
+        || unsafe { libc::setsockopt(fd, libc::SOL_SOCKET, libc::SO_NOSIGPIPE,
+            (&one as *const libc::c_int).cast(), std::mem::size_of_val(&one) as libc::socklen_t) } < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    stream.set_nonblocking(true)?;
+    let connected = unsafe { libc::connect(stream.as_raw_fd(),
+        (&address as *const libc::sockaddr_un).cast(), length as libc::socklen_t) };
+    if connected != 0 {
+        let error = std::io::Error::last_os_error();
+        if !matches!(error.raw_os_error(), Some(libc::EINPROGRESS) | Some(libc::EINTR)) {
+            return Err(error);
+        }
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() { return Err(ErrorKind::TimedOut.into()); }
+            let mut poll = libc::pollfd { fd, events: libc::POLLOUT, revents: 0 };
+            let milliseconds = remaining.as_nanos().div_ceil(1_000_000).min(i32::MAX as u128) as i32;
+            let result = unsafe { libc::poll(&mut poll, 1, milliseconds) };
+            if result < 0 {
+                let error = std::io::Error::last_os_error();
+                if error.kind() == ErrorKind::Interrupted { continue; }
+                return Err(error);
+            }
+            if result == 0 { return Err(ErrorKind::TimedOut.into()); }
+            if let Some(error) = stream.take_error()? { return Err(error); }
+            break;
+        }
+    }
+    stream.set_nonblocking(false)?;
+    stream.set_write_timeout(Some(limit))?;
+    Ok(stream)
+}
+
 /// A named-pipe open returns immediately when all instances are busy.
 /// Retry only that case, within the same connect budget as Linux. The pipe
 /// must belong to this process: no credential-bearing commands reach a peer.
@@ -433,18 +490,18 @@ pub(crate) fn connect(path: &str, limit: Duration) -> std::io::Result<crate::pla
 
 /// How long one of the reporter's connects may wait for room in a full
 /// queue before it looks at the play's stop flag again.
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 const CONNECT_LIMIT: Duration = Duration::from_millis(100);
 
 /// How long the reporter's requests to observe may take to go out.
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 const OBSERVE_WRITE_LIMIT: Duration = Duration::from_secs(1);
 
 /// One line from mpv as JSON. mpv passes file names and tags on as it found
 /// them, so a line can hold bytes that are not UTF-8 (its IPC documentation
 /// tells clients to replace them before parsing); refusing the whole line
 /// would lose every track with it.
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 fn parse_line(line: &[u8]) -> Option<Value> {
     serde_json::from_str(&String::from_utf8_lossy(line)).ok()
 }
@@ -452,7 +509,7 @@ fn parse_line(line: &[u8]) -> Option<Value> {
 /// Start the reporter of one embedded play. It ends when mpv closes the
 /// connection, when the play's stop flag is set, or when it could not
 /// connect within the retries the other per-play threads allow.
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 pub(crate) fn spawn_reporter(
     socket_path: String,
     stop_flag: Arc<std::sync::atomic::AtomicBool>,

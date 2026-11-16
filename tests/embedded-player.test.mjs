@@ -168,7 +168,7 @@ test("every start is today's unless embedded window mode was decided", () => {
   // What "decided" means: the start-up module's answer, on Linux only.
   assert.match(
     functionBody(lib, 'pub fn prepare_startup() -> bool {', 'prepare_startup'),
-    /#\[cfg\(any\(target_os = "linux", target_os = "windows"\)\)\]\s+\{\s+use player::embedded::startup;\s+startup::prepare\(\) == startup::WindowMode::Embedded\s+\}\s+#\[cfg\(not\(any\(target_os = "linux", target_os = "windows"\)\)\)\]\s+\{\s+false\s+\}/,
+    /#\[cfg\(any\(target_os = "linux", target_os = "windows", target_os = "macos"\)\)\]\s+\{\s+use player::embedded::startup;\s+startup::prepare\(\) == startup::WindowMode::Embedded\s+\}\s+#\[cfg\(not\(any\(target_os = "linux", target_os = "windows", target_os = "macos"\)\)\)\]\s+\{\s+false\s+\}/,
   );
 
   // The window is transparent only in that mode. The configuration file,
@@ -200,7 +200,7 @@ test('embedded window mode is entered only behind its safety marker, which the l
   // The page reports that it loaded, and that is what clears the marker.
   assert.match(
     functionBody(commands, 'pub fn player_window_ready() {', 'player_window_ready'),
-    /#\[cfg\(any\(target_os = "linux", target_os = "windows"\)\)\]\s+crate::player::embedded::startup::window_came_up\(\);/,
+    /#\[cfg\(any\(target_os = "linux", target_os = "windows", target_os = "macos"\)\)\]\s+crate::player::embedded::startup::window_came_up\(\);/,
   );
   assert.match(lib, /commands::player_window_ready,/);
   assert.match(page, /invoke\("player_window_ready"\)/);
@@ -429,7 +429,7 @@ test('a play that outlasts the wait for it neither starts unannounced nor goes u
   assert.ok(refusal < library.indexOf('self.checked.get_or_init'));
   assert.match(
     lib,
-    /queue\.clear\(\);\s+\}\s+(?:\/\/[^\n]*\n\s+)*#\[cfg\(any\(target_os = "linux", target_os = "windows"\)\)\]\s+player::embedded::wait_for_unfinished_plays\(std::time::Duration::from_secs\(2\)\);/,
+    /queue\.clear\(\);\s+\}\s+(?:\/\/[^\n]*\n\s+)*#\[cfg\(any\(target_os = "linux", target_os = "windows", target_os = "macos"\)\)\]\s+player::embedded::wait_for_unfinished_plays\(std::time::Duration::from_secs\(2\)\);/,
   );
 });
 
@@ -562,6 +562,12 @@ test('mpv is told what it draws for in one place, together with the surface', ()
   assert.ok(rust.includes('player/embedded/hdr.rs') && rust.length > 20);
   for (const file of rust) {
     if (file === 'player/embedded/hdr.rs') continue;
+    // macOS has fixed SDR targets, separately compiled from Linux's
+    // negotiated targets. Keep the Linux rule everywhere it applied before.
+    if (file === 'player/embedded/macos_options.rs') {
+      assert.match(read('src-tauri/src/player/launch.rs'), /#\[cfg\(any\(target_os = "macos", test\)\)\]\s+#\[path = "embedded\/macos_options.rs"\]\s+mod macos;/);
+      continue;
+    }
     assert.doesNotMatch(
       code(read(path.join('src-tauri/src', file))),
       /target-(trc|prim|peak)/,

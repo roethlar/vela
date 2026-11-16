@@ -8,7 +8,7 @@
 //! on NVIDIA's driver. Both are fixed when the process starts and cannot be
 //! changed afterwards.
 //!
-//! Windows also needs a transparent main window. Its WebView2 and mpv child
+//! Windows and macOS also need a transparent main window. Its WebView2 and mpv child
 //! need none of those Linux renderer/driver restrictions; only the saved
 //! choice and the recovery marker determine its window mode.
 //!
@@ -93,7 +93,7 @@ pub(crate) fn decide(facts: Facts<'_>) -> Decision {
 
 /// Windows has no Wayland, WebKitGTK or NVIDIA restriction. The library is
 /// checked when Settings/playing asks for availability, as on Linux.
-#[cfg(any(target_os = "windows", test))]
+#[cfg(any(target_os = "windows", target_os = "macos", test))]
 fn decide_windows(player_setting: Option<&str>, marker_left_behind: bool) -> Decision {
     if player_setting != Some("embedded") {
         return Decision {
@@ -112,6 +112,18 @@ fn decide_windows(player_setting: Option<&str>, marker_left_behind: bool) -> Dec
         refused: None,
     }
 }
+
+/// macOS uses only the saved choice and one-start recovery, just like Windows.
+#[cfg(any(target_os = "macos", test))]
+fn decide_macos(player_setting: Option<&str>, marker_left_behind: bool) -> Decision {
+    decide_windows(player_setting, marker_left_behind)
+}
+
+#[cfg(target_os = "macos")]
+#[path = "macos_startup.rs"]
+mod macos;
+#[cfg(target_os = "macos")]
+use macos::{regular_file_at, text_of};
 
 #[cfg(target_os = "windows")]
 #[path = "windows_startup.rs"]
@@ -132,7 +144,7 @@ pub(crate) fn system_refusal() -> Option<EmbeddedUnavailable> {
     {
         SYSTEM_FACTS.get().and_then(|facts| decide(*facts).refused)
     }
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
     {
         None
     }
@@ -295,6 +307,8 @@ pub(crate) fn prepare() -> WindowMode {
     let mut decision = decide(facts);
     #[cfg(target_os = "windows")]
     let mut decision = decide_windows(player_setting.as_deref(), marker_left_behind);
+    #[cfg(target_os = "macos")]
+    let mut decision = decide_macos(player_setting.as_deref(), marker_left_behind);
     if marker_left_behind {
         // Whatever this start is, the next one may try again.
         if let Some(path) = &marker {
@@ -719,5 +733,28 @@ mod windows_tests {
             }
         );
         assert_eq!(decide_windows(Some("external"), true).refused, None);
+    }
+}
+
+
+#[cfg(test)]
+mod macos_tests {
+    use super::*;
+
+    #[test]
+    fn macos_start_uses_the_saved_choice_and_recovers_for_one_start() {
+        for setting in [None, Some("external"), Some(""), Some("Embedded")] {
+            for marker in [false, true] {
+                assert_eq!(decide_macos(setting, marker), Decision {
+                    mode: WindowMode::Today, refused: None,
+                });
+            }
+        }
+        assert_eq!(decide_macos(Some("embedded"), false), Decision {
+            mode: WindowMode::Embedded, refused: None,
+        });
+        assert_eq!(decide_macos(Some("embedded"), true), Decision {
+            mode: WindowMode::Today, refused: Some(EmbeddedUnavailable::FailedLastStart),
+        });
     }
 }

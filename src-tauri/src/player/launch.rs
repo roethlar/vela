@@ -12,6 +12,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use crate::playback::{PlaySpec, PlaybackScreens, PlaybackWindowState};
 use crate::player::PlayerKind;
 
+#[cfg(any(target_os = "macos", test))]
+#[path = "embedded/macos_options.rs"]
+mod macos;
+
 /// One mpv option of a launch.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum LaunchArg {
@@ -469,7 +473,9 @@ fn user_args(cfg: &crate::config::AppConfig) -> Vec<LaunchArg> {
 /// - `gpu-api`, `target-colorspace-hint`: Linux owns and tags the surface
 ///   itself; Windows asserts these in its protected native-window tail.
 /// - `ENABLE_HDR_WSI`: only the external Linux Vulkan player uses it.
-/// - the macOS audio default: macOS has no embedded player yet.
+///
+/// The macOS session applies the overridable AVFoundation audio default
+/// before this list and the user's configuration.
 fn embedded_default_args() -> Vec<LaunchArg> {
     vec![
         LaunchArg::flag("no-ytdl"),
@@ -548,10 +554,17 @@ fn embedded_required_args() -> Vec<LaunchArg> {
     if cfg!(target_os = "windows") {
         return windows_embedded_required_args();
     }
-    vec![
-        LaunchArg::set("vo", "libmpv"),
-        LaunchArg::set("force-window", "no"),
-    ]
+    #[cfg(target_os = "macos")]
+    {
+        return macos::required_args();
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        vec![
+            LaunchArg::set("vo", "libmpv"),
+            LaunchArg::set("force-window", "no"),
+        ]
+    }
 }
 
 /// mpv's own D3D11 child under WebView2. These are protected against user
