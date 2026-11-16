@@ -950,7 +950,7 @@
           <p class="muted small">
             Each later video opens the way you left the one before it: full
             screen, maximized, its screen and its size. This only chooses how
-            the first one opens.
+            the first one opens. It applies to mpv's own window.
           </p>
         </div>
       </div>
@@ -1065,6 +1065,8 @@
             Loads mpv's bundled <code>autocrop.lua</code> to remove black bars.
             <b>Manual</b> only crops when you press <code>Shift+C</code> during
             playback. <b>Automatic</b> crops every video on its own.
+            In Vela's window, cropping is done by Vela's own script (the Crop
+            button or <code>Shift+C</code>) and does not crop HDR video.
           </p>
           {#if advanced.autocrop === "auto"}
             <p class="warn small">
