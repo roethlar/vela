@@ -17,34 +17,38 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   until the embedded player works on macOS and Windows; the tag is the
   owner's. Where it stands (2026-11-16, evening):
   - Landed: the macOS app declares why it reaches the local network
-    (`d6a8033`, the August failure's likely cause; checked in the release
-    workflow); the player window finds its remembered screen on a Mac,
-    Retina included (`b3635db`), and on Windows, where mpv ignored
-    `--screen-name` and takes only `--screen=<number>` (`3cc0667`); a Mac
-    with two screens of one model names them as mpv does (`e54b302`);
-    version 1.0.68 (`be1a98e`).
-  - The embedded player on macOS and Windows: probes on hosted runners
-    (`probes/`, workflow `platform-probe.yml`); results, design and what
-    has landed are in `.agents/plans/embedded-player.md`, the amendment of
-    2026-11-16 ("Probe log", "Design that follows", "Landed"). Windows:
-    mpv's own window inside Vela's; the set from the pins (`3dad7a8`,
-    `8c40ff8`) and the host (`6b206ec`) have landed. macOS: the render API
-    (OpenGL) into a layer under the page, proven by probe M1; HDR through
-    the layer's extended dynamic range, as IINA does with the same API, is
-    the slice after the macOS host (technique in the plan's "Design that
-    follows"; measured on the owner's Mac).
-  - In progress (codex, one worktree each under
-    `~/dev/vela-agent-keep/wt/cx-<tag>`): the macOS set (`maclib`), the
-    macOS host (`mhost`), the Windows set in the Windows installers
-    (`wpack`), the end-to-end suite on a hosted Windows runner
-    (`e2ewin`). Then: the macOS set in the app bundle, and the owner's
-    checks, listed once per platform.
-  - Type-checking Windows and macOS code from Linux works (`cargo check
-    --target x86_64-pc-windows-msvc` / `aarch64-apple-darwin`; for macOS
-    a stand-in C compiler for one build script's Objective-C file, since
-    check never links). The scripts live in the session's scratchpad
-    (`xcheck.sh`); CI's macOS and Windows compile jobs remain the real
-    compile.
+    (`d6a8033`; the notarized app of a release run carries the sentence);
+    the player window finds its remembered screen on a Mac, Retina
+    included (`b3635db`), on a Mac with two screens of one model
+    (`e54b302`), on Windows, where mpv ignored `--screen-name` and takes
+    only `--screen=<number>` (`3cc0667`), and on Linux for a play that
+    starts fullscreen (`c49be2a`: mpv picks a fullscreen screen from
+    `--fs-screen-name` only); version 1.0.68 (`be1a98e`).
+  - The embedded player on macOS and Windows (the plan's amendment of
+    2026-11-16, "Probe log", "Design that follows", "Landed"):
+    - Windows: done but for the owner's checks. The set from the pins
+      (`3dad7a8`, `8c40ff8`; plays on a Windows runner), the host
+      (`6b206ec`, review fixes `ca07bfa`), the installers carrying the set
+      (`4fe60b8`; a release run by hand proved both installers and the
+      set unpacked from each).
+    - macOS: the host (`623ec17`: the render API into a CAOpenGLLayer
+      under the page; standard range for now); the set's build
+      (`ba677b7`, `c60a6d3`, and the check's fix after it) is on its third
+      run on a hosted Mac (the second built everything; its check stopped
+      on the interpreter's own images); its CI job is held to runs by hand
+      until a run passes (ci.yml, condition on `libmpv-macos`).
+    - In progress (codex, worktrees `~/dev/vela-agent-keep/wt/cx-<tag>`):
+      `mhdr` (HDR on macOS through the layer's EDR, the technique in the
+      plan), `mpack` (the set in Vela.app, signed and checked in the
+      release workflow). Open review findings pl-3, pl-4 (macOS host;
+      `.agents/review/codereview-2026-11-16-platforms.md`) go with `mhdr`.
+  - Linux unchanged through all of it: both end-to-end suites in full at
+    `6b206ec`, `623ec17` and `c49be2a` (48 of 48, 51 of 51, parity PASS).
+  - The end-to-end suite now runs on a hosted Windows runner too
+    (`9617815`, workflow `e2e-windows.yml`, by hand); its first full run
+    is in progress.
+  - Type-checking Windows and macOS Rust from Linux:
+    `scripts/check-other-platforms.sh` (repo-guidance, Verification).
 - VELA 1.0.66 IS READY TO BE RELEASED, AS FAR AS THE AGENT CAN TAKE IT
   (2026-11-16). It is NOT tagged and NOT published; the owner verifies the
   macOS and Windows builds first. The whole account, with what was
