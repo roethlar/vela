@@ -138,6 +138,24 @@ CI builds the same set in its `libmpv` job and uploads it as the
 `libmpv-linux-x86_64` artifact; `gh run download --name libmpv-linux-x86_64`
 fetches it without building.
 
+For Windows x86_64, run `bash scripts/build-libmpv-windows.sh --container`.
+The separate recipe uses Debian Trixie's mingw-w64 cross compiler and writes
+`.libmpv/out/libmpv-windows-x86_64/`: `libmpv-2.dll`, its non-system DLL
+dependencies, licences and the same file-hash/version manifest format. It
+uses the Linux component pins, D3D11 in both mpv and libplacebo (shaderc and
+SPIRV-Cross), D3D11VA/DXVA2 decoding, WASAPI, DirectWrite font discovery,
+Schannel HTTPS, Lua 5.2 and uchardet. Shader compiler support, zlib, iconv
+and MinGW runtimes are static; the original library set remains separate
+DLLs. `windows-license-notes.txt` records the licences, pin provenance and
+outstanding zlib selection caveat. CI's `libmpv-windows` job builds/caches
+and uploads `libmpv-windows-x86_64`; `libmpv-windows-check` downloads it on
+Windows and runs `python -B packaging/libmpv/check-libmpv-windows.py DIR`.
+That check verifies the manifest before loading, restricts DLL search to
+the set and Windows, audits loaded module paths, reports the client API and
+plays a two-second lavfi pattern to EOF with null outputs. It does not
+exercise D3D11 drawing, HDR, hardware decoding or HTTPS, nor does this build
+recipe wire the embedded player into the Windows app or installer.
+
 How the set is put together:
 
 - **Pins.** `packaging/libmpv/versions.txt` is the only place a version or

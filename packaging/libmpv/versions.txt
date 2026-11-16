@@ -2,8 +2,9 @@
 #
 #   name  version  role  sha256  url  [mirror-url ...]
 #
-# role: ship  = built by scripts/build-libmpv.sh and shipped in libmpv/
-#       build = needed only to build (headers); never shipped
+# role: ship  = built as separate shared libraries by both platform recipes
+#       build = headers or static support archives, not separate shipped DLLs
+# Windows also records and carries licences for its statically linked inputs.
 # A mirror is tried when the first URL fails. It must serve the same bytes: a
 # download is kept only if it matches the checksum.
 #
@@ -22,3 +23,13 @@ dav1d            1.5.4     ship   686616b7c69eb88d44459391ab25cac13b6647a3b28883
 lua              5.2.4     ship   b9e2e4aad6789b3b63a056d442f7b39f0ecfca3ae0f1fc0ae4e9614401b69f4b  https://www.lua.org/ftp/lua-5.2.4.tar.gz  https://www.tecgraf.puc-rio.br/lua/mirror/ftp/lua-5.2.4.tar.gz
 uchardet         0.0.8     ship   e97a60cfc00a1c147a674b097bb1422abd9fa78a2d9ce3f3fdcc2e78a34ac5f0  https://www.freedesktop.org/software/uchardet/releases/uchardet-0.0.8.tar.xz
 vulkan-headers   1.4.368   build  5c5c6f64fcce28a24cc934143a048707af036a858e4ed11d7f71fe016006ecda  https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/tags/v1.4.368.tar.gz
+
+# Windows support inputs. Provenance and licences: windows-license-notes.txt.
+# Static support only; the ten components above remain separate shared libraries.
+shaderc          2026.4    build  f06ce5bcca94e5df7f34e115743597d0ad2e13c5fe9213c67dc8c76031241947  https://github.com/google/shaderc/archive/refs/tags/v2026.4.tar.gz
+glslang          16.6.0    build  9c09b901149c729df745057dafa815278aaa101b84d2b6e14f16a42de52f97f2  https://github.com/KhronosGroup/glslang/archive/refs/tags/16.6.0.tar.gz
+spirv-tools      2026.4    build  92df4c377603f086c3d2a1eb2bd9b8f883a73ca890fb939d78a0cecdcc01686c  https://github.com/KhronosGroup/SPIRV-Tools/archive/refs/tags/v2026.4.tar.gz
+spirv-headers    1.4.363.0 build  5b3a0d099f5c7649e29c0938476c462e71d66ad89a0bde42fa1ba3eb476956c9  https://github.com/KhronosGroup/SPIRV-Headers/archive/refs/tags/vulkan-sdk-1.4.363.0.tar.gz
+spirv-cross      1.4.357.0 build  97c910326afdd44d794ce8561326fa675fd1958b27142f03295403044d639639  https://github.com/KhronosGroup/SPIRV-Cross/archive/refs/tags/vulkan-sdk-1.4.357.0.tar.gz
+zlib             1.4       build  4f11c512053d7bab8d9e9b89bde3575add3e4c50a383b42ef6cb837035fc5a7c  https://github.com/madler/zlib/releases/download/v1.4/zlib-1.4.tar.xz  https://zlib.net/zlib-1.4.tar.xz  https://zlib.net/fossils/zlib-1.4.tar.xz
+libiconv         1.19.1    build  9a06844846d664d7122161700c10a64480d7c7bcead3091925a785b38c91edab  https://ftp.gnu.org/pub/gnu/libiconv/libiconv-1.19.1.tar.gz

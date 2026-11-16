@@ -1,0 +1,12 @@
+# Cross-build tools only. No distribution media/shader libraries enter the set.
+# Windows has no glibc baseline; Trixie supplies GCC 14 and mingw-w64 12 headers.
+FROM docker.io/library/debian:trixie-slim
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      build-essential gcc-mingw-w64-x86-64-posix g++-mingw-w64-x86-64-posix \
+      binutils-mingw-w64-x86-64 mingw-w64-x86-64-dev \
+      pkg-config nasm ninja-build cmake meson \
+      python3 python3-jinja2 python3-markupsafe \
+      curl ca-certificates xz-utils file \
+ && rm -rf /var/lib/apt/lists/*

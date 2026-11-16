@@ -378,28 +378,44 @@ test('the release workflow puts the set into every Linux package and checks each
   assert.match(inventory, /uses: actions\/download-artifact@v8\n\s+with:\n\s+pattern: vela-\*\n\s+path: artifacts\n/);
   assert.doesNotMatch(inventory, /libmpv-linux/);
 
-  // ci.yml still has one piece of business with the set: its `libmpv` job
-  // builds it and proves it. Every line of ci.yml that mentions the set is in
-  // that job, and that job builds no package of Vela. No job of CI packages.
-  assert.doesNotMatch(ci, /tauri\.libmpv\.conf|with-libmpv|VELA_PACKAGE_LIBMPV|check-package/, 'ci.yml');
+  // Only the three named set jobs may mention it. They build/check libraries;
+  // none of them may package Vela, and no other CI job may acquire the set.
+  assertCiSetJobs(ci);
+});
+
+function assertCiSetJobs(ci) {
+  assert.doesNotMatch(ci, /tauri\.libmpv\.conf|with-libmpv|VELA_PACKAGE_LIBMPV|check-package/, 'ci.yml must not package the set');
   let job = null;
   let inJobs = false;
   const outside = [];
-  const libmpvJob = [];
+  const setJobs = new Map(['libmpv', 'libmpv-windows', 'libmpv-windows-check'].map((name) => [name, []]));
   for (const line of ci.split('\n')) {
     if (/^\S/.test(line)) inJobs = /^jobs:\s*$/.test(line);
     const header = inJobs && line.match(/^ {2}([A-Za-z0-9_-]+):\s*(#.*)?$/);
     if (header) job = header[1];
-    if (inJobs && job === 'libmpv') libmpvJob.push(line);
+    if (inJobs && setJobs.has(job)) setJobs.get(job).push(line);
     else if (/libmpv/i.test(line)) outside.push(line.trim());
   }
-  assert.ok(libmpvJob.length > 1, 'ci.yml must keep its libmpv job');
-  assert.deepEqual(outside, [], 'ci.yml mentions the set outside its libmpv job');
-  assert.doesNotMatch(
-    libmpvJob.join('\n'),
-    /tauri|makepkg|scripts\/build\.sh|build:arch|build:linux/i,
-    "ci.yml's libmpv job must not build a package",
-  );
+  assert.deepEqual(outside, [], 'ci.yml mentions the set outside its named libmpv jobs');
+  for (const [name, lines] of setJobs) {
+    assert.ok(lines.length > 1, `ci.yml must keep its ${name} job`);
+    assert.doesNotMatch(lines.join('\n'), /tauri|makepkg|scripts\/build\.sh|build:arch|build:linux/i,
+      `ci.yml's ${name} job must not build a package`);
+  }
+}
+
+test('the CI set-job boundary rejects each escape (red proof)', () => {
+  const ci = read('.github/workflows/ci.yml');
+  assertCiSetJobs(ci);
+  assert.throws(() => assertCiSetJobs(ci + '\n  elsewhere:\n    run: echo libmpv\n'), /outside its named/);
+  assert.throws(() => assertCiSetJobs(ci + '\n  libmpv-unapproved:\n    run: true\n'), /outside its named/);
+  assert.throws(() => assertCiSetJobs(ci + '\n# libmpv outside jobs\n'), /outside its named/);
+  assert.throws(() => assertCiSetJobs(ci.replace('jobs:', 'jobs:\n  app:\n    run: scripts/build.sh --with-libmpv')), /must not package/);
+  for (const name of ['libmpv', 'libmpv-windows', 'libmpv-windows-check']) {
+    assert.throws(() => assertCiSetJobs(ci.replace(`  ${name}:\n`, `  ${name}:\n    run: makepkg\n`)), /must not build a package/);
+    const absent = ci.replace(new RegExp(`^  ${name}:\\n[\\s\\S]*?(?=\\n  [a-z][a-z0-9_-]*:\\n|$)`, 'm'), '');
+    assert.throws(() => assertCiSetJobs(absent), /must keep|outside its named/);
+  }
 });
 
 test('the embedded-player guide qualifies the renderer override refusal', () => {

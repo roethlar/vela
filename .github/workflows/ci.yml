@@ -144,6 +144,49 @@ jobs:
           if-no-files-found: error
           path: .libmpv/out/libmpv
 
+  libmpv-windows:
+    name: Shipped libmpv set (Windows x86_64 cross build)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Restore the built set
+        id: cache
+        uses: actions/cache@v6
+        with:
+          path: .libmpv/out/libmpv-windows-x86_64
+          key: libmpv-windows-x86_64-${{ hashFiles('scripts/build-libmpv-windows.sh', 'packaging/libmpv/versions.txt', 'packaging/libmpv/Containerfile.windows', 'packaging/libmpv/windows-license-notes.txt') }}
+      - name: Build the Windows set
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: bash scripts/build-libmpv-windows.sh --container
+      - name: Check the manifest
+        run: python3 -B packaging/libmpv/check-libmpv-windows.py .libmpv/out/libmpv-windows-x86_64 --manifest-only
+      - name: Upload the Windows set
+        uses: actions/upload-artifact@v7
+        with:
+          name: libmpv-windows-x86_64
+          if-no-files-found: error
+          path: .libmpv/out/libmpv-windows-x86_64
+
+  libmpv-windows-check:
+    name: Load and play the Windows libmpv set
+    needs: libmpv-windows
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+          architecture: x64
+      - name: Download the Windows set
+        uses: actions/download-artifact@v8
+        with:
+          name: libmpv-windows-x86_64
+          path: .libmpv/out/libmpv-windows-x86_64
+      - name: Load and play to EOF
+        shell: pwsh
+        run: python -B packaging/libmpv/check-libmpv-windows.py .libmpv/out/libmpv-windows-x86_64
+
   audit:
     name: cargo audit
     runs-on: ubuntu-latest

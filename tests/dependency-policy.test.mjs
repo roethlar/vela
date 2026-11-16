@@ -1,3 +1,7 @@
+import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -238,8 +242,10 @@ test("the libmpv build script builds exactly the pinned components", async () =>
   const pinned = new Set(pins.map((pin) => pin.name));
   assert.ok(fetched.length >= shipped.length);
   for (const name of fetched) assert.ok(pinned.has(name), `${name} is fetched but not pinned`);
+  const windowsScript = await readText(path.join(repoRoot, "scripts", "build-libmpv-windows.sh"), "utf8");
+  const windowsFetched = [...windowsScript.matchAll(/"\$\((?:unpack|fetch) ([a-z0-9-]+)\)"/g)].map((m) => m[1]);
   for (const pin of pins) {
-    assert.ok(fetched.includes(pin.name), `${pin.name} is pinned but never fetched`);
+    assert.ok(fetched.includes(pin.name) || windowsFetched.includes(pin.name), `${pin.name} is pinned but never fetched by either platform`);
   }
   assert.equal(script.match(/\bcurl\b/g)?.length, 1, "fetch() is the only download");
   assert.doesNotMatch(script, /\b(wget|git clone|pip3? install)\b/);
@@ -759,4 +765,306 @@ test("every libmpv fixture clip has a recorded result, and both tracks have a da
     /for clip in \/recipe\/fixtures\/broken\/\*; do broken=\\"\\\$broken --broken \\\$clip\\"; done/,
   );
   assert.match(runner, /\\\$broken \/recipe\/fixtures\/\*\.mp4 \/recipe\/fixtures\/\*\.mkv/);
+});
+
+// Windows cross-build and package checks.
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const read = (name) => fs.readFileSync(path.join(root, name), 'utf8').replace(/\r\n/g, '\n');
+const scriptPath = path.join(root, 'scripts/build-libmpv-windows.sh');
+const script = read('scripts/build-libmpv-windows.sh');
+const checkerPath = path.join(root, 'packaging/libmpv/check-libmpv-windows.py');
+const checker = read('packaging/libmpv/check-libmpv-windows.py');
+const container = read('packaging/libmpv/Containerfile.windows');
+const notes = read('packaging/libmpv/windows-license-notes.txt');
+const ci = read('.github/workflows/ci.yml');
+const pins = read('packaging/libmpv/versions.txt').split('\n')
+  .filter((line) => line.trim() && !line.startsWith('#')).map((line) => line.split(/\s+/));
+const body = (text, name) => text.match(new RegExp(`^${name}\\(\\) \\{\\n([\\s\\S]*?)\\n\\}`, 'm'))?.[1] ?? '';
+const job = (text, name) => text.match(new RegExp(`^  ${name}:\\n([\\s\\S]*?)(?=\\n  [a-z][a-z0-9_-]*:\\n|(?![\\s\\S]))`, 'm'))?.[1] ?? '';
+const noBash = process.platform === 'win32' ? 'cross build shell runs on Linux' : false;
+const python = process.platform === 'win32' ? 'python' : 'python3';
+
+// Check the actual recipe section, then delete each required setting and
+// prove this same guard fails. A missing token cannot silently pass a mutation.
+function requiredTokens(label, source, tokens) {
+  for (const token of tokens) {
+    test(`Windows ${label}: ${token} (green and red)`, () => {
+      const guard = (candidate) => assert.ok(candidate.includes(token), `${label}: missing ${token}`);
+      guard(source);
+      assert.throws(() => guard(source.replaceAll(token, 'REMOVED_FOR_RED_PROOF')), /missing/);
+    });
+  }
+}
+
+requiredTokens('cross isolation', script, [
+  'shopt -s inherit_errexit', 'unset PKG_CONFIG_PATH PKG_CONFIG_SYSROOT_DIR',
+  'unset CPATH C_INCLUDE_PATH CPLUS_INCLUDE_PATH LIBRARY_PATH CPPFLAGS',
+  'export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"',
+  'export CC_FOR_BUILD=gcc CXX_FOR_BUILD=g++ CFLAGS_FOR_BUILD= CXXFLAGS_FOR_BUILD= LDFLAGS_FOR_BUILD=',
+  "system = 'windows'", "cpu_family = 'x86_64'", 'needs_exe_wrapper = true',
+  "[properties]\nneeds_exe_wrapper = true\npkg_config_libdir = ['$PREFIX/lib/pkgconfig']",
+  'set(CMAKE_SYSTEM_NAME Windows)', 'set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)',
+  'set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)', 'set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)',
+  'set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)', '--cross-file "$WORK/windows.ini"',
+  '-DCMAKE_TOOLCHAIN_FILE="$WORK/windows.cmake"', '--wrap-mode=nodownload',
+  '-DFETCHCONTENT_FULLY_DISCONNECTED=ON', '-Dauto_features=disabled', '-Ddefault_library=shared',
+  '-static-libgcc -static-libstdc++',
+  'install -m644 "$winpthread" "$PREFIX/lib/libwinpthread.a"',
+  'install -m644 "$winpthread" "$PREFIX/lib/libpthread.a"',
+  'stdcxx="$("$CXX" -print-file-name=libstdc++.a)"',
+  'sha256sum -c --quiet - >&2 || die "checksum mismatch:',
+]);
+requiredTokens('container', container, [
+  'FROM docker.io/library/debian:trixie-slim', 'gcc-mingw-w64-x86-64-posix',
+  'g++-mingw-w64-x86-64-posix', 'mingw-w64-x86-64-dev', 'binutils-mingw-w64-x86-64',
+  'pkg-config nasm ninja-build cmake meson',
+]);
+const configuration = {
+  zlib: ['-DZLIB_BUILD_SHARED=OFF', '-DZLIB_BUILD_STATIC=ON', '-DZLIB_BUILD_TESTING=OFF', '"$PREFIX/lib/libzs.a" "$PREFIX/lib/libz.a"'],
+  libiconv: ['--host="$TARGET"', '--enable-static --disable-shared --disable-nls --disable-rpath', 'make -C libcharset', 'make -C libcharset install-lib libdir="$PWD/lib" includedir="$PWD/lib"', 'make -C lib ', 'install -Dm644 include/iconv.h.inst "$PREFIX/include/iconv.h"'],
+  freetype: ['-Dzlib=system', '-Dharfbuzz=disabled', '-Dmmap=disabled'],
+  fribidi: ['-Ddocs=false -Dbin=false -Dtests=false'],
+  harfbuzz: ['-Dfreetype=enabled', '-Dtests=disabled -Dutilities=disabled', '-Dsubset=disabled -Draster=disabled -Dvector=disabled -Dgpu=disabled'],
+  libass: ['-Ddirectwrite=enabled -Dfontconfig=disabled -Dasm=enabled'],
+  dav1d: ['-Denable_tools=false -Denable_tests=false -Denable_examples=false'],
+  lua: ['-DLUA_COMPAT_ALL -DLUA_BUILD_AS_DLL', '-Wl,--out-implib,liblua5.2.dll.a', 'lua52.dll', 'lua5.2.pc'],
+  uchardet: ['-DBUILD_BINARY=OFF -DBUILD_STATIC=OFF -DBUILD_SHARED_LIBS=ON'],
+  shaderc: ['-DBUILD_SHARED_LIBS=OFF', '-DSHADERC_GLSLANG_DIR="$glslang"', '-DSHADERC_SPIRV_TOOLS_DIR="$tools"',
+    '-DSHADERC_SPIRV_HEADERS_DIR="$headers"', '-DSPIRV-Headers_SOURCE_DIR="$headers"',
+    '-DSHADERC_SKIP_INSTALL=OFF -DSHADERC_SKIP_TESTS=ON -DSHADERC_SKIP_EXAMPLES=ON',
+    '-DSHADERC_SKIP_EXECUTABLES=ON', '-DSHADERC_ENABLE_WGSL_OUTPUT=OFF',
+    '-DSHADERC_ENABLE_HLSL=OFF -DENABLE_HLSL=OFF -DENABLE_GLSLANG_BINARIES=OFF',
+    '-DGLSLANG_TESTS=OFF -DENABLE_CTEST=OFF -DBUILD_EXTERNAL=OFF -DENABLE_OPT=ON',
+    '-DSPIRV_SKIP_TESTS=ON -DSPIRV_SKIP_EXECUTABLES=ON', '-DSPIRV_TOOLS_BUILD_STATIC=ON',
+    '--target shaderc_combined', '-lshaderc_combined', 'shaderc.pc'],
+  spirv_cross: ['-DSPIRV_CROSS_STATIC=ON -DSPIRV_CROSS_SHARED=OFF',
+    '-DSPIRV_CROSS_CLI=OFF -DSPIRV_CROSS_ENABLE_TESTS=OFF',
+    '-DSPIRV_CROSS_ENABLE_GLSL=ON -DSPIRV_CROSS_ENABLE_HLSL=ON',
+    '-DSPIRV_CROSS_ENABLE_MSL=OFF -DSPIRV_CROSS_ENABLE_CPP=OFF',
+    '-DSPIRV_CROSS_ENABLE_REFLECT=OFF -DSPIRV_CROSS_ENABLE_UTIL=OFF', '-DSPIRV_CROSS_ENABLE_C_API=ON',
+    'spirv-cross-c-shared.pc', '$(pkg-config --modversion spirv-cross-c)',
+    '-lspirv-cross-c -lspirv-cross-hlsl -lspirv-cross-glsl -lspirv-cross-core'],
+  ffmpeg: ['--target-os=mingw32 --arch=x86_64 --enable-cross-compile', '--cc="$CC" --cxx="$CXX"',
+    '--enable-shared --disable-static', '--disable-autodetect', '--disable-gpl --disable-nonfree --disable-version3',
+    '--enable-zlib --enable-iconv --enable-schannel --enable-libdav1d', '--enable-d3d11va --enable-dxva2',
+    '--enable-w32threads --disable-pthreads', '--disable-indevs --disable-outdevs --enable-indev=lavfi',
+    'grep -qx \'#define FFMPEG_LICENSE "LGPL version 2.1 or later"\' config.h',
+    'grep -qx "#define CONFIG_$feature 1" config.h || die',
+    "grep -qx '#define CONFIG_LAVFI_INDEV 1' config_components.h || die"],
+  libplacebo: ['-Dd3d11=enabled -Dshaderc=enabled -Dglslang=disabled', '-Dvulkan=disabled -Dopengl=disabled',
+    '-Ddemos=false -Dtests=false -Dbench=false -Dfuzz=false'],
+  mpv: ['-Dgpl=false -Dlibmpv=true -Dcplayer=false', '-Dbuild-date=false',
+    '-Dlua=lua5.2 -Diconv=enabled -Dzlib=enabled -Duchardet=enabled -Dvector=enabled',
+    '-Dd3d11=enabled -Dshaderc=enabled -Dspirv-cross=enabled',
+    '-Dd3d-hwaccel=enabled -Dd3d9-hwaccel=enabled -Dwasapi=enabled',
+    '-Dwin32-threads=enabled -Dlibavdevice=enabled'],
+};
+for (const [name, tokens] of Object.entries(configuration)) requiredTokens(name, body(script, `build_${name}`), tokens);
+requiredTokens('collector', body(script, 'collect'), [
+  'queue="libmpv-2.dll"', 'needed "$OUT/$lib"', 'allowed_system "$dep"',
+  'missing or ambiguous DLL:', "file format pei-x86-64", '"$STRIP" --strip-unneeded',
+  'die "unshipped dependency:', 'die "no licence text collected for component',
+  "find . -type f ! -name MANIFEST -printf '%P\\n'", '"$(sha256sum "$f"', '"$(stat -c %s "$f")"',
+  '"licence $name licenses/$name/$f"', '"$recipe/windows-license-notes.txt"',
+  'lic spirv-cross LICENSE spirv.h spirv.hpp GLSL.std.450.h',
+]);
+requiredTokens('licence notes', notes, ['LGPL-3.0-or-later', 'Apache-2.0', 'Runtime Library Exception', 'modified libiconv']);
+
+test('Windows source graph uses every pin, exclusively, with licences (green and red)', () => {
+  const guard = (candidate, entries = pins) => {
+    const fetched = [...candidate.matchAll(/"\$\((?:unpack|fetch) ([a-z0-9-]+)\)"/g)].map((m) => m[1]);
+    assert.deepEqual([...new Set(fetched)].sort(), entries.map((p) => p[0]).sort(), 'source graph equals pins');
+    assert.equal((candidate.match(/\bcurl\b/g) ?? []).length, 1, 'one download boundary');
+    assert.doesNotMatch(candidate, /\b(?:wget|git clone|pip3? install)\b/, 'no unpinned download');
+    const steps = candidate.match(/^steps="\$\{\*:-(.*?)\}"$/m)?.[1].split(' ');
+    assert.deepEqual(steps, [...Object.keys(configuration), 'collect'], 'all builders run in dependency order');
+    for (const [name, , role, sha] of entries) {
+      assert.match(sha, /^[0-9a-f]{64}$/, `${name}: checksum`);
+      assert.match(role, /^(ship|build)$/, `${name}: role`);
+      assert.ok(body(candidate, 'collect').includes(`lic ${name} `) || (name === 'lua' && candidate.includes('licence lua licenses/lua/LICENSE')), `${name}: licence`);
+    }
+  };
+  guard(script);
+  for (const [name] of pins) {
+    assert.throws(() => guard(script.replaceAll(`$(unpack ${name})`, '$(unpack UNPINNED)')), /source graph/);
+    const changed = script.replaceAll(`lic ${name} `, 'lic MISSING ')
+      .replaceAll(`licence ${name} licenses/${name}/LICENSE`, 'REMOVED');
+    assert.throws(() => guard(changed), /licence/);
+    assert.throws(() => guard(script, pins.map((pin) => pin[0] === name ? [pin[0], pin[1], pin[2], 'bad'] : pin)), /checksum/);
+    assert.throws(() => guard(script, pins.map((pin) => pin[0] === name ? [pin[0], pin[1], 'bad', pin[3]] : pin)), /role/);
+  }
+  assert.throws(() => guard(script + '\ncurl https://unverified.invalid\n'), /download boundary/);
+  assert.throws(() => guard(script + '\nwget https://unverified.invalid\n'), /unpinned download/);
+  assert.throws(() => guard(script.replace('lua uchardet shaderc', 'lua shaderc')), /dependency order/);
+});
+
+test('Windows rejects GPL configuration and runtime DLL exemptions (green and red)', () => {
+  const licence = (candidate) => {
+    assert.doesNotMatch(body(candidate, 'build_mpv'), /-Dgpl=true/, 'mpv GPL');
+    assert.doesNotMatch(body(candidate, 'build_ffmpeg'), /--enable-(gpl|nonfree|version3)/, 'FFmpeg LGPL');
+  };
+  licence(script);
+  assert.throws(() => licence(script.replace('-Dgpl=false', '-Dgpl=true')), /mpv GPL/);
+  for (const flag of ['gpl', 'nonfree', 'version3']) {
+    assert.throws(() => licence(script.replace(`--disable-${flag}`, `--enable-${flag}`)), /FFmpeg LGPL/);
+  }
+  const runtime = (candidate) => {
+    const allowed = candidate.match(/^ALLOWED_SYSTEM="([\s\S]*?)"$/m)?.[1];
+    assert.ok(allowed, 'system allowlist');
+    assert.doesNotMatch(allowed, /libgcc|libstdc\+\+|libwinpthread|libssp|shaderc|spirv|libmpv/i, 'runtime is not a system DLL');
+  };
+  runtime(script);
+  for (const dll of ['libgcc_s_seh-1.dll', 'libstdc++-6.dll', 'libwinpthread-1.dll', 'libssp-0.dll']) {
+    assert.throws(() => runtime(script.replace('  advapi32.dll', `  ${dll} advapi32.dll`)), /not a system DLL/);
+  }
+});
+
+const buildJob = job(ci, 'libmpv-windows');
+const checkJob = job(ci, 'libmpv-windows-check');
+requiredTokens('CI cross build', buildJob, [
+  'runs-on: ubuntu-22.04', 'path: .libmpv/out/libmpv-windows-x86_64',
+  "key: libmpv-windows-x86_64-${{ hashFiles(", "'scripts/build-libmpv-windows.sh'",
+  "'packaging/libmpv/versions.txt'", "'packaging/libmpv/Containerfile.windows'",
+  "'packaging/libmpv/windows-license-notes.txt'", "if: steps.cache.outputs.cache-hit != 'true'",
+  'run: bash scripts/build-libmpv-windows.sh --container',
+  'run: python3 -B packaging/libmpv/check-libmpv-windows.py .libmpv/out/libmpv-windows-x86_64 --manifest-only',
+  'uses: actions/upload-artifact@v7', 'name: libmpv-windows-x86_64', 'if-no-files-found: error',
+]);
+requiredTokens('CI Windows check', checkJob, [
+  'needs: libmpv-windows', 'runs-on: windows-latest', 'architecture: x64',
+  'uses: actions/download-artifact@v8', 'name: libmpv-windows-x86_64',
+  'path: .libmpv/out/libmpv-windows-x86_64',
+  'run: python -B packaging/libmpv/check-libmpv-windows.py .libmpv/out/libmpv-windows-x86_64',
+]);
+test('Windows checks cached sets too (green and red)', () => {
+  const guard = (candidate) => assert.doesNotMatch(candidate, /^\s+if:/m, 'no condition on check');
+  guard(checkJob);
+  guard(buildJob.split('- name: Check the manifest')[1]);
+  assert.throws(() => guard(checkJob + '\n    if: false\n'), /no condition/);
+});
+requiredTokens('checker wiring', checker, [
+  'problems = check_manifest(directory, args.pins)', 'skip load: manifest check failed',
+  'with os.add_dll_directory(str(directory)):',
+  'ctypes.CDLL(str(directory / "libmpv-2.dll"), winmode=0x00000100 | 0x00000800)',
+  'kernel.SetDefaultDllDirectories(0x00000800 | 0x00000400)',
+  'kernel.K32EnumProcessModules(kernel.GetCurrentProcess()', 'kernel.GetModuleFileNameW(handle',
+  'snapshots.update(loaded_modules(kernel))', 'check_loaded(directory, files, snapshots, require_mpv)',
+  'lib.mpv_client_api_version()', '("vo", "null"), ("ao", "null")',
+  'b"av://lavfi:testsrc2=duration=2"', 'end.reason != 0 or end.error != 0 or not loaded',
+  'time.monotonic() + 25', 'timeout=60, check=False', 'lib.mpv_terminate_destroy(handle)',
+]);
+
+function callPython(name, ...args) {
+  const run = spawnSync(python, ['-B', '-c', [
+    'import importlib.util, json, sys',
+    "spec = importlib.util.spec_from_file_location('windows_check', sys.argv[1])",
+    'module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)',
+    'print(json.dumps(getattr(module, sys.argv[2])(*json.loads(sys.argv[3]))))',
+  ].join('\n'), checkerPath, name, JSON.stringify(args)], { encoding: 'utf8' });
+  assert.equal(run.status, 0, run.stderr);
+  return JSON.parse(run.stdout);
+}
+
+test('Windows module audit accepts case-insensitive paths and rejects foreign/unlisted DLLs', () => {
+  const set = 'C:\\set';
+  const names = ['libmpv-2.dll', 'avcodec-63.dll'];
+  const modules = ['c:\\SET\\LIBMPV-2.DLL', 'C:\\set\\avcodec-63.dll', 'C:\\Windows\\System32\\kernel32.dll'];
+  const check = (paths, required = true) => callPython('check_loaded', set, names, paths, required);
+  assert.deepEqual(check(modules), []);
+  assert.match(check([...modules, 'D:\\elsewhere\\AVCODEC-63.DLL']).join(), /loaded from elsewhere/);
+  assert.match(check([...modules, 'C:\\set\\unlisted.dll']).join(), /loaded unlisted/);
+  assert.match(check([...modules, 'C:\\set\\nested\\avcodec-63.dll']).join(), /loaded unlisted|elsewhere/);
+  assert.deepEqual(check([...modules, 'C:\\set-other\\unrelated.dll']), []);
+  assert.match(check(modules.slice(1)).join(), /not mapped from the set/);
+  assert.deepEqual(check([], false), []);
+});
+
+function fixture(t) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vela-windows-check-'));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  const dir = path.join(tmp, 'set');
+  const pinfile = path.join(tmp, 'versions.txt');
+  fs.mkdirSync(dir);
+  fs.writeFileSync(pinfile, 'mpv 0.42.0 ship\nshaderc 2026.4 build\n');
+  const data = { 'libmpv-2.dll': 'test DLL', 'avcodec-63.dll': 'dependency',
+    'licenses/mpv/LICENSE': 'LGPL', 'licenses/shaderc/LICENSE': 'Apache' };
+  const lines = ['arch x86_64', 'platform windows', 'component mpv 0.42.0', 'component shaderc 2026.4',
+    'licence mpv licenses/mpv/LICENSE', 'licence shaderc licenses/shaderc/LICENSE'];
+  for (const [name, text] of Object.entries(data)) {
+    fs.mkdirSync(path.dirname(path.join(dir, name)), { recursive: true });
+    fs.writeFileSync(path.join(dir, name), text);
+    lines.push(`file ${createHash('sha256').update(text).digest('hex')} ${Buffer.byteLength(text)} ${name}`);
+  }
+  const manifest = lines.join('\n') + '\n';
+  const manifestPath = path.join(dir, 'MANIFEST');
+  fs.writeFileSync(manifestPath, manifest);
+  const problems = () => callPython('check_manifest', dir, pinfile);
+  return { tmp, dir, pinfile, manifest, manifestPath, problems };
+}
+
+test('Windows manifest check fails for each broken rule before loading', async (t) => {
+  const changes = [
+    ['missing DLL', (f) => fs.unlinkSync(path.join(f.dir, 'avcodec-63.dll')), /missing/],
+    ['changed DLL', (f) => fs.appendFileSync(path.join(f.dir, 'libmpv-2.dll'), 'x'), /modified/],
+    ['same-size changed DLL', (f) => fs.writeFileSync(path.join(f.dir, 'libmpv-2.dll'), 'bad! DLL'), /modified/],
+    ['changed licence', (f) => fs.appendFileSync(path.join(f.dir, 'licenses/shaderc/LICENSE'), 'x'), /modified/],
+    ['extra DLL', (f) => fs.writeFileSync(path.join(f.dir, 'extra.dll'), 'x'), /not in MANIFEST/],
+    ['missing licence file', (f) => fs.unlinkSync(path.join(f.dir, 'licenses/shaderc/LICENSE')), /missing/],
+    ['licence not recorded', (f) => fs.writeFileSync(f.manifestPath, f.manifest.replace('licence shaderc licenses/shaderc/LICENSE\n', '')), /no licence/],
+    ['wrong version', (f) => fs.writeFileSync(f.manifestPath, f.manifest.replace('component mpv 0.42.0', 'component mpv 0.41.0')), /versions differ/],
+    ['wrong architecture', (f) => fs.writeFileSync(f.manifestPath, f.manifest.replace('arch x86_64', 'arch aarch64')), /must name Windows x86_64/],
+    ['wrong platform', (f) => fs.writeFileSync(f.manifestPath, f.manifest.replace('platform windows', 'platform linux')), /must name Windows x86_64/],
+    ['missing primary DLL record', (f) => fs.writeFileSync(f.manifestPath, f.manifest.replace(/^file .* libmpv-2.dll\n/m, '')), /does not list/],
+    ['duplicate component', (f) => fs.appendFileSync(f.manifestPath, 'component mpv 0.42.0\n'), /duplicate component/],
+    ['malformed hash', (f) => fs.writeFileSync(f.manifestPath, f.manifest.replace(/file [a-f0-9]{64}/, 'file bad')), /invalid file/],
+    ['licence names no file', (f) => fs.appendFileSync(f.manifestPath, 'licence mpv licenses/mpv/absent\n'), /invalid licence/],
+    ['empty licence', (f) => fs.writeFileSync(f.manifestPath, f.manifest.replace(/file ([a-f0-9]{64}) \d+ licenses\/mpv/, 'file $1 0 licenses/mpv')), /invalid licence/],
+    ['unknown record', (f) => fs.appendFileSync(f.manifestPath, 'typo something\n'), /invalid MANIFEST/],
+    ['duplicate DLL ignoring case', (f) => fs.appendFileSync(f.manifestPath, f.manifest.match(/^file .* libmpv-2.dll$/m)[0].replace('libmpv-2.dll', 'LIBMPV-2.DLL') + '\n'), /duplicate file/],
+  ];
+  for (const escape of ['../escape.dll', 'C:/escape.dll', 'C:escape.dll', 'bad\\escape.dll', '/escape.dll']) {
+    changes.push([`escape ${escape}`, (f) => fs.writeFileSync(f.manifestPath, f.manifest.replace('avcodec-63.dll', escape)), /unsafe file name/]);
+  }
+  for (const [name, change, expected] of changes) {
+    await t.test(name, (t) => {
+      const f = fixture(t);
+      assert.deepEqual(f.problems(), [], 'green');
+      change(f);
+      assert.match(f.problems().join('\n'), expected, 'red');
+      const run = spawnSync(python, ['-B', checkerPath, f.dir, '--pins', f.pinfile], { encoding: 'utf8' });
+      assert.equal(run.status, 1, run.stderr);
+      assert.match(run.stdout, /skip load: manifest check failed/);
+    });
+  }
+  await t.test('symbolic link', { skip: process.platform === 'win32' && 'link creation needs Windows privileges' }, (t) => {
+    const f = fixture(t);
+    assert.deepEqual(f.problems(), []);
+    fs.renameSync(path.join(f.dir, 'avcodec-63.dll'), path.join(f.tmp, 'foreign.dll'));
+    fs.symlinkSync(path.join(f.tmp, 'foreign.dll'), path.join(f.dir, 'avcodec-63.dll'));
+    assert.match(f.problems().join(), /link or reparse/);
+  });
+  await t.test('manifest-only CLI succeeds without loading a DLL', (t) => {
+    const f = fixture(t);
+    const run = spawnSync(python, ['-B', checkerPath, f.dir, '--pins', f.pinfile, '--manifest-only'], { encoding: 'utf8' });
+    assert.equal(run.status, 0, run.stderr);
+    assert.match(run.stdout, /ok: MANIFEST/);
+  });
+});
+
+test('Windows fetch rejects corrupt cached sources before any compiler runs', { skip: noBash }, (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vela-windows-pin-'));
+  t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(tmp, 'src'));
+  const lua = pins.find((p) => p[0] === 'lua');
+  fs.writeFileSync(path.join(tmp, 'src', `lua-${lua[1]}.tar.gz`), 'bad source');
+  const run = spawnSync('bash', [scriptPath, 'lua'], { env: { ...process.env, LIBMPV_ROOT: tmp }, encoding: 'utf8' });
+  assert.equal(run.status, 1, run.stdout + run.stderr);
+  assert.match(run.stderr, /checksum mismatch: .*lua-/);
+  assert.equal(fs.existsSync(path.join(tmp, 'work-windows-x86_64/src/lua')), false);
+});
+
+test('Windows build refuses unknown steps before changing output', { skip: noBash }, () => {
+  const run = spawnSync('bash', [scriptPath, 'ffmpeg-gpl'], { encoding: 'utf8' });
+  assert.equal(run.status, 1);
+  assert.match(run.stderr, /unknown step 'ffmpeg-gpl'/);
 });

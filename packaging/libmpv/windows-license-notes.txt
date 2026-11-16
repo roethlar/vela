@@ -1,0 +1,73 @@
+Vela's Windows libmpv set
+
+Vela stays MIT. mpv, FFmpeg, libplacebo, libass, FreeType, HarfBuzz, FriBidi,
+dav1d, Lua 5.2 and uchardet are separate, replaceable DLLs. Their upstream
+licence texts accompany this file. mpv is configured with -Dgpl=false and
+FFmpeg reports "LGPL version 2.1 or later". No GPL-only feature is enabled.
+
+The Windows D3D11 implementation uses shaderc (Apache-2.0), with glslang
+(BSD-3-Clause, BSD-2-Clause, MIT and Apache-2.0 notices in LICENSE.txt),
+SPIRV-Tools (Apache-2.0), SPIRV-Headers (MIT/Khronos notices), and SPIRV-Cross
+(Apache-2.0, with its compiled Khronos headers' MIT-style notices copied
+alongside LICENSE). All are static support
+archives linked into the DLLs, hence role "build" in versions.txt; this does
+not mean their licences or source obligations disappear. Tests, examples,
+standalone shader compilers, glslang's optional source-update scripts and
+SPIRV-Cross's other language backends are not built or distributed.
+
+Apache-2.0 is compatible with the LGPL-2.1-or-later components by exercising
+their "or later" permission and distributing the combined Windows library
+work under LGPL-3.0-or-later. It is not a claim that Apache-2.0 is compatible
+with LGPL-2.1-only. The LGPL v3 and its incorporated GPL v3 text accompany
+the FFmpeg licence files; their presence does not mean GPL-only code was
+enabled. See https://www.gnu.org/licenses/license-list.html#apache2 and
+https://www.gnu.org/licenses/gpl-faq.html#AllCompatibility .
+
+zlib (Zlib licence) and GNU libiconv's libraries (LGPL-2.1-or-later) are also
+static support inputs. Only libiconv's libcharset, lib and include targets
+are built/installed; its GPL command-line program and documentation are not.
+Vulkan-Headers is a build-only source of headers; its MIT and Apache-2.0
+texts are included. MinGW's runtime and GCC's libgcc/libstdc++/winpthread
+runtime objects are linked statically, with the toolchain copyright notices
+and GCC Runtime Library Exception carried in licenses/toolchain/.
+
+Corresponding source and rebuilding:
+The official source archive URLs and SHA-256 values are in versions.txt.
+scripts/build-libmpv-windows.sh and packaging/libmpv/Containerfile.windows
+are the complete build instructions, including the static support archives
+and the two pkg-config adapters; no upstream source patch is applied. Keep
+these inputs available with a distribution to permit rebuilding/relinking
+the LGPL DLLs, including with modified libiconv. Vela loads the DLLs rather
+than statically linking the LGPL work into its executable.
+
+Pin selection, recorded 2026-11-16 (versions/hashes are canonical only in
+versions.txt): shaderc's September release and glslang's September release
+use the same SPIRV-Tools revision in DEPS/known_good.json. The selected
+SPIRV-Tools October release and SPIRV-Headers SDK tag contain the matching
+headers revision 4965431. SPIRV-Cross's July SDK release has the C API and
+HLSL backend required by both renderers. Each predates the two-week cutoff
+of 2026-11-02. libiconv's October 31 release meets that cutoff and supplies
+the iconv API required by mpv's uchardet feature. zlib is 1.4 (4 Nov 2026),
+younger than the cutoff: it is the security release that fixes a gzwrite()
+buffer overflow (CVE-2026-85091) and three inflate overruns in 1.3.2, and
+FFmpeg and FreeType inflate untrusted data. A security release outweighs
+the age rule.
+
+Source metadata used (the archives still require verification by the build):
+https://github.com/google/shaderc/releases/tag/v2026.4
+https://raw.githubusercontent.com/google/shaderc/v2026.4/DEPS
+https://raw.githubusercontent.com/KhronosGroup/glslang/16.6.0/known_good.json
+https://github.com/KhronosGroup/SPIRV-Headers/releases/tag/vulkan-sdk-1.4.363.0
+https://raw.githubusercontent.com/Homebrew/homebrew-core/master/Formula/s/shaderc.rb
+https://raw.githubusercontent.com/Homebrew/homebrew-core/master/Formula/g/glslang.rb
+https://raw.githubusercontent.com/Homebrew/homebrew-core/master/Formula/s/spirv-headers.rb
+https://raw.githubusercontent.com/Homebrew/homebrew-core/master/Formula/s/spirv-cross.rb
+https://www.freshports.org/graphics/spirv-tools/
+https://zlib.net/ChangeLog.txt
+https://raw.githubusercontent.com/msys2/MINGW-packages/master/mingw-w64-libiconv/PKGBUILD
+https://ftp.gnu.org/pub/gnu/libiconv/
+
+Checksums: every archive pinned for this set was downloaded and hashed by
+the reviewing agent on 2026-11-16; each matches its pin. zlib 1.4's GitHub
+release and zlib.net serve identical bytes. The build verifies every
+download against its pin regardless.
