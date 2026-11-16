@@ -148,6 +148,35 @@ pub(crate) fn user_config_files(
     files
 }
 
+/// Windows mpv.conf files, lowest priority first, matching mpv 0.42's
+/// options/path.c and osdep/path-win.c. Portable mode replaces home and
+/// suppresses global, but exe_dir still applies. MPV_HOME replaces them all.
+#[cfg(any(target_os = "windows", test))]
+fn windows_user_config_files(
+    exe_dir: Option<&std::path::Path>,
+    portable_present: bool,
+    appdata_dir: Option<&std::path::Path>,
+    mpv_home: Option<&std::ffi::OsStr>,
+) -> Vec<std::path::PathBuf> {
+    if let Some(home) = mpv_home.filter(|value| !value.is_empty()) {
+        return vec![std::path::PathBuf::from(home).join("mpv.conf")];
+    }
+    let mut files = Vec::new();
+    if let Some(dir) = exe_dir {
+        if !portable_present {
+            files.push(dir.join("mpv").join("mpv.conf"));
+        }
+        files.push(dir.join("mpv.conf"));
+    }
+    let home = if portable_present {
+        exe_dir.map(|dir| dir.join("portable_config"))
+    } else {
+        appdata_dir.map(|dir| dir.join("mpv"))
+    };
+    files.extend(home.map(|dir| dir.join("mpv.conf")));
+    files
+}
+
 /// Decimal HWND, as mpv's WinID option and the W0 toplevel probe require.
 #[cfg(any(target_os = "windows", test))]
 pub(crate) fn windows_window_options(hwnd: usize) -> Vec<LaunchArg> {
@@ -170,28 +199,16 @@ pub(crate) fn current_user_config_files() -> Vec<std::path::PathBuf> {
     }
     #[cfg(target_os = "windows")]
     {
-        use std::path::PathBuf;
-        // mpv's Windows search: explicit MPV_HOME; otherwise portable_config
-        // beside the executable, or global exe/mpv then RoamingAppData/mpv.
-        if let Some(home) = std::env::var_os("MPV_HOME").filter(|v| !v.is_empty()) {
-            return vec![PathBuf::from(home).join("mpv.conf")];
-        }
         let executable = std::env::current_exe().ok();
         let directory = executable.as_deref().and_then(std::path::Path::parent);
-        if let Some(portable) = directory
-            .map(|dir| dir.join("portable_config"))
-            .filter(|p| p.is_dir())
-        {
-            return vec![portable.join("mpv.conf")];
-        }
-        let mut files: Vec<_> = directory
-            .map(|dir| dir.join("mpv/mpv.conf"))
-            .into_iter()
-            .collect();
-        files.extend(
-            directories::BaseDirs::new().map(|dirs| dirs.config_dir().join("mpv/mpv.conf")),
-        );
-        files
+        let portable_present = directory.is_some_and(|dir| dir.join("portable_config").is_dir());
+        let dirs = directories::BaseDirs::new();
+        windows_user_config_files(
+            directory,
+            portable_present,
+            dirs.as_ref().map(|dirs| dirs.config_dir()),
+            std::env::var_os("MPV_HOME").as_deref(),
+        )
     }
 }
 
@@ -504,6 +521,54 @@ mod tests {
 #[cfg(test)]
 mod windows_tests {
     use super::*;
+    use std::ffi::OsStr;
+    use std::path::Path;
+
+    #[test]
+    fn windows_nonportable_configs_load_global_exe_then_appdata() {
+        let exe = Path::new("install");
+        let appdata = Path::new("roaming");
+        for mpv_home in [None, Some(OsStr::new(""))] {
+            assert_eq!(
+                windows_user_config_files(Some(exe), false, Some(appdata), mpv_home),
+                [
+                    exe.join("mpv").join("mpv.conf"),
+                    exe.join("mpv.conf"),
+                    appdata.join("mpv").join("mpv.conf"),
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn windows_portable_configs_load_exe_then_portable() {
+        let exe = Path::new("install");
+        for mpv_home in [None, Some(OsStr::new(""))] {
+            assert_eq!(
+                windows_user_config_files(Some(exe), true, Some(Path::new("roaming")), mpv_home),
+                [
+                    exe.join("mpv.conf"),
+                    exe.join("portable_config").join("mpv.conf"),
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn windows_mpv_home_excludes_all_other_config_dirs() {
+        let home = Path::new("custom");
+        for portable_present in [false, true] {
+            assert_eq!(
+                windows_user_config_files(
+                    Some(Path::new("install")),
+                    portable_present,
+                    Some(Path::new("roaming")),
+                    Some(home.as_os_str()),
+                ),
+                [home.join("mpv.conf")]
+            );
+        }
+    }
 
     #[test]
     fn windows_play_uses_a_decimal_parent_and_the_native_video_output() {
@@ -512,8 +577,41 @@ mod windows_tests {
         assert!(steps.contains(&Step::Options("wid=%6%123456\n".into())));
         assert!(steps.contains(&Step::Options("vo=%8%gpu-next\n".into())));
         assert!(steps.contains(&Step::Options("gpu-api=%5%d3d11\n".into())));
+        assert!(steps.contains(&Step::Options("gpu-context=%5%d3d11\n".into())));
         assert!(!steps.contains(&Step::Options("vo=%6%libmpv\n".into())));
         assert!(steps.contains(&Step::Options("target-colorspace-hint=%3%yes\n".into())));
+    }
+
+    #[test]
+    fn windows_protected_gpu_options_follow_user_options() {
+        let mut args = vec![
+            LaunchArg::User("--vo=gpu".into()),
+            LaunchArg::User("--gpu-api=opengl".into()),
+            LaunchArg::User("--gpu-context=win".into()),
+        ];
+        args.extend(windows_window_options(123456));
+        let steps = steps(&args);
+        for (name, user, required) in [
+            ("vo", "gpu", "gpu-next"),
+            ("gpu-api", "opengl", "d3d11"),
+            ("gpu-context", "win", "d3d11"),
+        ] {
+            let applied: Vec<_> = steps
+                .iter()
+                .filter(|step| {
+                    matches!(step, Step::Options(text) if text.starts_with(&format!("{name}=")))
+                })
+                .cloned()
+                .collect();
+            assert_eq!(
+                applied,
+                [
+                    Step::Options(line(name, Some(user))),
+                    Step::Options(line(name, Some(required))),
+                ],
+                "{name}: the protected value must override the user's option"
+            );
+        }
     }
 
     #[test]

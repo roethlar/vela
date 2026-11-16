@@ -1155,3 +1155,10 @@ at 1.0.16 with 292 Rust tests and 53 Node tests. No follow-up review ran, so no
 clean verdict is claimed for the repaired code. tr-1 also exposed that
 `package.json`'s `check` script names its test files explicitly, so a new file
 under `tests/` gates nothing until it is added there.
+
+## 2026-11-16 — the embedded player on Windows and macOS (codereview codex)
+
+Record: `codereview-2026-11-16-platforms.md`. Two hunts, one per slice:
+the Windows host (`8c40ff8..6b206ec`) and the macOS host
+(`4fe60b8..623ec17`). 4 candidates, 4 admitted (MEDIUM), 0 declined;
+pl-1 and pl-2 closed, pl-3 and pl-4 open (queued with the macOS HDR slice).

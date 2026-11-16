@@ -576,6 +576,8 @@ pub(crate) fn windows_embedded_required_args() -> Vec<LaunchArg> {
     vec![
         LaunchArg::set("vo", "gpu-next"),
         LaunchArg::set("gpu-api", "d3d11"),
+        // The API alone cannot override an incompatible user context like win.
+        LaunchArg::set("gpu-context", "d3d11"),
         LaunchArg::set("target-colorspace-hint", "yes"),
         LaunchArg::set("force-window", "no"),
         LaunchArg::set("osc", "no"),
