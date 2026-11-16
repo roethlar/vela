@@ -28,8 +28,10 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# Everything the signing module wrote, for the note below.
-$said = @()
+# Everything the signing module wrote, kept line by line as it comes: an
+# assignment from a command that then throws would keep none of it, and what
+# SignTool printed before it failed is the reason.
+$said = [System.Collections.Generic.List[string]]::new()
 
 try {
   if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
@@ -46,15 +48,14 @@ try {
 
   Import-Module TrustedSigning
 
-  $said = Invoke-TrustedSigning `
+  Invoke-TrustedSigning `
     -Endpoint $env:AZURE_SIGNING_ENDPOINT `
     -CodeSigningAccountName $env:AZURE_SIGNING_ACCOUNT `
     -CertificateProfileName $env:AZURE_CERT_PROFILE `
     -TimestampRfc3161 'http://timestamp.acs.microsoft.com' `
     -TimestampDigest 'SHA256' `
     -FileDigest 'SHA256' `
-    -Files $Path *>&1
-  $said | ForEach-Object { Write-Output "$_" }
+    -Files $Path *>&1 | ForEach-Object { $said.Add("$_"); Write-Output "$_" }
 
   # A signing tool that quietly does nothing still exits 0, so prove the signature
   # landed on this file before the bundler moves on to the next one.
@@ -68,7 +69,7 @@ try {
   $reason = "Signing $(Split-Path -Leaf $Path) failed: $($_.Exception.Message)"
   $module = (Get-Module TrustedSigning | Select-Object -First 1).Version
   $lines = @($reason, "TrustedSigning module: $module")
-  $lines += $said | Select-Object -Last 25 | ForEach-Object { "  $_" }
+  $lines += $said | Select-Object -Last 80 | ForEach-Object { "  $_" }
   if (-not [string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)) {
     Add-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'vela-signing-failure.txt') -Value $lines
   }
