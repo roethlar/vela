@@ -1158,9 +1158,12 @@ under `tests/` gates nothing until it is added there.
 
 ## 2026-11-16 — the embedded player on Windows and macOS (codereview codex)
 
-Record: `codereview-2026-11-16-platforms.md`. Four hunts: the Windows
-host (`8c40ff8..6b206ec`), the macOS host (`4fe60b8..623ec17`), the
-fixes `c49be2a` and `ca07bfa`, and the macOS HDR slice
-(`ad65c4d..49f2c3c`). 7 candidates, 7 admitted (MEDIUM), 0 declined; all
-seven closed (`ca07bfa`, `49f2c3c`, `41d47c4`, `9833fc1`, `e93402e`,
-`e1cf5f2`).
+Record: `codereview-2026-11-16-platforms.md`. Five hunts so far (a
+sixth, the Windows packaging, running): the Windows host
+(`8c40ff8..6b206ec`), the macOS host (`4fe60b8..623ec17`), the fixes
+`c49be2a` and `ca07bfa`, the macOS HDR slice (`ad65c4d..49f2c3c`), the
+macOS packaging (six commits in `9ec9991..bffc3a4`). 10 candidates, 10
+admitted (8 MEDIUM, 2 LOW), 0 declined; pl-1 to pl-7 and pl-10 closed
+(`ca07bfa`, `49f2c3c`, `41d47c4`, `9833fc1`, `e93402e`, `e1cf5f2`,
+`e740bf4`); pl-8 in repair; pl-9 (tests only) waits for the release's
+test pass.

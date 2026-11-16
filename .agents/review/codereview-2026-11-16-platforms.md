@@ -1,14 +1,17 @@
 # Codereview 2026-11-16 — the embedded player on Windows and macOS
 
-Outcome: four codereview codex hunts: one per slice over the Windows
-host (`8c40ff8..6b206ec`) and the macOS host (`4fe60b8..623ec17`), a
-third over the fixes `c49be2a` and `ca07bfa`, and a fourth over the macOS
-HDR slice (`ad65c4d..49f2c3c`) (below). **findings** in all four: seven
-candidates, seven admitted (all MEDIUM), none declined. All seven are
-repaired and closed: codex wrote pl-1 to pl-6's repairs as coding tasks
-and the working agent's review closed them (adding the Windows half of
-pl-5); the working agent wrote pl-7's, which codex's next hunt over the
-fixes reads.
+Outcome: five codereview codex hunts so far: one per slice over the
+Windows host (`8c40ff8..6b206ec`) and the macOS host
+(`4fe60b8..623ec17`), a third over the fixes `c49be2a` and `ca07bfa`, a
+fourth over the macOS HDR slice (`ad65c4d..49f2c3c`), and a fifth over
+the macOS packaging (below); a sixth, over the Windows packaging, is
+running. **findings**: ten candidates, ten admitted (eight MEDIUM, two
+LOW), none declined. pl-1 to pl-7 and pl-10 are repaired and closed:
+codex wrote pl-1 to pl-6's repairs as coding tasks and the working
+agent's review closed them (adding the Windows half of pl-5); the working
+agent wrote pl-7's and pl-10's, which codex's next hunt over the fixes
+reads. pl-8 is being repaired (codex). pl-9 is about tests alone and
+waits for the release's test pass (`.agents/decisions.md`, 2026-11-14).
 
 ## Dispatch record
 
@@ -42,6 +45,9 @@ fixes reads.
 | pl-5 | MEDIUM   | Linux: a numeric `--fs-screen`/`--screen` from the user outranks the remembered name | `[x]` | `9833fc1` |
 | pl-6 | MEDIUM   | Windows: an explicitly empty MPV_HOME is read as unset, so config files are read mpv would not read | `[x]` | `e93402e` |
 | pl-7 | MEDIUM   | macOS: a draw begun under a colour hold can flush the old range's frame if the hold ends mid-render | `[x]` | `e1cf5f2` |
+| pl-8 | MEDIUM   | release: on a tag, the macOS DMG reaches the draft release before its checks run | `[ ]` | in repair (codex) |
+| pl-9 | LOW      | tests: no guard holds the mpv patch's `utils-mac.c` hunk | deferred | the release's test pass |
+| pl-10 | LOW     | docs: the macOS audit and its CI job described as they were before the fixes | `[x]` | `e740bf4` |
 
 ### pl-1 (whost)
 
@@ -195,3 +201,65 @@ under one is cleared to black (`draws_black`, `macos_hdr.rs`); the
 release's redraw shows the picture with the new targets. The rule's unit
 test and a guard of its wiring each seen failing with their part taken
 out.
+
+## A fifth hunt: the macOS packaging
+
+Dispatched by the working agent over `9ec9991..bffc3a4`, limited to six
+commits: the macOS set's build (`ba677b7`), its fixes (`c60a6d3`,
+`485628c`, `ad65c4d`), Vela.app carrying the set (`2181dcb`) and the CI
+job's hold removed (`bffc3a4`). Same harness and reviewer as above.
+**findings**: three candidates, three admitted, as pl-8 (MEDIUM), pl-9
+and pl-10 (LOW).
+
+### pl-8 (mpkg)
+
+Reviewer, verbatim, evidence: ".github/workflows/release.yml:383 supplies
+tagName to tauri-action on tagged macOS builds, causing attachment during
+the build step. The new packaged-libmpv check runs afterward, at line
+432." Predicted failure: "If the packaged set fails its signature,
+provenance, inventory or playback check, the rejected DMG remains
+attached to the draft release. Failing the later job does not retract
+that asset." Suggested: "Build without attaching through tauri-action.
+Create the draft and upload the macOS DMG only after its checks pass,
+alongside the other checked packages."
+
+Admitted: the Linux and Windows legs already attach nothing and leave it
+to the `inventory` job; the macOS leg was left creating the draft. In
+repair (codex): no leg of `bundle` attaches; on a tag the `inventory` job
+creates the draft if there is none, refuses a published release, and
+uploads the checked DMG with the rest. The `.app.tar.gz` that
+tauri-action used to add goes (the same app, undocumented, never in
+SHA256SUMS).
+
+### pl-9 (mpkg)
+
+Reviewer, verbatim, evidence: "tests/dependency-policy.test.mjs:1190-1199
+checks only the patch's target filename and SDK linker-path hunk.
+Removing packaging/libmpv/macos/mpv-sdk-only.patch:14-19 left all 559
+dependency-policy and libmpv-packaging tests passing in a local
+regression probe." Predicted failure: "The portable checks accept removal
+of the fix for the documented _cfstr_from_cstr load failure. With Cocoa
+disabled, the Apple audio outputs again lack their utility definitions;
+only the later macOS execution check detects it."
+
+Admitted, about tests alone: under the owner's decision of 2026-11-14 it
+is not repaired now and is written here for the release's test pass,
+which should guard the patch's second hunk and its `cocoa` condition so
+that removing either fails. Until then the macOS check (CI's
+`libmpv-macos`, loading the set on a hosted Mac) is what catches it, as
+it did on 2026-11-16.
+
+### pl-10 (mpkg)
+
+Reviewer, verbatim, evidence: "docs/development.md:177-178 and
+packaging/libmpv/macos/NOTES.txt:70-74 say Xcode's Python libraries fail
+the audit and no interpreter exemption exists. check-libmpv-macos.py:65-66
+explicitly exempts sys.base_prefix. The guide at lines 185-187 also
+describes CI as manual-only, although bffc3a4 removed that condition."
+Predicted failure: "The development guide and shipped NOTES describe a
+stricter audit than actually runs, and incorrectly tell maintainers that
+pushes do not run the macOS set job."
+
+Admitted. Repair (`e740bf4`, written by the working agent): both
+documents state the one exemption and the job on every push; the guide
+also names the AVFoundation audio output the set gained in `ad65c4d`.
