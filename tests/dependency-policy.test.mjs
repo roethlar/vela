@@ -1116,7 +1116,7 @@ const macConfiguration = {
     '-Dlibavdevice=enabled -Dcoreaudio=enabled -Dgl=enabled -Dplain-gl=enabled',
     '-Dcocoa=disabled -Dgl-cocoa=disabled -Dvideotoolbox-gl=disabled -Dvideotoolbox-pl=disabled',
     '-Dswift-build=disabled -Dmacos-cocoa-cb=disabled -Dmacos-media-player=disabled',
-    '-Dmacos-touchbar=disabled -Davfoundation=disabled -Dvulkan=disabled',
+    '-Dmacos-touchbar=disabled -Davfoundation=enabled -Dvulkan=disabled',
     'patch -d "$src" -p1 < "$recipe/macos/mpv-sdk-only.patch"',
     "grep -qx '#define HAVE_SWIFT 0'", 'grep -qx "#define HAVE_$feature 1"'],
 };

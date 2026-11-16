@@ -23,10 +23,13 @@ libass discovers fonts with CoreText, not fontconfig. As on Linux,
 libplacebo has no GPU backend; mpv implements the render API's OpenGL
 renderer. Lua 5.2 enables POSIX/dlopen through upstream LUA_USE_MACOSX.
 
-mpv uses gl + plain-gl, coreaudio, libavdevice, Lua, iconv, zlib, uchardet
-and vector. Its cocoa, gl-cocoa, swift-build, macos-cocoa-cb,
-macos-media-player, macos-touchbar, avfoundation and vulkan options are
-disabled. In this pin cocoa unconditionally includes clipboard-mac.m
+mpv uses gl + plain-gl, coreaudio, avfoundation (the audio output Vela's
+macOS players ask for first), libavdevice, Lua, iconv, zlib, uchardet and
+vector. Its cocoa, gl-cocoa, swift-build, macos-cocoa-cb,
+macos-media-player, macos-touchbar and vulkan options are disabled. The
+Apple audio outputs call cfstr_from_cstr from osdep/utils-mac.c, which
+mpv's meson.build compiles only with cocoa; the build patch (second hunk)
+compiles it for them when cocoa is off. In this pin cocoa unconditionally includes clipboard-mac.m
 (which imports the generated Swift header), and player/main.c calls
 Swift bridge functions guarded only by HAVE_COCOA. Thus selecting
 gl-cocoa + cocoa + videotoolbox-gl with swift-build disabled would not

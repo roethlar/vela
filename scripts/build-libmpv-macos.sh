@@ -238,8 +238,8 @@ build_mpv() {
     -Dlibavdevice=enabled -Dcoreaudio=enabled -Dgl=enabled -Dplain-gl=enabled \
     -Dcocoa=disabled -Dgl-cocoa=disabled -Dvideotoolbox-gl=disabled -Dvideotoolbox-pl=disabled \
     -Dswift-build=disabled -Dmacos-cocoa-cb=disabled -Dmacos-media-player=disabled \
-    -Dmacos-touchbar=disabled -Davfoundation=disabled -Dvulkan=disabled
-  for feature in GL COREAUDIO LUA LIBAVDEVICE; do
+    -Dmacos-touchbar=disabled -Davfoundation=enabled -Dvulkan=disabled
+  for feature in GL COREAUDIO AVFOUNDATION LUA LIBAVDEVICE; do
     grep -qx "#define HAVE_$feature 1" "$src/_build/config.h" || die "mpv lacks $feature"
   done
   grep -qx '#define HAVE_SWIFT 0' "$src/_build/config.h" || die 'mpv unexpectedly uses Swift'

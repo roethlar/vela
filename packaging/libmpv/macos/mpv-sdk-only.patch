@@ -1,14 +1,24 @@
-Vela: use the selected Apple SDK, never the runner's /usr/local libraries.
+Vela: build mpv's library on macOS without Cocoa or Swift, from the SDK only.
 
-mpv adds these linker paths even with cocoa/Swift disabled. Dependencies are
-resolved through the private pkg-config directory and the SDK instead. Only
-meson.build changes. Re-check this hunk when bumping mpv.
+1. Use the selected Apple SDK, never the runner's /usr/local libraries: mpv
+   adds these linker paths even with cocoa/Swift disabled. Dependencies are
+   resolved through the private pkg-config directory and the SDK instead.
+2. Compile osdep/utils-mac.c for the Apple audio outputs when cocoa is off:
+   ao_coreaudio_utils.c and ao_avfoundation.m call its cfstr_from_cstr, but
+   meson.build compiles it only with cocoa (which needs Swift), so a library
+   without cocoa failed to load (undefined _cfstr_from_cstr).
+
+Only meson.build changes. Re-check both hunks when bumping mpv.
 --- a/meson.build
 +++ b/meson.build
-@@ -1598,5 +1598,5 @@
-     message('Detected macOS SDK: ' + macos_sdk_version)
+@@ -882,2 +882,5 @@
+                      'audio/out/ao_coreaudio_utils.c')
++    if not features['cocoa']
++        sources += files('osdep/utils-mac.c')
++    endif
+ endif
+@@ -1599,3 +1602,3 @@
      add_languages('objc', native: false)
 -    objc_link_flags = ['-isysroot', macos_sdk_path, '-L/usr/lib', '-L/usr/local/lib']
 +    objc_link_flags = ['-isysroot', macos_sdk_path]
      add_project_link_arguments(objc_link_flags, language: ['c', 'objc'])
- endif
