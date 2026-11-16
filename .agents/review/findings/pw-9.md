@@ -176,9 +176,7 @@ the session's scratch files, and may not be there later.
 The coordinating agent read both versions, merged the kept half with the
 certificate change (`bc51d01`), which touches the same function, and ran
 the full check on the result (green: 694 Rust tests, 549 Node tests).
-End to end on that content: `playback`, \
-eplaceplay\, `playlistplay`, `sourcedeadend`, `surfaces`, `exitplay`, `continueon` and `multiplex` in the external player (8 of 8), and `embeddedplay`, `embeddedlatestart`, `playlistplay`, \
-eplaceplay\ and `exitplay` in the embedded one (5 of 5). It made no red-proofs of its own: the owner set work on tests
+End to end on that content: `playback`, `replaceplay`, `playlistplay`, `sourcedeadend`, `surfaces`, `exitplay`, `continueon` and `multiplex` in the external player (8 of 8), and `embeddedplay`, `embeddedlatestart`, `playlistplay`, `replaceplay` and `exitplay` in the embedded one (5 of 5). It made no red-proofs of its own: the owner set work on tests
 aside that day. Under the owner's decision of 2026-11-14 ("Coding tasks
 may go to codex") this review closes the finding.
 
