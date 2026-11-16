@@ -201,7 +201,7 @@ test("every component of the shipped libmpv set is pinned by version, checksum a
     assert.ok(!names.has(pin.name), `${pin.name} is pinned twice`);
     names.add(pin.name);
     assert.match(pin.version, /^\d+(\.\d+)+$/, `${pin.name}: version`);
-    assert.match(pin.role, /^(ship|build)$/, `${pin.name}: role`);
+    assert.match(pin.role, /^(ship|build|build-macos)$/, `${pin.name}: role`);
     assert.match(pin.sha256, /^[0-9a-f]{64}$/, `${pin.name}: sha256`);
     const extension = pin.url.match(/\.tar\.(gz|xz)$/)?.[0];
     for (const source of [pin.url, ...pin.mirrors]) {
@@ -244,8 +244,11 @@ test("the libmpv build script builds exactly the pinned components", async () =>
   for (const name of fetched) assert.ok(pinned.has(name), `${name} is fetched but not pinned`);
   const windowsScript = await readText(path.join(repoRoot, "scripts", "build-libmpv-windows.sh"), "utf8");
   const windowsFetched = [...windowsScript.matchAll(/"\$\((?:unpack|fetch) ([a-z0-9-]+)\)"/g)].map((m) => m[1]);
+  const macScriptText = await readText(path.join(repoRoot, "scripts", "build-libmpv-macos.sh"), "utf8");
+  const macFetched = [...macScriptText.matchAll(/"\$\((?:unpack|fetch) ([a-z0-9-]+)\)"/g)].map((m) => m[1]);
   for (const pin of pins) {
-    assert.ok(fetched.includes(pin.name) || windowsFetched.includes(pin.name), `${pin.name} is pinned but never fetched by either platform`);
+    assert.ok(fetched.includes(pin.name) || windowsFetched.includes(pin.name) || macFetched.includes(pin.name), `${pin.name} is pinned but never fetched by any platform`);
+    if (pin.role === "build-macos") assert.ok(macFetched.includes(pin.name), `${pin.name} is a macOS build input the macOS build never fetches`);
   }
   assert.equal(script.match(/\bcurl\b/g)?.length, 1, "fetch() is the only download");
   assert.doesNotMatch(script, /\b(wget|git clone|pip3? install)\b/);
@@ -871,7 +874,9 @@ requiredTokens('collector', body(script, 'collect'), [
 requiredTokens('licence notes', notes, ['LGPL-3.0-or-later', 'Apache-2.0', 'Runtime Library Exception', 'modified libiconv']);
 
 test('Windows source graph uses every pin, exclusively, with licences (green and red)', () => {
-  const guard = (candidate, entries = pins) => {
+  // The macOS set's own build inputs (role build-macos) are not Windows'.
+  const windowsPins = pins.filter((p) => p[2] !== 'build-macos');
+  const guard = (candidate, entries = windowsPins) => {
     const fetched = [...candidate.matchAll(/"\$\((?:unpack|fetch) ([a-z0-9-]+)\)"/g)].map((m) => m[1]);
     assert.deepEqual([...new Set(fetched)].sort(), entries.map((p) => p[0]).sort(), 'source graph equals pins');
     assert.equal((candidate.match(/\bcurl\b/g) ?? []).length, 1, 'one download boundary');
@@ -885,13 +890,13 @@ test('Windows source graph uses every pin, exclusively, with licences (green and
     }
   };
   guard(script);
-  for (const [name] of pins) {
+  for (const [name] of windowsPins) {
     assert.throws(() => guard(script.replaceAll(`$(unpack ${name})`, '$(unpack UNPINNED)')), /source graph/);
     const changed = script.replaceAll(`lic ${name} `, 'lic MISSING ')
       .replaceAll(`licence ${name} licenses/${name}/LICENSE`, 'REMOVED');
     assert.throws(() => guard(changed), /licence/);
-    assert.throws(() => guard(script, pins.map((pin) => pin[0] === name ? [pin[0], pin[1], pin[2], 'bad'] : pin)), /checksum/);
-    assert.throws(() => guard(script, pins.map((pin) => pin[0] === name ? [pin[0], pin[1], 'bad', pin[3]] : pin)), /role/);
+    assert.throws(() => guard(script, windowsPins.map((pin) => pin[0] === name ? [pin[0], pin[1], pin[2], 'bad'] : pin)), /checksum/);
+    assert.throws(() => guard(script, windowsPins.map((pin) => pin[0] === name ? [pin[0], pin[1], 'bad', pin[3]] : pin)), /role/);
   }
   assert.throws(() => guard(script + '\ncurl https://unverified.invalid\n'), /download boundary/);
   assert.throws(() => guard(script + '\nwget https://unverified.invalid\n'), /unpinned download/);
@@ -1143,8 +1148,8 @@ for (const language of ['c', 'cpp', 'objc', 'objcpp']) {
   ]);
 }
 
-test('macOS sources and notices cover exactly the Linux components plus Vulkan headers (green and red)', () => {
-  const expected = pins.filter((p) => p[2] === 'ship' || p[0] === 'vulkan-headers');
+test('macOS sources and notices cover exactly the Linux components plus Vulkan headers and the macOS build inputs (green and red)', () => {
+  const expected = pins.filter((p) => p[2] === 'ship' || p[2] === 'build-macos' || p[0] === 'vulkan-headers');
   const guard = (candidate, helper, entries = expected) => {
     const fetched = [...candidate.matchAll(/"\$\((?:unpack|fetch) ([a-z0-9-]+)\)"/g)].map((m) => m[1]);
     assert.deepEqual([...new Set(fetched)].sort(), entries.map((p) => p[0]).sort(), 'source graph equals selected pins');
@@ -1154,7 +1159,7 @@ test('macOS sources and notices cover exactly the Linux components plus Vulkan h
     assert.deepEqual(steps, [...Object.keys(macConfiguration), 'collect'], 'all components built in dependency order');
     for (const [name, version, role, sha, url] of entries) {
       assert.match(sha, /^[0-9a-f]{64}$/, `${name}: checksum`);
-      assert.match(role, /^(ship|build)$/, `${name}: role`);
+      assert.match(role, /^(ship|build|build-macos)$/, `${name}: role`);
       assert.ok(url?.startsWith('https://') && url.includes(version), `${name}: versioned source URL`);
       assert.ok(helper.includes(`"${name}": [`) || (name === 'lua' && helper.includes('licence lua licenses/lua/LICENSE')), `${name}: licence`);
     }

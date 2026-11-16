@@ -157,7 +157,8 @@ def pins_for_macos(file):
     pins = {}
     for line in Path(file).read_text().splitlines():
         fields = line.split()
-        if fields and not fields[0].startswith("#") and (fields[2] == "ship" or fields[0] == "vulkan-headers"):
+        if fields and not fields[0].startswith("#") and (
+                fields[2] in ("ship", "build-macos") or fields[0] == "vulkan-headers"):
             pins[fields[0]] = fields[1]
     return pins
 
@@ -186,6 +187,8 @@ def merge(work, dest, recipe):
         "harfbuzz": ["COPYING"], "fribidi": ["COPYING"],
         "dav1d": ["COPYING"], "uchardet": ["COPYING"],
         "vulkan-headers": ["LICENSE.md", "LICENSES/Apache-2.0.txt", "LICENSES/MIT.txt"],
+        # Header-only, compiled into libplacebo; offered under MIT, Apache-2.0 or BSL-1.0.
+        "fast-float": ["LICENSE-MIT", "LICENSE-APACHE", "LICENSE-BOOST"],
     }
     roles = []
     for component, files in texts.items():

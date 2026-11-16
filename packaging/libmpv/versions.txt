@@ -4,6 +4,8 @@
 #
 # role: ship  = built as separate shared libraries by all three platform recipes
 #       build = headers or static support archives, not separate shipped DLLs
+#       build-macos = the same, for the macOS set only (the Linux and Windows
+#               builds, their manifests and checks leave it out)
 # Windows also records and carries licences for its statically linked inputs.
 # A mirror is tried when the first URL fails. It must serve the same bytes: a
 # download is kept only if it matches the checksum.
@@ -33,3 +35,4 @@ spirv-headers    1.4.363.0 build  5b3a0d099f5c7649e29c0938476c462e71d66ad89a0bde
 spirv-cross      1.4.357.0 build  97c910326afdd44d794ce8561326fa675fd1958b27142f03295403044d639639  https://github.com/KhronosGroup/SPIRV-Cross/archive/refs/tags/vulkan-sdk-1.4.357.0.tar.gz
 zlib             1.4       build  4f11c512053d7bab8d9e9b89bde3575add3e4c50a383b42ef6cb837035fc5a7c  https://github.com/madler/zlib/releases/download/v1.4/zlib-1.4.tar.xz  https://zlib.net/zlib-1.4.tar.xz  https://zlib.net/fossils/zlib-1.4.tar.xz
 libiconv         1.19.1    build  9a06844846d664d7122161700c10a64480d7c7bcead3091925a785b38c91edab  https://ftp.gnu.org/pub/gnu/libiconv/libiconv-1.19.1.tar.gz
+fast-float       8.3.3     build-macos  4dd695f051893c8218faf2ed9871fa4a4990aa6aee2d3190ed7bfa2e83092245  https://github.com/fastfloat/fast_float/archive/refs/tags/v8.3.3.tar.gz

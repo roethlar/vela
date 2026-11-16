@@ -77,8 +77,10 @@ def read_manifest(directory):
 
 
 def pinned_components(pins):
+    # Every pin but the macOS set's own build inputs (role build-macos).
     return {p[0]: p[1] for line in Path(pins).read_text(encoding="utf-8").splitlines()
-            if (p := line.split()) and not p[0].startswith("#")}
+            if (p := line.split()) and not p[0].startswith("#")
+            and (len(p) < 3 or p[2] != "build-macos")}
 
 
 def check_manifest(directory, pins):

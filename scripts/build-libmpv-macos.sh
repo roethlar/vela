@@ -209,6 +209,15 @@ build_libplacebo() {
   headers="$(unpack vulkan-headers)" || exit 1
   mkdir -p "$src/3rdparty/Vulkan-Headers"
   cp -R "$headers/." "$src/3rdparty/Vulkan-Headers/"
+  # libplacebo's convert.cc parses floats with std::from_chars where the C++
+  # library has it and with fast_float otherwise. Apple's libc++ offers no
+  # floating-point from_chars for a macOS 11 deployment target, and the
+  # release tarball leaves out the git submodule that carries fast_float:
+  # it is pinned (role build-macos) and put where libplacebo's meson.build
+  # looks for it (3rdparty/fast_float/include).
+  fast_float="$(unpack fast-float)" || exit 1
+  mkdir -p "$src/3rdparty/fast_float"
+  cp -R "$fast_float/include" "$src/3rdparty/fast_float/"
   # Same as Linux: mpv's render API uses mpv's GL renderer. libplacebo
   # supplies utilities; it needs no OpenGL backend, shader compiler or GPU.
   meson_build "$src" -Dopengl=disabled -Dvulkan=disabled -Dd3d11=disabled \
