@@ -97,7 +97,7 @@ test('the launch asserts the lifecycle options after every user-controlled optio
   // Advanced arguments and own-config handling live in base_args; the
   // inherited window state and screen placement are the last option groups
   // before Vela's protected tail.
-  for (const earlier of ['base_args(', 'window_state_args(', 'screen_name_arg(']) {
+  for (const earlier of ['base_args(', 'window_state_args(', 'restored_screen_args(']) {
     const last = body.lastIndexOf(earlier);
     assert.notEqual(last, -1, `the launch must still call ${earlier}`);
     assert.ok(last < at, `lifecycle_args() must follow ${earlier}`);

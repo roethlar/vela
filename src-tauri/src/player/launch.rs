@@ -607,6 +607,35 @@ fn screen_name_arg(name: Option<&str>, screens: &PlaybackScreens) -> Option<Laun
     }
 }
 
+/// The remembered screen's protected tail, after the user's options.
+/// mpv 0.42 consults a numeric selector before a name (Wayland's
+/// `find_output`, X11's `vo_x11_select_screen`, macOS's `getTargetScreen`),
+/// and on Windows, which takes numbers only, a fullscreen window goes to
+/// `fs-screen`'s monitor before its own (`w32_common.c`
+/// `get_default_monitor`). options/options.c names the neutral values
+/// `default` and `current`. Only Linux's backends also need the fullscreen
+/// screen's name; macOS and Windows go fullscreen on the restored window's
+/// screen once no number overrides it.
+fn restored_screen_args(spec: &PlaySpec, player: PlayerKind, linux: bool) -> Vec<LaunchArg> {
+    if player != PlayerKind::External {
+        return Vec::new();
+    }
+    let Some(screen) = screen_name_arg(spec.screen_name.as_deref(), &spec.screens) else {
+        return Vec::new();
+    };
+    let mut args = vec![screen];
+    if matches!(spec.screens, PlaybackScreens::Named) {
+        args.push(LaunchArg::set("screen", "default"));
+    }
+    if spec.inherited_window_state.fullscreen == Some(true) {
+        if let Some(name) = initial_fullscreen_screen_name(spec, player, linux) {
+            args.push(LaunchArg::set("fs-screen-name", name));
+        }
+        args.push(LaunchArg::set("fs-screen", "current"));
+    }
+    args
+}
+
 /// Linux's window backends choose the initial fullscreen output separately
 /// from `screen-name`. macOS and Windows enter fullscreen on the window's
 /// screen, and an embedded play has no window of its own.
@@ -984,15 +1013,12 @@ pub(crate) fn build_launch_for(
     if !embedded {
         // The embedded player has no window of its own to place or size.
         args.extend(window_state_args(spec.inherited_window_state));
-        if let Some(screen_arg) = screen_name_arg(spec.screen_name.as_deref(), &spec.screens) {
-            // Reassert after user options. On Wayland this is a placement request,
-            // not a guarantee; the compositor's actual choice is observed over IPC.
-            args.push(screen_arg);
-        }
-        if let Some(name) = initial_fullscreen_screen_name(spec, player, cfg!(target_os = "linux"))
-        {
-            args.push(LaunchArg::set("fs-screen-name", name));
-        }
+        // On Wayland this is a request; IPC observes the compositor's choice.
+        args.extend(restored_screen_args(
+            spec,
+            player,
+            cfg!(target_os = "linux"),
+        ));
     }
 
     args.extend(lifecycle_args(player));
@@ -1354,9 +1380,69 @@ mod tests {
     }
 
     #[test]
+    fn named_windowed_restoration_neutralizes_the_users_numeric_screen() {
+        for (linux, name) in [(true, "DP-3"), (false, "Studio Display (1234)")] {
+            let spec = PlaySpec {
+                screen_name: Some(name.into()),
+                inherited_window_state: PlaybackWindowState {
+                    fullscreen: Some(false),
+                    ..Default::default()
+                },
+                ..plain_spec(PlayerKind::External, "https://media.invalid/video.mkv")
+            };
+            let cfg = crate::config::AppConfig {
+                mpv_extra_args: Some("--screen=0\n--fs-screen=0".into()),
+                ..Default::default()
+            };
+            let mut args = user_args(&cfg);
+            args.extend(restored_screen_args(&spec, PlayerKind::External, linux));
+            assert_eq!(
+                cli(args),
+                [
+                    "--screen=0",
+                    "--fs-screen=0",
+                    &format!("--screen-name={name}"),
+                    "--screen=default",
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn named_fullscreen_restoration_neutralizes_both_numeric_screens() {
+        for (linux, name) in [(true, "DP-3"), (false, "Studio Display (1234)")] {
+            let spec = PlaySpec {
+                screen_name: Some(name.into()),
+                inherited_window_state: PlaybackWindowState {
+                    fullscreen: Some(true),
+                    ..Default::default()
+                },
+                ..plain_spec(PlayerKind::External, "https://media.invalid/video.mkv")
+            };
+            let cfg = crate::config::AppConfig {
+                mpv_extra_args: Some("--screen=0\n--fs-screen=0".into()),
+                ..Default::default()
+            };
+            let mut args = user_args(&cfg);
+            args.extend(restored_screen_args(&spec, PlayerKind::External, linux));
+            let mut expected = vec![
+                "--screen=0".to_string(),
+                "--fs-screen=0".into(),
+                format!("--screen-name={name}"),
+                "--screen=default".into(),
+            ];
+            if linux {
+                expected.push(format!("--fs-screen-name={name}"));
+            }
+            expected.push("--fs-screen=current".into());
+            assert_eq!(cli(args), expected);
+        }
+    }
+
+    #[test]
     fn windows_launch_reasserts_the_index_for_windowed_and_fullscreen_plays() {
         let cfg = crate::config::AppConfig {
-            mpv_extra_args: Some("--screen=0".to_string()),
+            mpv_extra_args: Some("--screen=0\n--fs-screen=0".to_string()),
             ..Default::default()
         };
         for fullscreen in [false, true] {
@@ -1387,17 +1473,32 @@ mod tests {
                 if fullscreen { "yes" } else { "no" }
             )));
             assert!(!args.iter().any(|arg| arg.starts_with("--screen-name=")));
-            assert!(
-                !args.iter().any(|arg| arg.starts_with("--fs-screen")),
-                "later fullscreen follows the moved window"
+            assert!(!args.iter().any(|arg| arg.starts_with("--fs-screen-name=")));
+            // A fullscreen start goes to the remembered screen, not to the
+            // user's numbered one; a later toggle keeps the user's choice.
+            let expected: &[&str] = if fullscreen {
+                &["--fs-screen=0", "--fs-screen=current"]
+            } else {
+                &["--fs-screen=0"]
+            };
+            assert_eq!(
+                args.iter()
+                    .filter(|arg| arg.starts_with("--fs-screen="))
+                    .map(String::as_str)
+                    .collect::<Vec<_>>(),
+                expected
             );
+            let user = args.iter().position(|arg| arg == "--fs-screen=0").unwrap();
+            if fullscreen {
+                assert!(args.iter().position(|arg| arg == "--fs-screen=current").unwrap() > user);
+            }
         }
     }
 
     #[test]
-    fn linux_and_macos_launches_reassert_the_name_without_a_screen_index() {
+    fn linux_and_macos_launches_reassert_the_name_and_neutral_screen_index() {
         let cfg = crate::config::AppConfig {
-            mpv_extra_args: Some("--screen-name=other".to_string()),
+            mpv_extra_args: Some("--screen-name=other\n--screen=0\n--fs-screen=0".to_string()),
             ..Default::default()
         };
         for name in ["DP-3", "Studio Display (1234)"] {
@@ -1415,7 +1516,20 @@ mod tests {
                     .collect::<Vec<_>>(),
                 ["--screen-name=other", &expected]
             );
-            assert!(!args.iter().any(|arg| arg.starts_with("--screen=")));
+            assert_eq!(
+                args.iter()
+                    .filter(|arg| arg.starts_with("--screen="))
+                    .map(String::as_str)
+                    .collect::<Vec<_>>(),
+                ["--screen=0", "--screen=default"]
+            );
+            assert_eq!(
+                args.iter()
+                    .filter(|arg| arg.starts_with("--fs-screen="))
+                    .map(String::as_str)
+                    .collect::<Vec<_>>(),
+                ["--fs-screen=0"]
+            );
         }
     }
 
@@ -1423,7 +1537,7 @@ mod tests {
     fn fullscreen_launch_reasserts_the_linux_screen_after_user_options() {
         let cfg = crate::config::AppConfig {
             mpv_extra_args: Some(
-                "--screen-name=other\n--fs-screen-name=other\n--fullscreen=no".to_string(),
+                "--screen-name=other\n--fs-screen-name=other\n--screen=0\n--fs-screen=0\n--fullscreen=no".to_string(),
             ),
             ..Default::default()
         };
@@ -1440,7 +1554,12 @@ mod tests {
             .iter()
             .position(|arg| arg == "--fullscreen=no")
             .unwrap();
-        for option in ["--screen-name=DP-3", "--fullscreen=yes"] {
+        for option in [
+            "--screen-name=DP-3",
+            "--screen=default",
+            "--fs-screen=current",
+            "--fullscreen=yes",
+        ] {
             assert!(args.iter().position(|arg| arg == option).unwrap() > last_user_option);
         }
         let fullscreen_screens: Vec<_> = args
@@ -1462,7 +1581,20 @@ mod tests {
         } else {
             assert_eq!(fullscreen_screens, ["--fs-screen-name=other"]);
         }
-        assert!(!args.iter().any(|arg| arg.starts_with("--screen=")));
+        assert_eq!(
+            args.iter()
+                .filter(|arg| arg.starts_with("--screen="))
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            ["--screen=0", "--screen=default"]
+        );
+        assert_eq!(
+            args.iter()
+                .filter(|arg| arg.starts_with("--fs-screen="))
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            ["--fs-screen=0", "--fs-screen=current"]
+        );
     }
 
     #[test]

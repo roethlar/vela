@@ -538,8 +538,10 @@ mod tests {
                 "--window-maximized=no".to_string(),
                 "--fullscreen=yes".to_string(),
                 "--screen-name=DP-3".to_string(),
+                "--screen=default".to_string(),
                 #[cfg(target_os = "linux")]
                 "--fs-screen-name=DP-3".to_string(),
+                "--fs-screen=current".to_string(),
                 "--idle=no".to_string(),
                 "--input-ipc-server=/tmp/vela-recorded/mpv.sock".to_string(),
                 "--force-media-title=Recorded: Title".to_string(),
