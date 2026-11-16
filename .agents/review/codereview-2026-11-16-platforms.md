@@ -6,13 +6,13 @@ over the fixes `c49be2a` and `ca07bfa`, a fourth over the macOS HDR slice
 (`ad65c4d..49f2c3c`), a fifth over the macOS packaging and a sixth over
 the Windows packaging (below). **findings**: thirteen candidates,
 thirteen admitted (one HIGH, nine MEDIUM, three LOW), none declined.
-pl-1 to pl-8, pl-10 and pl-13 are repaired and closed: codex wrote pl-1
-to pl-6's and pl-8's repairs as coding tasks and the working agent's
-review closed them (adding the Windows half of pl-5); the working agent
-wrote pl-7's, pl-10's and pl-13's, which codex's next hunt over the fixes
-reads. pl-11 and pl-12 are being repaired (codex). pl-9 is about tests
-alone and waits for the release's test pass (`.agents/decisions.md`,
-2026-11-14).
+All but pl-9 are repaired and closed: codex wrote pl-1 to pl-6's, pl-8's,
+pl-11's and pl-12's repairs as coding tasks and the working agent's review
+closed them (adding the Windows half of pl-5); the working agent wrote
+pl-7's, pl-10's and pl-13's, which codex's next hunt over the fixes reads.
+pl-9 is about tests alone and waits for the release's test pass
+(`.agents/decisions.md`, 2026-11-14). pl-11 leaves one path open on
+purpose, stated in its section.
 
 ## Dispatch record
 
@@ -49,8 +49,8 @@ alone and waits for the release's test pass (`.agents/decisions.md`,
 | pl-8 | MEDIUM   | release: on a tag, the macOS DMG reaches the draft release before its checks run | `[x]` | `9dc0b0e` |
 | pl-9 | LOW      | tests: no guard holds the mpv patch's `utils-mac.c` hunk | deferred | the release's test pass |
 | pl-10 | LOW     | docs: the macOS audit and its CI job described as they were before the fixes | `[x]` | `e740bf4` |
-| pl-11 | HIGH    | Windows: a later bare-name DLL load (libplacebo's d3d11.dll) can resolve beside Vela.exe | `[ ]` | in repair (codex) |
-| pl-12 | MEDIUM  | Windows set: the dependency checks miss delay imports and forwarders; the audit passes a foreign DLL | `[ ]` | in repair (codex) |
+| pl-11 | HIGH    | Windows: a later bare-name DLL load (libplacebo's d3d11.dll) can resolve beside Vela.exe | `[x]` | `4d511a2` |
+| pl-12 | MEDIUM  | Windows set: the dependency checks miss delay imports and forwarders; the audit passes a foreign DLL | `[x]` | `2e3913d` |
 | pl-13 | LOW     | docs: the embedded player described as Linux-only, Windows and macOS packages as without the library | `[x]` | `34fd3a3` |
 
 ### pl-1 (whost)
@@ -293,13 +293,20 @@ Vela.exe can execute inside Vela during embedded playback or break
 rendering. The successful installer checks do not detect this because
 they use a stricter loading policy and null video output."
 
-Admitted. Context: the installers put the set beside Vela.exe, so the
-application directory is the set's; writing there needs the rights that
-installed Vela. In repair (codex): the process's default DLL directories
-restricted to System32 (as the checker does), so later bare-name loads
-cannot resolve beside Vela.exe; what stays reachable through loaders that
-name the application directory explicitly (FFmpeg's `win32_dlopen`) is to
-be stated with the repair.
+Admitted. Repair (`4d511a2`, codex): immediately before the set's load,
+the process's default DLL directories become System32 and user
+directories (Vela adds none), as the checker's are; a failure refuses
+the embedded player. Nothing else in Vela's process needs a bare-name
+load from beside Vela.exe (WebView2's loader is linked statically).
+
+Left open on purpose (the working agent's judgment, for the owner to
+overrule): FFmpeg's own Windows loader (`compat/w32dlfcn.h`, lines 134-144
+in 9.0.2) passes `LOAD_LIBRARY_SEARCH_APPLICATION_DIR |
+LOAD_LIBRARY_SEARCH_SYSTEM32` explicitly, so with hardware decoding its
+d3d11va and dxva2 paths still look beside Vela.exe first; moving the set
+would not change that. Only something able to write into Vela's
+installation directory can use it, and that can replace Vela.exe itself.
+Closing it would take a patch to FFmpeg's loader in the Windows set.
 
 ### pl-12 (wpkg)
 
@@ -315,10 +322,14 @@ dependency. Playback that subsequently reaches the affected function can
 fail to resolve it or load a foreign DLL; the null-output playback check
 need not exercise that function."
 
-Admitted (the checks are release gates, not tests alone). In repair
-(codex): the closure covers delay imports and forwarded exports, and the
-runtime audit reports a newly loaded module outside both the set and
-Windows' own directories.
+Admitted (the checks are release gates, not tests alone). Repair
+(`2e3913d`, codex): the build reads each DLL with a standard-library PE
+scanner (`packaging/libmpv/windows-pe.py`: ordinary imports, delay imports,
+forwarded exports) and checks the closure over all three; the runtime
+audit reports a module loaded after its baseline outside both the set and
+Windows' own directories. The set CI built has no delay imports or
+forwarders, and passes. Eighteen fixture tests, seen failing across 22
+mutations.
 
 ### pl-13 (wpkg)
 

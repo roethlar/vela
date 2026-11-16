@@ -42,10 +42,10 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
       player on a hosted Mac, `probes/m2-vela`) found the picture black:
       nothing drives the layer's draws (the plan's Probe log); repair in
       progress (codex, `mdraw`).
-    - In progress (codex, worktrees `~/dev/vela-agent-keep/wt/cx-<tag>`):
-      `mdraw` (above), `pl11` and `pl12` (review findings of the Windows
-      packaging; `.agents/review/codereview-2026-11-16-platforms.md`,
-      which records six hunts and thirteen findings).
+    - In progress (codex, worktree `~/dev/vela-agent-keep/wt/cx-mdraw`):
+      `mdraw` (above). The six hunts' thirteen findings are closed but
+      pl-9, about tests alone
+      (`.agents/review/codereview-2026-11-16-platforms.md`).
   - Linux unchanged through all of it: both end-to-end suites in full at
     `6b206ec`, `623ec17`, `c49be2a` and `49f2c3c` (48 of 48, 51 of 51,
     parity PASS).
