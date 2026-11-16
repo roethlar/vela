@@ -1158,8 +1158,9 @@ under `tests/` gates nothing until it is added there.
 
 ## 2026-11-16 — the embedded player on Windows and macOS (codereview codex)
 
-Record: `codereview-2026-11-16-platforms.md`. Three hunts: the Windows
-host (`8c40ff8..6b206ec`), the macOS host (`4fe60b8..623ec17`), and the
-fixes `c49be2a` and `ca07bfa`. 6 candidates, 6 admitted (MEDIUM), 0
-declined; all six closed (`ca07bfa`, `49f2c3c`, `41d47c4`, `9833fc1`,
-`e93402e`).
+Record: `codereview-2026-11-16-platforms.md`. Four hunts: the Windows
+host (`8c40ff8..6b206ec`), the macOS host (`4fe60b8..623ec17`), the
+fixes `c49be2a` and `ca07bfa`, and the macOS HDR slice
+(`ad65c4d..49f2c3c`). 7 candidates, 7 admitted (MEDIUM), 0 declined; all
+seven closed (`ca07bfa`, `49f2c3c`, `41d47c4`, `9833fc1`, `e93402e`,
+`e1cf5f2`).

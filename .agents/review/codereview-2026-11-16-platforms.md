@@ -1,11 +1,14 @@
 # Codereview 2026-11-16 — the embedded player on Windows and macOS
 
-Outcome: three codereview codex hunts: one per slice over the Windows
-host (`8c40ff8..6b206ec`) and the macOS host (`4fe60b8..623ec17`), and a
-third over the fixes `c49be2a` and `ca07bfa` (below). **findings** in all
-three: six candidates, six admitted (all MEDIUM), none declined. All six
-are repaired and closed (codex wrote each repair as a coding task; the
-working agent's review closed it, and added the Windows half of pl-5).
+Outcome: four codereview codex hunts: one per slice over the Windows
+host (`8c40ff8..6b206ec`) and the macOS host (`4fe60b8..623ec17`), a
+third over the fixes `c49be2a` and `ca07bfa`, and a fourth over the macOS
+HDR slice (`ad65c4d..49f2c3c`) (below). **findings** in all four: seven
+candidates, seven admitted (all MEDIUM), none declined. All seven are
+repaired and closed: codex wrote pl-1 to pl-6's repairs as coding tasks
+and the working agent's review closed them (adding the Windows half of
+pl-5); the working agent wrote pl-7's, which codex's next hunt over the
+fixes reads.
 
 ## Dispatch record
 
@@ -38,6 +41,7 @@ working agent's review closed it, and added the Windows half of pl-5).
 | pl-4 | MEDIUM   | macOS: in a launch that honours DYLD_*, a set dependency can be redirected past the load check | `[x]` | `41d47c4` |
 | pl-5 | MEDIUM   | Linux: a numeric `--fs-screen`/`--screen` from the user outranks the remembered name | `[x]` | `9833fc1` |
 | pl-6 | MEDIUM   | Windows: an explicitly empty MPV_HOME is read as unset, so config files are read mpv would not read | `[x]` | `e93402e` |
+| pl-7 | MEDIUM   | macOS: a draw begun under a colour hold can flush the old range's frame if the hold ends mid-render | `[x]` | `e1cf5f2` |
 
 ### pl-1 (whost)
 
@@ -157,3 +161,37 @@ set and non-empty, that directory's mpv.conf only, on every platform
 (which also drops `/etc/mpv/mpv.conf` beside a non-empty `MPV_HOME` on
 Linux and macOS: mpv reads only the first config directory then). Tests
 seen failing with each rule taken out.
+
+## A fourth hunt: the macOS HDR slice (`49f2c3c`)
+
+Dispatched by the working agent as each slice's hunt is (the plan's rule),
+over `ad65c4d..49f2c3c`, one commit: HDR in the macOS embedded player
+through the layer's extended dynamic range. Same harness and reviewer as
+above; the mandate named the decision, the switch read as three threads
+(the play thread, Core Animation's drawing thread, the main thread), the
+surface, and logs. **findings**: one candidate, admitted (MEDIUM), as
+pl-7.
+
+### pl-7 (mhdr)
+
+Reviewer, verbatim, evidence: "macos_gl.rs:479-482 reads `held` only after
+`draw_into` returns, while macos_host.rs:289-295 changes the layer and
+calls `release`, which clears `held` without synchronizing with that draw
+(macos_gl.rs:385-392). After the initial black acknowledgement, another
+draw can snapshot the old or partially updated targets; the remaining
+target confirmations and main-thread release can then finish before that
+draw returns. mpv 0.42 snapshots renderer options before rendering
+outside its core-facing mutex, so property confirmations do not exclude
+this overlap. A headless harness using the production DrawingState
+reproduced an old-encoding frame escaping; retaining the entry hold kept
+that frame black." Predicted failure: "An overlapping HDR/SDR or gamut
+switch can show a frame encoded for the previous targets under the new
+layer colour space, producing a visible brightness or colour flash. This
+is an intermittent rendering defect."
+
+Admitted. Repair (`e1cf5f2`, written by the working agent): the hold is
+read before mpv renders as well as after, and a draw that began or ended
+under one is cleared to black (`draws_black`, `macos_hdr.rs`); the
+release's redraw shows the picture with the new targets. The rule's unit
+test and a guard of its wiring each seen failing with their part taken
+out.
