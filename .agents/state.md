@@ -9,18 +9,71 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Now
 
+- RELEASE READINESS, 2026-11-16 (in progress). The owner that day: "you
+  have permission to update whatever you need to to get the release
+  ready. then do a final round of reviews with codex, then come to me
+  with actions you cannot do" (`.agents/decisions.md`, that date: the
+  workflows are the agent's to edit under it; tagging and publishing a
+  release, `sudo`, signing identities and by-eye judgments stay the
+  owner's; the 2026-11-14 rule that set tests aside is superseded, a
+  release being in view). Where it stands:
+  - The release workflow puts the embedded player's library into the
+    four Linux packages and checks each one (`4ab145b`); macOS and
+    Windows packages carry none of it. It has been run by hand on `main`
+    (a `workflow_dispatch` run builds, signs and checks everything and
+    creates NO release; only a `v*` tag creates one, as a draft). The
+    Linux side passes: the AppImage, the deb, the rpm and the Arch
+    package were built with the library on GitHub's runners and each
+    passed `packaging/libmpv/check-package.sh` (run 43879587091, the
+    first AppImage ever built with it). The macOS leg builds and then
+    fails at notarization: Apple answers 403, "A required agreement is
+    missing or has expired", which only the owner can accept, in the
+    Apple Developer account. The Windows leg builds and then fails at
+    the first signature: SignTool exit code 1 under the TrustedSigning
+    module 0.5.8. Tauri shows nothing a signing command says, so
+    `.github/scripts/azure-sign.ps1` now leaves its reason for the
+    workflow to print (`9e7554f`, `6b7dd7c`); the reason itself had not
+    been seen when this was written (run 43884461044). v1.0.60 was
+    signed by the same workflow on 2026-08-08, so both are most likely
+    something that lapsed in the owner's accounts since.
+  - CI (`ci.yml`): the package-check tests run instead of skipping
+    (`4ab145b`), and a job compiles the backend on macOS and Windows
+    (`687d533`): the first compile off Linux since v1.0.60, 429 commits
+    on (that commit's message says "some three hundred"), and it passes
+    on both. Two red runs, at `d1e771a` and `6f53c11`, were GitHub's
+    macOS runner failing inside `actions/checkout` before any code was
+    compiled; every run since is green.
+  - A package that carries the library names its licences (`c45fe51`).
+    `RELEASE_NOTES.md` is written as a release's notes, still headed
+    "Unreleased". The documents say that the Linux packages carry the
+    library. Stale records the audit named are tidied (`2a4fa26`,
+    `5c53c2c`, this rotation).
+  - Found on the way: an embedded play closed by its user reports a
+    final position about 180 ms before where it was (Blockers; verified
+    and traced 2026-11-16; a fix is being written by codex, worktree
+    `cx-embstop`). The test repair that shows it is `pa-7`'s, ported
+    onto `main`'s tests by codex the same day (worktree `cx-pa7port`,
+    reviewed by the agent: its 54 mutations all caught, external 7 of 7
+    and `multiplex` 3 of 3; in the embedded player `multiplex` fails 3
+    of 3 on that defect, so it lands after the fix).
+  - Left, in order: that fix and that test repair; the version (1.0.65,
+    by `scripts/bump.sh`, with the notes' heading: 1.0.64 is what the
+    package on `continuum` carries, built before later fixes); the full
+    check, both end-to-end suites with the parity verdict, and a package
+    built from the final commit; the final `codereview codex` round over
+    `7b17f63..` and its repairs; then the list for the owner. Nothing
+    since `013cee3` has had a full end-to-end run.
 - THE EMBEDDED PLAYER IS OFFERED IN SETTINGS (2026-11-15). The owner
   ruled that day that what is built is to be usable from the app, and
   that the owner is Vela's only user (`.agents/decisions.md`; read it
   before describing anything as held back from users). Settings, Player,
   "Video player" landed at `3046f83`, its documents at `3505387`, and
   the certificate setting's documents at `efd6421`. The embedded player
-  plan's log (last entry) has what was checked, including the packaged
-  app playing embedded from its own library, and where on `continuum`
-  the package built with the library is. Left for the owner: installing
-  that package and the by-eye checks; the release workflow, which does
-  not ship the library yet; the tag and release of 1.0.64; one step in
-  `ci.yml` (Blockers).
+  plan's log has what was checked, including the packaged app playing
+  embedded from its own library, and where on `continuum` the package
+  built with the library is. Left for the owner: installing that package
+  and the by-eye checks (the plan's "Owner checks outstanding" and "For
+  the owner").
 - ALSO 2026-11-15: `pagefail` IS FIXED (`b066dc0`), and no scenario is
   allowed to fail any more (`tests/e2e/parity.mjs`, `KNOWN_FAILURES`, is
   empty). The fix has two halves, both needed and each shown by taking it
@@ -50,226 +103,42 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   log), and testing it uncovered that a play's final report to the
   server could be lost to a closed connection, in both players; fixed
   at `e50aa83`.
-- WHERE THE RUN OF 2026-11-12 TO 14 ENDED (2026-11-14, evening). The
-  agent's part of both approved plans is done and every codex review of
-  it is closed (`.agents/review/index.md` has no open finding). `main` at
-  `7b17f63` passes the full check (694 Rust tests, 562 Node tests, both
-  clippy runs, the build, `npm audit`; `cargo audit` is not installed on
-  `continuum` and was not run) and the parity verdict (each suite run in
-  full and building its app: external 47 of 48, embedded 49 of 50, the
-  one failure in each the recorded `pagefail`). GitHub CI is green again.
-  Nothing is released or tagged: 1.0.64 waits for the owner. What was
-  left then was the owner's: the by-eye checks of the embedded player
-  (its plan's "Owner checks outstanding" and "For the owner"), the
-  acceptance steps of the player-window plan on real desktops, and one
-  step in `ci.yml` (Blockers); the embedded player's Settings control
-  and the certificate setting's documents, also listed here then, were
-  done on 2026-11-15 (entry above). Three owner decisions of 2026-11-14 change
-  how to work here; read them in `.agents/decisions.md` before doing
-  anything: tests are not a priority until a release is in view; what is
-  obviously broken is fixed without asking; a repair codex wrote is
-  closed by the agent's review. The account below was written while the
-  run went on and is kept for its detail.
-- The embedded player plan `.agents/plans/embedded-player.md`, APPROVED
-  2026-11-12. Where it stands is in that file's "Implementation log";
-  read it before doing anything, and its "Owner checks outstanding" and
-  "For the owner" lists before telling the owner anything. As of
-  2026-11-13:
-  - Slice 0 (probes), 0b (the library build), 1 (the launch seam) and 2
-    (selection and fallback) have landed and been reviewed by codex.
-  - Slice 3's core landed at `0a63799`: a play can run inside Vela's
-    window on Linux/Wayland, from a development build pointed at a built
-    library set, with `"player": "embedded"` in the config file. Proven by
-    E2E under a headless Wayland compositor (`npm run e2e -- --embedded`)
-    and by runs on `continuum`'s desktop. A Close button and nothing else.
-    Its codex review returned NINE findings (`ec-1` to `ec-9`), all
-    admitted and all fixed, one commit each, and codex has verified all
-    nine (`.agents/review/index.md`).
-    Packaging the library into the Linux packages landed later, as an
-    opt-in (below); released packages do not contain it, and the release
-    workflow is not touched.
-  - Slice 4 (HDR) landed at `e8db400`. Its codex review returned THREE
-    findings (`hd-1` to `hd-3`), all three fixed and verified by codex
-    (`.agents/review/index.md`).
-    Their design, with what was measured against the shipped library and
-    what the fixes changed about it, is
-    `.agents/review/hd-3-hd-2.design.md`. The slice's acceptance is a
-    by-eye comparison only the owner can make.
-  - WHERE THINGS STAND (2026-11-14). What has landed since Slice 4, and
-    what is still on local branches of this clone (worktrees beside it;
-    NOT on `main`, not pushed):
-    - Packaging the mpv library into the Linux packages LANDED at
-      `4b8293e`, opt-in: `scripts/build.sh --with-libmpv`. Released packages
-      do not contain it; the release workflow is untouched. Its codex
-      review returned SIX findings, `pk-1` to `pk-6`, all admitted and
-      fixed on `main` (`53f2ecd` to `1348782`: thirteen commits, three of
-      them for defects found while the fixes were attacked). codex has
-      verified all six; it had reopened `pk-1` and `pk-6`, each for a case
-      with a symbolic link, and accepted their repairs (`e3ac36e`,
-      `b26f6b6`): `.agents/review/index.md`. That review is closed. Since
-      those commits the check never runs an AppImage, and it loads a
-      package's library only when the package holds, byte for byte, the
-      set named with `--set`. The AppImage reading has been run once
-      against a real `unsquashfs` (in a container; `pk-1`'s record).
-    - Slice 5, controls and cropping, LANDED at `3d2fef6`; see the plan's
-      log. Its codex review returned TWO findings, both admitted and fixed
-      (`a909c20`, `4118fea`). codex verified `pc-1`. `pc-2` is HALTED FOR
-      THE OWNER since 2026-11-14, after a third reopen; do not repair it
-      further without the owner's word. Three repairs are on `main`
-      (`4118fea`, `c872dad`, `060a5fd`). The third changed the rule: what
-      the page is told when a run ends is decided from the app's state at
-      that moment, not from which reports of a play's end came first. It
-      closed all four orders of events the reviewer had named, and the
-      reviewer then reopened it for one order the third repair itself
-      introduced: a source choice the user opened by hand, cancelled in the
-      moment between a play's clean end and Vela dealing with that end,
-      takes the window out of fullscreen just before the next play starts.
-      Nothing is left fullscreen with nothing playing any more. The record
-      says what would close it and puts the question
-      (`.agents/review/findings/pc-2.md`, "Halted for the owner"). The
-      slice's cropping script
-      is built under
-      an assumption the owner has not ruled on: the plan's "For the
-      owner", item 3.
-    - Slice 6 (parity), the TEST SIDE, LANDED at `ac3e563`: every row of
-      the plan's parity list is shown in both players by the end-to-end
-      suite, or recorded as exempted, with a guard in `npm run check` and
-      a verdict over two full runs (`npm run e2e:verdict`; the plan's log
-      has the table). No product code changed. Two rows have no
-      end-to-end proof in either player (the quality step-down and its
-      notice) and one is red in the EXTERNAL player because of a defect
-      these tests found there (Blockers, "own mpv configuration"). The
-      rest of Slice 6 is the switch-on, which is the owner's. Its codex
-      review returned EIGHT findings, `pa-1` to `pa-8`, all admitted, all
-      about tests that can pass without what they stand for
-      (`.agents/review/codereview-2026-11-14-embedded-parity.md`). All
-      eight were fixed on `main` (tests only, no product code), and that
-      review is CLOSED (2026-11-14; `.agents/review/index.md`). Codex
-      accepted `pa-8`, `pa-3`, `pa-2` and, after four rounds, `pa-1`.
-      `pa-6` closed on the agent's review of a repair codex wrote. The
-      owner closed `pa-4`, `pa-5` and `pa-7` as they stand, when setting
-      tests aside until a release is in view (next point); codex's last
-      comments on those three are known limits in their records. A
-      further repair of `pa-5` (codex, worktree `cx-pa5r5`) and of `pa-7`
-      (helper agents, local branch `pa7-r3`) was being written at that
-      moment; neither was reviewed or landed, and both exist only in
-      worktrees on `continuum`. Notes kept
-      from the work: `.agents/plans/embedded-player.slice6-notes.md`.
-    The owner's by-eye checks and the switch-on (Settings control, release
-    notes, version bump) are NOT the agent's to do.
-  - OWNER, 2026-11-14: TESTS ARE NOT A PRIORITY until the app is done and
-    a release is in view (`.agents/decisions.md`, that date; read it
-    before doing anything about tests). Keep the checks and the
-    end-to-end suite green and run them before calling work done; give a
-    product fix the test that shows it; spend no review round and no
-    repair on a finding, or a reviewer's comment, that is about tests
-    alone: write it into the record for the release's test pass.
-  - OWNER, 2026-11-14: WHAT IS OBVIOUSLY BROKEN IS FIXED WITHOUT ASKING
-    (`.agents/decisions.md`, that date, which also says what is still
-    brought to the owner). Under it these are being fixed, each of which
-    this file or a record had as waiting for a go: the second half of
-    `pw-9` (FIXED); the external player idling at the end of a file under the
-    user's own mpv configuration (FIXED, see the commit "a video ends
-    when its file ends in the external player"); the order of events left
-    open in `pc-2` (FIXED, and `pc-2` closed);
-    the Arch package not installing `vela-markers.lua` (FIXED); the same faults as `pw-7`'s in the
-    other Settings controls (FIXED); the lockfile-only
-    `npm audit fix` (FIXED; GitHub CI's Frontend job should pass again from
-    that commit on: look before relying on it). Their entries under Blockers still say "needs a go":
-    read them with this point until each is fixed and its entry removed.
-  - Active review loop: see `.agents/review/index.md`. Nothing is waiting
-    for the owner there: `ps-2` closed as it stands (it is about a test),
-    and `pc-2` closed with a fourth repair under the point above.
-  - On 2026-11-13 the owner switched on multi-agent workflows for the
-    session that is doing this work. The agent reads that as the approval
-    the 2026-08-20 constraint below asks for before more than one Claude
-    session is started, for that session only. Reviews of record still go
-    to codex, and no agent is cut short. Later the same day the owner
-    asked that agents started from then on run on Opus 5.5.
-  - On 2026-11-14 the owner asked, in the session doing this work, for
-    coding tasks to be handed to codex (gpt-6-astra at max effort, which is
-    what a plain call resolves to on `continuum`) and reviewed by the
-    agent, "to see if we can make some progress by splitting effort".
-    Five were handed over, one at a time, each in a worktree of its own
-    under `~/dev/vela-agent-keep/wt/` (`cx-pw9a`, `cx-race`, `cx-pa6r3`,
-    `cx-pa5r5`, `cx-pw7r4`), uncommitted there until the agent lands them:
-    the first half of `pw-9` (LANDED at `0b313a2`); the other end-to-end
-    scenarios checked for the race `pw-8` had, with the wait in one helper
-    (LANDED at `71395c3`: sixteen scenario files changed; the survey and
-    the agent's review are `.agents/review/pw-8.other-scenarios.md`);
-    `pa-6`'s second repair (LANDED at `3d2ecca`); `pa-5`'s fourth (set
-    aside unlanded when the owner put tests off); and `pw-7`'s fourth
-    (being written). Codex cannot be the
-    reviewer of code it wrote, so for these the agent reviews (reads the
-    diff, runs the checks and the end-to-end runs codex's sandbox cannot,
-    red-proves the tests) and lands them; their records say so. The owner
-    DECIDED on 2026-11-14 that the agent's review closes a finding whose
-    last repair codex wrote (`.agents/decisions.md`, that date). `pa-6` is
-    closed under it.
-  After the embedded plan's slices came
-  `.agents/plans/mpv-window-geometry.md` Slices 1-3, also approved: LANDED
-  2026-11-14 at `9815e10` as one commit, Vela 1.0.64 (not released, not
-  tagged). Every play in a run now opens mpv's window as the previous one
-  left it, size included, and Settings has a "Player window" choice for
-  the first window after Vela starts. Its log says why it is one commit,
-  what could not be tested here (a real window size), and lists the
-  owner's acceptance steps on real desktops, none of them done. Going back
-  to an older Vela after playing anything in 1.0.64 needs Settings
-  recovery (the release note says so). Its codex review, one hunt per
-  slice, returned SEVEN findings, `pw-1` to `pw-7`, all admitted
-  (`.agents/review/codereview-2026-11-14-player-window.md`): the Prefer
-  Compatible policy can rank for a different screen than the window opens
-  on; a size can be carried that the window never had; quitting waits
-  without limit for the settings file; an older window can be saved over a
-  newer one; and three smaller ones. All seven are FIXED on `main`
-  (`55be8fc` to `ac25240`, ten commits, 2026-11-14; no version change, no
-  release note). Where each stands (2026-11-14, evening): `pw-1` to
-  `pw-7` are CLOSED. Codex accepted `pw-3` to `pw-6` at once, and `pw-1`
-  and `pw-2` in their third round, after two joint repairs (`52138d0` to
-  `eb2f1c2`, then `c9e7245` to `79384d9`): a Prefer Compatible copy is
-  ranked for the screen its window is asked to open on, decided once
-  before the ranking; every other policy decides the screen after the
-  stream is resolved, as the plan says; a remembered screen that is
-  known to be gone is passed over for the screen Vela's window is on.
-  What that changes for a user, and its known gaps (no macOS or Windows
-  build, no real second screen), are in `pw-1`'s record. `pw-7` closed on
-  the agent's review of a repair codex wrote (`0cc2e03`: saves of the
-  Player window choice go one at a time). One fix departs on purpose
-  from what was first decided: what a play's end and Vela's exit save is
-  the last window of mpv's own, not the latest play's (`pw-6`'s record
-  says why).
-  Two findings were added after the review (its document, "Raised after
-  the intake"). `pw-8`: the scenario `windowsetting` used to fail one
-  external run in four; the scenario was fixed (`26660a9`), every other
-  scenario was gone through for the same race (`71395c3`,
-  `.agents/review/pw-8.other-scenarios.md`), and codex then reopened it
-  on a fault in the product: Vela, quitting, saved the window before its
-  reader had read all that mpv sent. Repaired at `0ae5b64` to `bb3b84e`
-  (quitting waits at most half a second, inside the two seconds it
-  already allowed, until the reader has finished); codex ACCEPTED it. `pw-9`:
-  both halves are fixed and it is CLOSED: a play hands on how its window
-  was opened (`0b313a2`), and a play whose player has already gone is
-  over at once, not five seconds later (written by codex, reviewed by the
-  agent). With it the whole player-window review is CLOSED; the plan's
-  log has the summary. One known gap is left on purpose (`pw-9`'s
-  record, "Not taken"): a play cancelled by a newer play can hand on a
-  window one change out of date.
-  The parity verdict has not passed on `main` since the fixes began to
-  land; the runs made along the way are in the records. The verdict
-  PASSED at `77d4dc3`, at `22b64f6` and at the run's last commit,
-  `7b17f63` (external 47 of 48, embedded 49 of 50, the one failure in
-  each `pagefail`; the embedded-player plan's log has the second). `embeddedownconfig` is no longer a known failure in the
-  external player (`67536da`); `pagefail` still is, in both.
-  Rules the owner set for this run (decision `.agents/decisions.md`
-  2026-11-12, "plans are approved"): every slice with repo code gets a
-  `codereview codex` pass; push each commit; steps only the owner can do
-  (by-eye picture checks) are left as a list in the plan's log, and until
-  the owner has done them the embedded player gets no Settings control, no
-  version bump and no release note.
-  Standing working rule from the owner (2026-11-12): settle
-  implementation, failure-mode and licensing details yourself and record
-  them; bring the owner only what changes Vela for its users, briefly, and
-  do not repeat a pending ask. Licensing is closed (`.agents/decisions.md`).
+- The embedded player (`.agents/plans/embedded-player.md`, approved
+  2026-11-12) and the player window carried from play to play
+  (`.agents/plans/mpv-window-geometry.md`, landed 2026-11-14 at `9815e10`
+  as Vela 1.0.64, not released) are both on `main`, and every codex
+  review of them is closed (`.agents/review/index.md` has no open
+  finding). Each plan's "Implementation log" says where it stands. Read
+  the embedded plan's "Owner checks outstanding" and "For the owner"
+  before telling the owner anything, and the player-window plan's log
+  for the owner's acceptance steps on real desktops, none of them done.
+  Gaps left on purpose are in the findings' records (`pw-1`: nothing was
+  built or run on macOS or Windows, and no real second screen; `pw-9`,
+  "Not taken"). Going back to an older Vela after using this one can
+  need Settings recovery (the release notes say when). The account of
+  that run, written while it went on, rotated to
+  `docs/history/state-archive.md` on 2026-11-16. Of the test repairs it
+  left parked, `pa-7`'s is being landed (entry above); `pa-5`'s (codex,
+  worktree `cx-pa5r5` on `continuum`) was never reviewed or landed.
+- HOW TO WORK HERE: rules the owner set since 2026-11-12, most of them
+  in `.agents/decisions.md` under their dates; read them there before
+  doing anything. Every slice with repo code gets a `codereview codex`
+  pass, and each commit is pushed (2026-11-12, "plans are approved").
+  Settle implementation and failure-mode details yourself and record
+  them; bring the owner only what changes Vela for its user, briefly,
+  and never put an answered ask again (2026-11-12, 2026-11-15).
+  Licensing is closed: do not raise it. What is obviously broken is
+  fixed without asking (2026-11-14, which also says what is still
+  brought to the owner). Coding tasks may go to codex, called plainly,
+  and a repair codex wrote is closed by the agent's review, since codex
+  cannot review code it wrote (2026-11-14). What is built for the owner
+  is made usable from the app, and the owner is Vela's only user
+  (2026-11-15). On 2026-11-13 the owner switched on multi-agent
+  workflows for the session doing this work; the agent reads that as
+  the approval the 2026-08-20 constraint below asks for before more than
+  one Claude session is started, for that session only. The same day
+  the owner asked that agents started from then on run on Opus 5.5.
+  Reviews of record still go to codex, and no agent is cut short.
 - Windows mpv idle-exit fix, 2026-11-12, `bf1b1c3` (1.0.62; plan
   `.agents/plans/windows-mpv-idle-exit.md`). On Windows, mpv started by Vela
   idled at end of file instead of exiting, so Continue Playing, playlist
@@ -494,27 +363,42 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   - Until then: an embedded run that fails the verdict on `completionhub`
     alone is this race until shown otherwise; run the scenario again by
     itself before reading it as a regression.
-- An observation not yet looked into (reported by a helper during the
-  `pa-7` repair work on 2026-11-14; NOT verified by the working agent, and
-  left out of the record until 2026-11-16): when an embedded play is closed
-  by the user, the final position reported to Plex was about 165 ms before
-  the position the play was being held at, after a "playing" report at the
-  held position. If true, the saved resume point is a fraction of a second
-  early; nothing is lost. Check it in both players before treating it as
-  the embedded player's alone.
-- CI does not exercise the package check (2026-11-14, the owner has not
-  been asked yet). `tests/libmpv-packaging.test.mjs` needs `bsdtar` to
-  build and unpack its stand-in packages; GitHub's runner image does not
-  list it and the `frontend` job installs nothing, so those tests are
-  skipped there. One step would fix it (`sudo apt-get install -y
-  libarchive-tools` before `npm run check`); it is a change to `ci.yml`,
-  which the agent does not make.
+- An embedded play closed by its user reports a final position about
+  180 ms early (a helper reported it during the `pa-7` repair work on
+  2026-11-14; VERIFIED and traced by the working agent on 2026-11-16; a
+  fix is being written). The embedded player alone: the external player
+  reports the true position.
+  - Seen: a play held paused at 9.000 s, which Vela had already reported
+    to Plex as "playing" at 9000 ms, was closed with the view's Close
+    control, and the stopped report said 8822, 8819 and 8822 ms in three
+    runs (`multiplex` with the `pa-7` test repair, which fails on it 3 of
+    3 embedded and passes 3 of 3 external).
+  - Why, from what mpv sent on its socket through the stop: on a stop
+    the play's thread leaves its loop at once and tears down in field
+    order (`Live`, `src-tauri/src/player/embedded/session.rs`): the
+    renderer is freed first, and only then is mpv told to quit
+    (`mpv_terminate_destroy`). Freeing the renderer while the file is
+    loaded makes mpv give up its video output (`video-reconfig`,
+    `current-vo` gone); with no video its position falls back to the
+    audio's (`time-pos` 8.819179, equal to `audio-pts`), and it reports
+    that change before `end-file`. Vela's reader keeps the last
+    `time-pos` it is told (`spawn_position_reader`,
+    `src-tauri/src/playback.rs`).
+  - Effect: the final report and the saved resume point are a fraction
+    of a second early; nothing is lost. A file that ends by itself, or a
+    quit sent over mpv's socket, ends the file before the renderer is
+    freed and is not affected.
+  - The fix wanted: on a stop, ask mpv to end the file without waiting
+    on it, keep the loop going until mpv has shut playback down or a
+    bound passes, and only then tear down.
 - The `refresh` E2E flake remains recorded (1.0.59 full Linux run, 36/39,
-  with `continueon` and `playverbs`). A candidate cause, seen 2026-11-15 and not
-  acted on: `refresh.mjs` and `watchposition.mjs` scroll the grid with the
-  helper `pagefail` had until `b066dc0`, which moves the grid AND sends a
-  synthetic scroll event. That is two events, and the second can ask again
-  for a page whose request has just failed. One cause of the continuation flakes
+  with `continueon` and `playverbs`). A candidate cause, seen 2026-11-15:
+  `refresh.mjs` and `watchposition.mjs` scrolled the grid with the helper
+  `pagefail` had until `b066dc0`, which moved the grid AND sent a synthetic
+  scroll event. That is two events, and the second can ask again for a page
+  whose request has just failed. Both scroll with one event since `ece850b`
+  (2026-11-16; external 4 of 4 and embedded 3 of 3 that day); whether that
+  was the flake is not established. One cause of the continuation flakes
   is gone since 2026-11-13: scenarios sought in a file the moment mpv named
   it, and mpv can answer that with "property unavailable" (seen in
   `continuetv` and `continueon`). The harness now waits until mpv reports a
