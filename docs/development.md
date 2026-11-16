@@ -233,11 +233,12 @@ packaging/libmpv/check-in-container.sh registry.fedoraproject.org/fedora:latest
 
 ### Trying the embedded player
 
-Experimental and Linux on Wayland only. Settings → Player → Video player
-offers it, and says why when it cannot be used. The released Linux packages
-carry its library; a package you build yourself carries it when built with
-`--with-libmpv` (see "Packaging the set" below). The plan and its state are
-in `.agents/plans/embedded-player.md`.
+Experimental, on Linux (Wayland), Windows and macOS. Settings → Player →
+Video player offers it, and says why when it cannot be used. Every released
+package carries its library; a Linux package you build yourself carries it
+when built with `--with-libmpv` (see "Packaging the set" below), and
+`scripts/build-macos.sh` builds the macOS app with it. The plan and its
+state are in `.agents/plans/embedded-player.md`.
 
 1. Build the set (above), or download CI's.
 2. Start a development build with the set's directory named:
@@ -247,7 +248,9 @@ in `.agents/plans/embedded-player.md`.
    ```
 
    Only a development build reads that variable. A release build loads the
-   library from its own resource directory and nowhere else.
+   library from where its package put it and nowhere else: on Linux its
+   resource directory, on Windows beside `Vela.exe`, on macOS the app's
+   `Contents/Frameworks`.
 3. In Settings → Player → Video player choose "Vela's window
    (experimental)" (it is saved at once) and restart Vela. The choice is
    stored as

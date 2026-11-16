@@ -69,7 +69,7 @@ what you see if you run Emby — a report is more useful than a guess.
 
 ## Playing in Vela's own window (experimental)
 
-Settings → Player → Video player (shown on Linux) chooses where videos play:
+Settings → Player → Video player chooses where videos play:
 
 - **mpv's own window** (the default): Vela starts the mpv installed on your
   system, in a window of its own. The rest of this page describes that
@@ -78,8 +78,9 @@ Settings → Player → Video player (shown on Linux) chooses where videos play:
   through a copy of mpv's library that comes with Vela. This is the embedded
   player.
 
-The embedded player runs on Linux in a Wayland session, and not yet with the
-NVIDIA proprietary driver. Switching to mpv's own window applies to the next
+The embedded player runs on macOS, on Windows, and on Linux in a Wayland
+session (not yet with the NVIDIA proprietary driver). Switching to mpv's own
+window applies to the next
 video. To use Vela's window, restart Vela if this run started without embedded
 playback. Whenever the embedded player cannot be used, the video plays in
 mpv's own window instead and one line on screen says why; Settings shows the
@@ -107,17 +108,22 @@ changes the volume. The middle, back and forward buttons do nothing.
 
 What is different from mpv's own window, and why it is marked experimental:
 
-- The picture is drawn by a different mpv renderer (`gpu`, where mpv's own
-  window uses `gpu-next`). HDR is passed through on a display and compositor
-  that offer it, but it can look different.
+- On Linux and macOS the picture is drawn by a different mpv renderer
+  (`gpu`, where mpv's own window uses `gpu-next`); on Windows it is mpv's own
+  `gpu-next` output, inside Vela's window. HDR reaches the screen where the
+  system offers it: on Linux through a display and compositor that pass it
+  through, on Windows with Windows' HDR turned on, on macOS on a screen with
+  extended dynamic range (such as a MacBook Pro's). It can look different
+  from mpv's own window.
 - Black-bar cropping is done by a script of Vela's own, and it does not crop
   HDR video.
 - With "Use my own mpv config" on, it applies your `mpv.conf` but not your
   mpv scripts, per-script option files or key bindings.
 - The Player window setting below is about mpv's own window and does not
   apply to it.
-- Its library comes in Vela's Linux packages (AppImage, deb, rpm and Arch,
-  x86_64). A package you build yourself carries it only when it is built with
+- Its library comes in every Vela package: the Linux ones (AppImage, deb,
+  rpm and Arch, x86_64), the Windows installers and the macOS app. A Linux
+  package you build yourself carries it only when it is built with
   `scripts/build.sh --with-libmpv`
   ([docs/development.md](development.md#packaging-the-set)). Settings says so
   when the library is missing.

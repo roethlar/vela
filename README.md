@@ -117,8 +117,8 @@ exactly where credentials can appear locally, are in
 - Emby remains experimental until it receives live-server integration testing.
 - HDR fidelity ultimately depends on mpv, its GPU backend, the display, and the
   operating system's color-management path.
-- Playing inside Vela's own window is experimental: Linux on Wayland only and
-  off by default. See
+- Playing inside Vela's own window is experimental and off by default; on
+  Linux it needs a Wayland session. See
   [docs/usage.md](docs/usage.md#playing-in-velas-own-window-experimental).
 
 Known issues and follow-up work are tracked in [ISSUES.md](ISSUES.md).

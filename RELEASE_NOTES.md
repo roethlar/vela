@@ -15,9 +15,10 @@ Vela's own window on Linux with Wayland.
 - The player now checks the certificate of an HTTPS media server. If your
   server uses a self-signed certificate or a private authority, read
   "Upgrading and going back" before you update.
-- Experimental, Linux on Wayland: play inside Vela's own window, with Vela's
-  own controls, keys and mouse actions, by choosing Settings → Player → Video
-  player. mpv's own window stays the default on every system.
+- Experimental, on Linux (Wayland), Windows and macOS: play inside Vela's own
+  window, with Vela's own controls, keys and mouse actions, by choosing
+  Settings → Player → Video player. mpv's own window stays the default on
+  every system.
 - Servers that share a name can be told apart by their Plex, Jellyfin or Emby
   mark.
 
@@ -139,11 +140,12 @@ packages and the Arch package are unsigned, as before. mpv 0.38 or newer
 remains a separate required installation: it is the default player on every
 system.
 
-The Linux packages are about 15 MB larger than before. They now carry the
-library the experimental embedded player uses: an LGPL build of mpv and of the
-libraries it needs, as separate shared libraries, with each component's
-licence text, built from the sources pinned in `packaging/libmpv/versions.txt`.
-The macOS and Windows packages do not carry it.
+Every package is larger than before (the Linux packages by about 15 MB): each
+now carries the library the experimental embedded player uses, an LGPL build
+of mpv and of the libraries it needs, as separate shared libraries, with each
+component's licence text, built from the sources pinned in
+`packaging/libmpv/versions.txt`. On macOS the libraries are signed with the
+app.
 
 ## Server status
 
@@ -156,10 +158,10 @@ The macOS and Windows packages do not carry it.
 
 - The rare queued watch-edit race disclosed in 1.0.0 remains an accepted
   limitation.
-- The embedded player is experimental: Linux on Wayland only, not yet with the
-  NVIDIA proprietary driver, its picture is drawn by a different mpv renderer
-  than mpv's own window, and it does not crop HDR video. `docs/usage.md` lists
-  the differences.
+- The embedded player is experimental: on Linux it needs a Wayland session
+  and does not yet work with the NVIDIA proprietary driver; on Linux and macOS
+  its picture is drawn by a different mpv renderer than mpv's own window; it
+  does not crop HDR video. `docs/usage.md` lists the differences.
 - With two monitors of the same model, Vela cannot tell them apart, and the
   player window can open on the other one.
 
