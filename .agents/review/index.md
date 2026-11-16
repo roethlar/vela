@@ -1161,5 +1161,5 @@ under `tests/` gates nothing until it is added there.
 Record: `codereview-2026-11-16-platforms.md`. Three hunts: the Windows
 host (`8c40ff8..6b206ec`), the macOS host (`4fe60b8..623ec17`), and the
 fixes `c49be2a` and `ca07bfa`. 6 candidates, 6 admitted (MEDIUM), 0
-declined; pl-1, pl-2 and pl-3 closed; pl-4, pl-5 and pl-6 open (one codex
-repair task).
+declined; all six closed (`ca07bfa`, `49f2c3c`, `41d47c4`, `9833fc1`,
+`e93402e`).

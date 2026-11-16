@@ -3,10 +3,9 @@
 Outcome: three codereview codex hunts: one per slice over the Windows
 host (`8c40ff8..6b206ec`) and the macOS host (`4fe60b8..623ec17`), and a
 third over the fixes `c49be2a` and `ca07bfa` (below). **findings** in all
-three: six candidates, six admitted (all MEDIUM), none declined. pl-1,
-pl-2 and pl-3 are repaired and closed (codex wrote each repair as a coding
-task; the working agent's review closed it); pl-4, pl-5 and pl-6 are open,
-their repair one codex task.
+three: six candidates, six admitted (all MEDIUM), none declined. All six
+are repaired and closed (codex wrote each repair as a coding task; the
+working agent's review closed it, and added the Windows half of pl-5).
 
 ## Dispatch record
 
@@ -36,9 +35,9 @@ their repair one codex task.
 | pl-1 | MEDIUM   | Windows: a user `gpu-context` survives the forced `gpu-api=d3d11`        | `[x]`  | this commit |
 | pl-2 | MEDIUM   | Windows: own-config mode skips `<exe dir>/mpv.conf`, which mpv reads     | `[x]`  | this commit |
 | pl-3 | MEDIUM   | macOS: a conditional mpv.conf profile can undo the protected SDR targets | `[x]`  | the HDR slice's commit |
-| pl-4 | MEDIUM   | macOS: in a launch that honours DYLD_*, a set dependency can be redirected past the load check | `[ ]` | queued |
-| pl-5 | MEDIUM   | Linux: a numeric `--fs-screen`/`--screen` from the user outranks the remembered name | `[ ]` | queued |
-| pl-6 | MEDIUM   | Windows: an explicitly empty MPV_HOME is read as unset, so config files are read mpv would not read | `[ ]` | queued |
+| pl-4 | MEDIUM   | macOS: in a launch that honours DYLD_*, a set dependency can be redirected past the load check | `[x]` | `41d47c4` |
+| pl-5 | MEDIUM   | Linux: a numeric `--fs-screen`/`--screen` from the user outranks the remembered name | `[x]` | `9833fc1` |
+| pl-6 | MEDIUM   | Windows: an explicitly empty MPV_HOME is read as unset, so config files are read mpv would not read | `[x]` | `e93402e` |
 
 ### pl-1 (whost)
 
@@ -105,9 +104,12 @@ using libraries outside its shipped set."
 
 Admitted, with this context: a released Vela.app is notarized with the
 hardened runtime, which ignores DYLD_* variables, so the exposure is a
-build without it (a development build). Open: the repair checks every
-image dyld loaded against the set's directory after the load (the
-reviewer's suggestion), queued with pl-3.
+build without it (a development build). Repair (`41d47c4`): after the
+load, every image dyld has loaded whose file name is one of the set
+directory's dylibs must resolve, canonically, inside that directory, or
+the library is unloaded and refused (a pure function tested on every
+platform; the macOS part only gathers the paths). Tests seen failing with
+the rule taken out.
 
 ## A third hunt: the fixes of `c49be2a` and `ca07bfa`
 
@@ -116,7 +118,8 @@ over `623ec17..ca07bfa` with the mandate limited to the two product commits
 in that range: the Linux fullscreen screen (`c49be2a`) and the Windows
 host's review repairs (`ca07bfa`). Same harness and reviewer as above.
 **findings**: two candidates, both admitted (MEDIUM), as pl-5 and pl-6.
-A fix task for pl-4, pl-5 and pl-6 is queued (codex).
+One codex task repaired pl-4, pl-5 and pl-6; each landed in a commit of
+its own.
 
 ### pl-5 (fixes2)
 
@@ -129,9 +132,15 @@ screen is not screen 0, playback still opens fullscreen on screen 0. The
 reader's subsequent fs-screen-name updates cannot override that numeric
 selection either."
 
-Admitted; it holds for `--screen` against `--screen-name` too. Repair
-queued: beside each reasserted name, the numeric selector's neutral value
-(`--screen=default`, `--fs-screen=current`) after the user's options.
+Admitted; it holds for `--screen` against `--screen-name` too, on macOS
+as well (`getTargetScreen`), and on Windows for a fullscreen start (mpv
+puts a fullscreen window on `fs-screen`'s monitor before its own,
+`w32_common.c` `get_default_monitor`; the working agent's review found
+that half). Repair (`9833fc1`): after the user's options,
+`--screen=default` beside `--screen-name` (Linux, macOS), and for a
+fullscreen start `--fs-screen=current` on every platform, with Linux's
+`--fs-screen-name`. A windowed start leaves the user's `--fs-screen` for
+later toggles. Tests seen failing with each rule taken out.
 
 ### pl-6 (fixes2)
 
@@ -143,5 +152,8 @@ own-config mode enabled, MPV_HOME empty, and only <exe dir>/mpv.conf
 present, this commit newly applies that file's settings or profiles
 although mpv would read no config."
 
-Admitted. Repair queued: unset, discovery; set and empty, no files; set
-and non-empty, that directory's mpv.conf only.
+Admitted. Repair (`e93402e`): unset, discovery; set and empty, no files;
+set and non-empty, that directory's mpv.conf only, on every platform
+(which also drops `/etc/mpv/mpv.conf` beside a non-empty `MPV_HOME` on
+Linux and macOS: mpv reads only the first config directory then). Tests
+seen failing with each rule taken out.

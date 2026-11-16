@@ -40,9 +40,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
       yet.
     - In progress: a release run by hand to prove the Mac app; codex
       defect hunts over the HDR slice and over the Windows and macOS
-      packaging; the repair of review findings pl-4, pl-5, pl-6 (codex,
-      worktree `~/dev/vela-agent-keep/wt/cx-fixes3`;
-      `.agents/review/codereview-2026-11-16-platforms.md`).
+      packaging. The six findings of the earlier hunts are all closed
+      (`.agents/review/codereview-2026-11-16-platforms.md`).
   - Linux unchanged through all of it: both end-to-end suites in full at
     `6b206ec`, `623ec17`, `c49be2a` and `49f2c3c` (48 of 48, 51 of 51,
     parity PASS).
