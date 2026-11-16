@@ -151,7 +151,7 @@ fn view(state: &AppState, page: &Page, session: &str, opened: bool) {
     });
 }
 
-/// The page's own handling of these events, as `+page.svelte` does it with
+/// The page's own handling of these events, as `App.svelte` does it with
 /// the helpers of `src/lib/playerView.ts` (the Node test
 /// `tests/player-view.test.mjs` runs the very sequences these tests produce
 /// through the real helpers): where it leaves the player's fullscreen.

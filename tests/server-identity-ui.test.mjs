@@ -61,7 +61,7 @@ test("Settings labels Emby, and only Emby, as experimental", () => {
   );
 });
 
-const page = read("src/routes/+page.svelte");
+const page = read("src/App.svelte");
 const pageMarkup = markup(page);
 const playlistsView = read("src/lib/PlaylistsView.svelte");
 const serverPlaylistView = read("src/lib/ServerPlaylistView.svelte");
@@ -133,7 +133,7 @@ test("the sidebar's Server Playlists section is driven by the flattened entries"
 
 test("the nested per-server playlist layout and its placeholders are gone", () => {
   for (const gone of ["serversourcename", "serverplayliststate", "serverplaylistgroup", "No video playlists", "Experimental"]) {
-    assert.ok(!page.includes(gone), `+page.svelte still contains ${gone}`);
+    assert.ok(!page.includes(gone), `App.svelte still contains ${gone}`);
   }
 });
 
