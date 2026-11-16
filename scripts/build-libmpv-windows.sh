@@ -354,10 +354,20 @@ allowed_system() {
   case " $(echo $ALLOWED_SYSTEM) " in *" ${1,,} "*) return 0 ;; esac
   return 1
 }
-needed() { "$TARGET-objdump" -p "$1" | awk '/DLL Name:/ { print tolower($3) }'; }
+needed() { python3 -B "$recipe/windows-pe.py" "$1"; }
+
+check_closure() {
+  local lib dep deps
+  for lib in "$OUT"/*.dll; do
+    deps="$(needed "$lib")" || die "cannot read dependencies: $lib"
+    for dep in $deps; do
+      [ -f "$OUT/$dep" ] || allowed_system "$dep" || die "unshipped dependency: $dep"
+    done
+  done
+}
 
 collect() {
-  local lib dep found name f roles="" system="" queue="libmpv-2.dll" seen=" "
+  local lib dep deps found name f roles="" system="" queue="libmpv-2.dll" seen=" "
   rm -rf "$OUT"; mkdir -p "$OUT/licenses"
   while [ -n "$queue" ]; do
     lib="${queue%% *}"; queue="${queue#"$lib"}"; queue="${queue# }"
@@ -368,7 +378,8 @@ collect() {
     "$TARGET-objdump" -f "$found" | grep -q 'file format pei-x86-64' || die "not x86_64 PE: $lib"
     install -m644 "$found" "$OUT/$lib"
     "$STRIP" --strip-unneeded "$OUT/$lib"
-    for dep in $(needed "$OUT/$lib"); do
+    deps="$(needed "$OUT/$lib")" || die "cannot read dependencies: $lib"
+    for dep in $deps; do
       if allowed_system "$dep"; then
         system="$system$dep"$'\n'
       else
@@ -376,12 +387,8 @@ collect() {
       fi
     done
   done
-  # Verify the complete import closure after copying and stripping.
-  for lib in "$OUT"/*.dll; do
-    for dep in $(needed "$lib"); do
-      [ -f "$OUT/$dep" ] || allowed_system "$dep" || die "unshipped dependency: $dep"
-    done
-  done
+  # Verify ordinary/delay imports and forwarded exports after copying/stripping.
+  check_closure
   lic() { local name="$1"; shift; mkdir -p "$OUT/licenses/$name"
     local f; for f in "$@"; do
       install -Dm644 "$WORK/src/$name/$f" "$OUT/licenses/$name/$f"

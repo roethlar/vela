@@ -866,7 +866,7 @@ for (const [name, tokens] of Object.entries(configuration)) requiredTokens(name,
 requiredTokens('collector', body(script, 'collect'), [
   'queue="libmpv-2.dll"', 'needed "$OUT/$lib"', 'allowed_system "$dep"',
   'missing or ambiguous DLL:', "file format pei-x86-64", '"$STRIP" --strip-unneeded',
-  'die "unshipped dependency:', 'die "no licence text collected for component',
+  'check_closure', 'die "no licence text collected for component',
   "find . -type f ! -name MANIFEST -printf '%P\\n'", '"$(sha256sum "$f"', '"$(stat -c %s "$f")"',
   '"licence $name licenses/$name/$f"', '"$recipe/windows-license-notes.txt"',
   'lic spirv-cross LICENSE spirv.h spirv.hpp GLSL.std.450.h',
@@ -930,7 +930,7 @@ requiredTokens('CI cross build', buildJob, [
   'runs-on: ubuntu-22.04', 'path: .libmpv/out/libmpv-windows-x86_64',
   "key: libmpv-windows-x86_64-${{ hashFiles(", "'scripts/build-libmpv-windows.sh'",
   "'packaging/libmpv/versions.txt'", "'packaging/libmpv/Containerfile.windows'",
-  "'packaging/libmpv/windows-license-notes.txt'", "if: steps.cache.outputs.cache-hit != 'true'",
+  "'packaging/libmpv/windows-license-notes.txt'", "'packaging/libmpv/windows-pe.py'", "if: steps.cache.outputs.cache-hit != 'true'",
   'run: bash scripts/build-libmpv-windows.sh --container',
   'run: python3 -B packaging/libmpv/check-libmpv-windows.py .libmpv/out/libmpv-windows-x86_64 --manifest-only',
   'uses: actions/upload-artifact@v7', 'name: libmpv-windows-x86_64', 'if-no-files-found: error',
@@ -953,7 +953,7 @@ requiredTokens('checker wiring', checker, [
   'ctypes.CDLL(str(directory / "libmpv-2.dll"), winmode=0x00000100 | 0x00000800)',
   'kernel.SetDefaultDllDirectories(0x00000800 | 0x00000400)',
   'kernel.K32EnumProcessModules(kernel.GetCurrentProcess()', 'kernel.GetModuleFileNameW(handle',
-  'snapshots.update(loaded_modules(kernel))', 'check_loaded(directory, files, snapshots, require_mpv)',
+  'snapshots.update(loaded_modules(kernel))', 'check_loaded(directory, files, snapshots, require_mpv, baseline, system_root)',
   'lib.mpv_client_api_version()', '("vo", "null"), ("ao", "null")',
   'b"av://lavfi:testsrc2=duration=2"', 'end.reason != 0 or end.error != 0 or not loaded',
   'time.monotonic() + 25', 'timeout=60, check=False', 'lib.mpv_terminate_destroy(handle)',
@@ -979,9 +979,16 @@ test('Windows module audit accepts case-insensitive paths and rejects foreign/un
   assert.match(check([...modules, 'D:\\elsewhere\\AVCODEC-63.DLL']).join(), /loaded from elsewhere/);
   assert.match(check([...modules, 'C:\\set\\unlisted.dll']).join(), /loaded unlisted/);
   assert.match(check([...modules, 'C:\\set\\nested\\avcodec-63.dll']).join(), /loaded unlisted|elsewhere/);
-  assert.deepEqual(check([...modules, 'C:\\set-other\\unrelated.dll']), []);
+  assert.match(check([...modules, 'C:\\set-other\\unrelated.dll']).join(), /new module.*c:\\set-other\\unrelated.dll/);
   assert.match(check(modules.slice(1)).join(), /not mapped from the set/);
   assert.deepEqual(check([], false), []);
+});
+
+test('Windows PE dependency closure and runtime audit reject real missing dependencies', () => {
+  const run = spawnSync(python, ['-I', '-B', 'tests/libmpv-windows-dependencies.py', '-v'], {
+    cwd: root, encoding: 'utf8', timeout: 30000,
+  });
+  assert.equal(run.status, 0, `${run.error ?? ''}\n${run.stdout}\n${run.stderr}`);
 });
 
 function fixture(t) {

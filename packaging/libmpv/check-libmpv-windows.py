@@ -127,9 +127,13 @@ def check_manifest(directory, pins):
         return [str(error)]
 
 
-def check_loaded(directory, listed, modules, require_mpv=False):
+def check_loaded(directory, listed, modules, require_mpv=False, baseline=(), system_root=r"C:\Windows"):
     """Pure Windows path comparison, also exercised by the policy tests on Linux."""
     root = ntpath.normcase(ntpath.normpath(str(directory)))
+    baseline = {ntpath.normcase(ntpath.normpath(path)) for path in baseline}
+    windows = ntpath.normcase(ntpath.normpath(system_root))
+    system_dirs = [ntpath.join(windows, name) + "\\" for name in
+                   ("system32", "syswow64", "winsxs", "driverstore")]
     dlls = {ntpath.basename(name).casefold() for name in listed if name.lower().endswith(".dll")}
     problems = []
     seen = set()
@@ -140,6 +144,8 @@ def check_loaded(directory, listed, modules, require_mpv=False):
         inside = path.startswith(root.rstrip("\\") + "\\")
         if inside and name.endswith(".dll") and (name not in dlls or parent != root):
             problems.append(f"loaded unlisted DLL: {path}")
+        if path not in baseline and not inside and not any(path.startswith(d) for d in system_dirs):
+            problems.append(f"new module loaded from outside the set and Windows: {path}")
         if name in dlls:
             if parent != root:
                 problems.append(f"set DLL loaded from elsewhere: {path}")
@@ -203,11 +209,13 @@ def play(directory):
     # calls made by mpv/dependencies. Keep only system32 and the added set.
     if not kernel.SetDefaultDllDirectories(0x00000800 | 0x00000400):
         raise ctypes.WinError(ctypes.get_last_error())
-    snapshots = set(loaded_modules(kernel))
+    baseline = frozenset(loaded_modules(kernel))
+    snapshots = set(baseline)
+    system_root = os.environ["SystemRoot"]
 
     def audit(require_mpv=False):
         snapshots.update(loaded_modules(kernel))
-        problems = check_loaded(directory, files, snapshots, require_mpv)
+        problems = check_loaded(directory, files, snapshots, require_mpv, baseline, system_root)
         if problems:
             raise RuntimeError("; ".join(problems))
 
@@ -278,7 +286,7 @@ def play(directory):
         finally:
             lib.mpv_terminate_destroy(handle)
         audit(True)
-    print("ok: all observed set DLLs mapped from the manifest directory", flush=True)
+    print("ok: set DLLs mapped from the manifest directory; new modules only from the set or Windows", flush=True)
 
 
 def main():
