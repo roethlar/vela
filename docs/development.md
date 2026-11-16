@@ -401,14 +401,15 @@ no package. Its `frontend` job installs `bsdtar` and squashfs-tools before
 `tests/libmpv-packaging.test.mjs`, which pack and unpack packages they make
 themselves) run there and are not skipped.
 
-Not known yet:
+What has been seen, and what follows from it:
 
-- **Whether a real AppImage keeps the set as it is.** The check handles the
-  format, but until the release workflow's first run with the set that path
-  has not met a real AppImage. It expects the program at `usr/bin/vela` and
-  the set at `usr/lib/Vela/libmpv` under the AppImage's own root, as Tauri
-  lays an AppImage out. If the AppImage tooling rewrites one of the set's
-  libraries, the check fails the release and says which.
+- **A real AppImage keeps the set as it is.** The release workflow's first
+  run with the set (by hand on `main`, 2026-11-16) built the AppImage, the deb,
+  the rpm and the Arch package on GitHub's runners, and the check passed all
+  four: the set whole and unmodified at `usr/lib/Vela/libmpv` (under the
+  AppImage's own root for the AppImage), loading from there. Should a later
+  version of the AppImage tooling rewrite one of the set's libraries, the check
+  fails the release and says which.
 - **The packages' licence field** names the set's licences when the set is
   packaged: `bundle.license` in `src-tauri/tauri.libmpv.conf.json` for
   the bundles built with that overlay, and `license` in

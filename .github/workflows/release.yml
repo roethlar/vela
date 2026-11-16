@@ -347,6 +347,20 @@ jobs:
           releaseName: ${{ startsWith(github.ref, 'refs/tags/') && matrix.os != 'ubuntu-22.04' && format('Vela {0}', github.ref_name) || '' }}
           releaseDraft: true
 
+      # Tauri reports a failed signing command as "failed to run pwsh" and shows
+      # nothing the command said; azure-sign.ps1 leaves its reason in a file.
+      - name: Say why Windows signing failed
+        if: failure() && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $note = Join-Path $env:RUNNER_TEMP 'vela-signing-failure.txt'
+          if (Test-Path -LiteralPath $note) {
+            Get-Content -LiteralPath $note
+            Write-Output "::error title=Windows signing failed::$(Get-Content -LiteralPath $note -TotalCount 1)"
+          } else {
+            Write-Output 'The signing script recorded no failure, so the build failed elsewhere.'
+          }
+
       - name: Require the universal macOS DMG
         if: runner.os == 'macOS'
         shell: bash
