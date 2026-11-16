@@ -63,8 +63,10 @@ for macOS, Windows, Linux, or Arch.
    custom executable under Settings → Player.
 2. **Download Vela** from
    [GitHub Releases](https://github.com/roethlar/vela/releases/latest) and
-   install it. The macOS release is Developer ID signed and notarized, so
-   Gatekeeper accepts it without an approval prompt. The Windows installers
+   install it. macOS downloads use the universal DMG; the duplicate
+   `.app.tar.gz` is no longer released. The macOS release is Developer ID
+   signed and notarized, so Gatekeeper accepts it without an approval prompt.
+   The Windows installers
    are not signed: Windows SmartScreen shows "Windows protected your PC"
    before running one; choose "More info", then "Run anyway". Linux and Arch
    packages are unsigned. `SHA256SUMS` is attached to every release, for

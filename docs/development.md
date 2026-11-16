@@ -564,7 +564,7 @@ not D3D11 drawing, HDR, hardware decoding, HTTPS or interactive installation.
 
 #### In the release workflow
 
-`.github/workflows/release.yml` puts the set into every Linux and Windows package it
+`.github/workflows/release.yml` puts the set into every Linux, Windows and macOS package it
 builds (the owner's ruling of 2026-11-16, `.agents/decisions.md`):
 
 - Its `libmpv` job builds the set from the release commit's pins, or restores
@@ -574,12 +574,10 @@ builds (the owner's ruling of 2026-11-16, `.agents/decisions.md`):
   `inventory` job takes `vela-*` only.
 - The Linux leg of `bundle` gives `tauri-action` `--config
   src-tauri/tauri.libmpv.conf.json` and then runs `check-package.sh --set
-  .libmpv/out/libmpv` on the AppImage, the deb and the rpm. `tauri-action`
-  uploads in the step that builds, which is before the check, so that leg
-  does not attach to the draft release at all; the `inventory` job attaches
-  the three bundles after both package jobs have passed. No Linux bundle
-  reaches the draft unchecked. `NO_STRIP=1` keeps the AppImage tooling's own
-  `strip` away from the set's libraries, as `scripts/build.sh` does.
+  .libmpv/out/libmpv` on the AppImage, the deb and the rpm. Only `inventory`
+  attaches the checked bundles, as on every platform. `NO_STRIP=1` keeps the
+  AppImage tooling's own `strip` away from the set's libraries, as
+  `scripts/build.sh` does.
 - The `arch` job sets `VELA_PACKAGE_LIBMPV` to the set's absolute path for
   `npm run build:arch` (that job does not go through `scripts/build.sh`) and
   runs the check on the package.
@@ -605,9 +603,24 @@ builds (the owner's ruling of 2026-11-16, `.agents/decisions.md`):
   Tauri. After signing/notarization it checks the app's signatures, staple,
   local-network declaration and DMG signature, then proves and plays the set
   inside the app mounted from the final DMG as above and reassesses
-  Gatekeeper before artifact upload.
+  Gatekeeper before uploading the `vela-macos` artifact.
+- No `bundle` leg gives `tauri-action` a tag or release name, so it only
+  builds. After `bundle` and `arch` pass all checks, `inventory` alone
+  attaches assets on a tag push: it requires exactly one DMG from
+  `vela-macos`, the three Linux bundles and both Windows installers, then
+  creates a missing draft with `--verify-tag` and the title `Vela <tag>`, or
+  reuses an existing draft. It refuses an already published release before
+  uploading anything. One `gh release upload --clobber` attaches the DMG,
+  Linux and Windows bundles, Arch package and `SHA256SUMS`. Manual runs,
+  including those targeting a tag, only produce workflow artifacts.
+  The former macOS `.app.tar.gz` release asset is no longer uploaded: it
+  duplicated the app in the DMG, was never in `SHA256SUMS`, and the DMG is
+  what the package checks prove.
 
-`tests/libmpv-packaging.test.mjs` holds those lines of the workflow as far as
+`tests/release-workflow.test.mjs` guards the attachment boundary and runs the
+inventory's upload script against a local `gh` stub for missing, draft and
+published releases, and missing or duplicate DMGs.
+`tests/libmpv-packaging.test.mjs` holds the packaging lines of the workflow as far as
 words can: a step that brought the set in, or left it out, without the names
 the test knows would get past it, so a change to either workflow still has to
 be read.

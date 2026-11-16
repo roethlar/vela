@@ -360,11 +360,9 @@ jobs:
       # are absent rather than empty on a secretless run. Nothing signs the
       # Windows installers.
       #
-      # The Linux and Windows legs build and do NOT attach: bundles go to the draft
-      # release from the inventory job, after the libmpv check below has
-      # passed every one of them. (tauri-action uploads in the step that
-      # builds, which would put a bundle on the draft before it was checked.)
-      # macOS attaches here as before, and so creates the draft.
+      # No leg creates or touches a release: tauri-action uploads in the step
+      # that builds, before the checks below. Only inventory creates the draft
+      # and attaches the checked packages, after every package job passes.
       #
       # NO_STRIP and APPIMAGE_EXTRACT_AND_RUN are for the AppImage tooling and
       # mean nothing elsewhere: linuxdeploy's own `strip` must not rewrite the
@@ -378,11 +376,6 @@ jobs:
         with:
           # macOS dylibs are framework sign targets; notices stay resources.
           args: ${{ matrix.target && format('--target {0} --bundles app,dmg --config .libmpv/tauri.libmpv-macos.conf.json', matrix.target) || (matrix.os == 'windows-latest' && '--bundles nsis,msi --config src-tauri/tauri.libmpv-windows.conf.json' || (matrix.os == 'ubuntu-22.04' && '--config src-tauri/tauri.libmpv.conf.json' || '')) }}
-          # Only create/attach a release when triggered by a v* tag, and never
-          # from the Linux or Windows legs (see above).
-          tagName: ${{ startsWith(github.ref, 'refs/tags/') && matrix.os == 'macos-latest' && github.ref_name || '' }}
-          releaseName: ${{ startsWith(github.ref, 'refs/tags/') && matrix.os == 'macos-latest' && format('Vela {0}', github.ref_name) || '' }}
-          releaseDraft: true
 
       - name: Require the universal macOS DMG
         if: runner.os == 'macOS'
@@ -603,7 +596,7 @@ jobs:
       contents: write
     steps:
       # Only what is released. The libmpv set travels between jobs as an
-      # artifact too, and is inside the Linux and Windows packages, not beside them.
+      # artifact too, and is inside the packages, not beside them.
       - uses: actions/download-artifact@v8
         with:
           pattern: vela-*
@@ -645,16 +638,23 @@ jobs:
           if-no-files-found: error
           path: artifacts/SHA256SUMS
 
-      # The draft exists by now: the macOS leg of `bundle` made
-      # it. The Linux and Windows bundles are attached here, so
-      # that none reaches the draft before its libmpv check has passed.
-      - name: Attach the checked Linux and Windows bundles, Arch package and checksums to tagged draft
-        if: startsWith(github.ref, 'refs/tags/')
+      # Only a tag push creates or reuses a draft, after all package checks.
+      # Never change a published release. macOS releases only the checked DMG;
+      # the duplicate .app.tar.gz is not an artifact or a release asset.
+      - name: Prepare tagged draft and attach checked packages and checksums
+        if: startsWith(github.ref, 'refs/tags/') && github.event_name == 'push'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
+          mapfile -d '' macos < <(
+            find artifacts/vela-macos -type f -name '*.dmg' -print0 | sort -z
+          )
+          [ "${#macos[@]}" -eq 1 ] || {
+            echo "Expected one universal macOS DMG; found ${#macos[@]}." >&2
+            exit 1
+          }
           mapfile -d '' linux < <(
             find artifacts/vela-linux -type f \
               \( -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \) -print0 | sort -z
@@ -671,7 +671,20 @@ jobs:
             echo "Expected the MSI and NSIS installers; found ${#windows[@]} Windows bundles." >&2
             exit 1
           }
+
+          if draft="$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft')"; then
+            [ "$draft" = true ] || {
+              echo "Refusing to upload to a published release: $GITHUB_REF_NAME" >&2
+              exit 1
+            }
+          else
+            # A failed lookup cannot authorize an upload: creation must succeed
+            # (and fails if a release already exists or the tag is absent).
+            gh release create "$GITHUB_REF_NAME" --draft --verify-tag \
+              --title "Vela $GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY"
+          fi
           gh release upload "$GITHUB_REF_NAME" \
+            "${macos[@]}" \
             "${linux[@]}" \
             "${windows[@]}" \
             artifacts/vela-arch/*.pkg.tar.zst \

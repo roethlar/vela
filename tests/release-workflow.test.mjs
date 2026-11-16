@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import fs from "node:fs";
 import { readFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -96,6 +99,208 @@ function releaseJob(source, name) {
   return body.split('\n').filter((line) => !/^\s*#/.test(line)).join('\n');
 }
 
+function bundleBuildsOnly(source) {
+  const bundle = releaseJob(source, 'bundle');
+  assert.match(bundle, /uses: tauri-apps\/tauri-action@v1/);
+  assert.doesNotMatch(bundle, /^\s*(?:tagName|releaseName|releaseDraft|releaseId):/m,
+    'no bundle leg may give tauri-action release inputs');
+}
+
+function releaseAttachmentScript(source) {
+  const inventory = releaseJob(source, 'inventory');
+  assert.match(inventory, /^    needs: \[bundle, arch\]$/m, 'inventory waits for all package checks');
+  assert.match(inventory, /    permissions:\n      contents: write\n/);
+  assert.doesNotMatch(inventory, /continue-on-error:|if:.*always\(/);
+  const releaseSteps = inventory.split(/(?=^      - )/m).filter((step) => /gh release /.test(step));
+  assert.equal(releaseSteps.length, 1, 'release lookup, creation and upload share one gated step');
+  const step = releaseSteps[0];
+  assert.match(step, /^        if: startsWith\(github\.ref, 'refs\/tags\/'\) && github\.event_name == 'push'$/m,
+    'only tag pushes may touch a release; manual runs, even on tags, do not');
+  assert.match(step, /^        shell: bash$/m);
+  assert.match(step, /GH_TOKEN: \$\{\{ secrets\.GITHUB_TOKEN \}\}/);
+  const script = step.split('        run: |\n')[1];
+  assert.ok(script, 'release attachment has a Bash script');
+  assert.match(script, /^          set -euo pipefail$/m, 'release errors stop the upload');
+  return script.replace(/^ {10}/gm, '');
+}
+
+test('bundle builds without release inputs and inventory alone attaches on tag pushes', () => {
+  bundleBuildsOnly(workflow);
+  releaseAttachmentScript(workflow);
+});
+
+for (const key of ['tagName', 'releaseName', 'releaseDraft', 'releaseId']) {
+  test(`bundle release guard rejects restored ${key} (red proof)`, () => {
+    const token = '          # macOS dylibs are framework sign targets; notices stay resources.\n';
+    assert.ok(workflow.includes(token));
+    const mutant = workflow.replace(token, `${token}          ${key}: forbidden\n`);
+    assert.throws(() => bundleBuildsOnly(mutant), /no bundle leg may give tauri-action release inputs/);
+  });
+}
+
+for (const [label, before, after] of [
+  ['tag condition', "startsWith(github.ref, 'refs/tags/') && github.event_name == 'push'", "github.event_name == 'push'"],
+  ['manual-run exclusion', " && github.event_name == 'push'", ''],
+]) {
+  test(`inventory guard rejects removed ${label} (red proof)`, () => {
+    assert.ok(workflow.includes(before));
+    assert.throws(() => releaseAttachmentScript(workflow.replace(before, after)), /only tag pushes may touch a release/);
+  });
+}
+
+// Exercise the actual inventory script with real find/mapfile/Bash and a local
+// gh stand-in. No token, GitHub connection or built package is needed. This job
+// runs on Ubuntu and uses GNU find/sort plus Bash 4's mapfile.
+const inventoryShellTest = { skip: process.platform !== 'linux' && 'inventory runs on Linux' };
+const releaseTag = 'v1.0.68';
+const releaseRepo = 'fixture/vela';
+const checkedAssets = [
+  'artifacts/vela-macos/nested bundles/Vela_1.0.68_universal.dmg',
+  'artifacts/vela-linux/Vela.AppImage',
+  'artifacts/vela-linux/Vela.deb',
+  'artifacts/vela-linux/Vela.rpm',
+  'artifacts/vela-windows/Vela-setup.exe',
+  'artifacts/vela-windows/Vela.msi',
+  'artifacts/vela-arch/vela.pkg.tar.zst',
+  'artifacts/SHA256SUMS',
+];
+
+function runReleaseAttachment(source, { state = 'draft', dmgCount = 1 } = {}) {
+  const script = releaseAttachmentScript(source);
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vela-release-inventory-'));
+  try {
+    const bin = path.join(root, 'bin');
+    fs.mkdirSync(bin);
+    const log = path.join(root, 'gh-calls');
+    fs.writeFileSync(log, '');
+    fs.writeFileSync(path.join(bin, 'gh'), `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\0' "$@" >> "$PL8_GH_LOG"
+printf '\\n' >> "$PL8_GH_LOG"
+case "$1 $2" in
+  'release view')
+    case "$PL8_RELEASE_STATE" in
+      missing|create-fails) exit 1 ;;
+      draft) printf 'true\\n' ;;
+      published) printf 'false\\n' ;;
+      *) exit 99 ;;
+    esac ;;
+  'release create') [ "$PL8_RELEASE_STATE" = missing ] ;;
+  'release upload') ;;
+  *) exit 99 ;;
+esac
+`, { mode: 0o755 });
+    const files = [
+      ...checkedAssets.slice(1),
+      // A duplicate app archive must not be selected even if one is present.
+      'artifacts/vela-macos/Vela_1.0.68_universal.app.tar.gz',
+      ...Array.from({ length: dmgCount }, (_, i) => i === 0 ? checkedAssets[0] : `artifacts/vela-macos/extra-${i}.dmg`),
+    ];
+    for (const file of files) {
+      const target = path.join(root, file);
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, 'checked fixture\n');
+    }
+    const result = spawnSync('bash', ['-e', '-o', 'pipefail', '-s'], {
+      cwd: root,
+      input: script,
+      encoding: 'utf8',
+      timeout: 10_000,
+      env: {
+        ...process.env,
+        PATH: `${bin}${path.delimiter}${process.env.PATH}`,
+        BASH_ENV: '',
+        GH_TOKEN: 'fixture-token',
+        GITHUB_REF_NAME: releaseTag,
+        GITHUB_REPOSITORY: releaseRepo,
+        PL8_GH_LOG: log,
+        PL8_RELEASE_STATE: state,
+      },
+    });
+    assert.ifError(result.error);
+    assert.equal(result.signal, null, 'attachment script must exit normally');
+    const calls = fs.readFileSync(log, 'utf8').split('\n').filter(Boolean)
+      .map((line) => line.split('\0').slice(0, -1));
+    return { ...result, calls };
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+
+function assertCheckedUpload(source, state) {
+  const result = runReleaseAttachment(source, { state });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(result.calls.map((call) => call[1]),
+    state === 'missing' ? ['view', 'create', 'upload'] : ['view', 'upload'],
+    'a missing release must be created before upload; an existing draft is reused');
+  assert.deepEqual(result.calls[0], ['release', 'view', releaseTag, '--repo', releaseRepo, '--json', 'isDraft', '--jq', '.isDraft']);
+  if (state === 'missing') {
+    assert.deepEqual(result.calls[1], ['release', 'create', releaseTag, '--draft', '--verify-tag', '--title', `Vela ${releaseTag}`, '--repo', releaseRepo],
+      'creation keeps the draft, verified tag and existing release title');
+  }
+  const upload = result.calls.at(-1);
+  assert.deepEqual(upload.slice(0, 3), ['release', 'upload', releaseTag]);
+  assert.deepEqual(upload.slice(-3), ['--repo', releaseRepo, '--clobber']);
+  // GNU sort follows the runner's locale; only membership matters here.
+  assert.deepEqual(upload.slice(3, -3).toSorted(), checkedAssets.toSorted(),
+    'upload contains the checked DMG and all other packages and checksums, with no app archive');
+}
+
+function assertPublishedRefused(source) {
+  const result = runReleaseAttachment(source, { state: 'published' });
+  assert.notEqual(result.status, 0, 'a published release must stop the upload');
+  assert.match(result.stderr, /Refusing to upload to a published release/);
+  assert.deepEqual(result.calls.map((call) => call[1]), ['view'], 'a published release must not be changed');
+}
+
+function assertDmgCountRefused(source, dmgCount) {
+  const result = runReleaseAttachment(source, { dmgCount });
+  assert.notEqual(result.status, 0, 'a DMG count other than one must stop the upload');
+  assert.match(result.stderr, new RegExp(`Expected one universal macOS DMG; found ${dmgCount}`));
+  assert.deepEqual(result.calls, [], 'bad DMG counts fail before touching the release');
+}
+
+for (const state of ['missing', 'draft']) {
+  test(`inventory uploads only checked assets to a ${state} release`, inventoryShellTest, () => {
+    assertCheckedUpload(workflow, state);
+  });
+}
+
+test('inventory refuses an already published release', inventoryShellTest, () => {
+  assertPublishedRefused(workflow);
+});
+
+test('inventory does not upload if release creation fails after a failed lookup', inventoryShellTest, () => {
+  const result = runReleaseAttachment(workflow, { state: 'create-fails' });
+  assert.notEqual(result.status, 0);
+  assert.deepEqual(result.calls.map((call) => call[1]), ['view', 'create']);
+});
+
+for (const count of [0, 2]) {
+  test(`inventory refuses ${count} DMGs`, inventoryShellTest, () => {
+    assertDmgCountRefused(workflow, count);
+  });
+}
+
+for (const [label, pattern, verify, reason] of [
+  ['draft creation', /^            gh release create[^\n]*\n              --title[^\n]*\n/m,
+    (source) => assertCheckedUpload(source, 'missing'), /missing release must be created before upload/],
+  ['published release refusal', /            \[ "\$draft" = true \] \|\| \{\n[\s\S]*?            \}\n/,
+    assertPublishedRefused, /published release must stop the upload/],
+  ...[0, 2].map((count) => [`DMG count check (${count})`, /          \[ "\$\{#macos\[@\]\}" -eq 1 \] \|\| \{\n[\s\S]*?          \}\n/,
+    (source) => assertDmgCountRefused(source, count), /DMG count other than one must stop the upload/]),
+  ['DMG upload', /^            "\$\{macos\[@\]\}" \\\n/m,
+    (source) => assertCheckedUpload(source, 'draft'), /upload contains the checked DMG/],
+]) {
+  test(`inventory guard rejects removed ${label} (red proof)`, inventoryShellTest, () => {
+    assert.match(workflow, pattern, 'mutation must apply');
+    // A no-op keeps the if/else syntactically valid when its rule is removed.
+    const mutant = workflow.replace(pattern, label === 'DMG upload' ? '' : '            :\n');
+    assert.throws(() => verify(mutant), reason);
+    verify(workflow);
+  });
+}
+
 function windowsReleaseContracts(source) {
   const set = releaseJob(source, 'libmpv-windows');
   const ciSet = releaseJob(ci, 'libmpv-windows');
@@ -124,9 +329,8 @@ function windowsReleaseContracts(source) {
   assert.ok(bundle.indexOf(build) < bundle.indexOf(check), 'installer check follows build');
   assert.ok(bundle.indexOf(check) < bundle.indexOf(upload), 'installer check precedes upload');
   assert.doesNotMatch(bundle, /continue-on-error:|if:.*always\(/, 'package failures cannot be ignored');
-  for (const [key, value] of [['tagName', 'github.ref_name'], ['releaseName', "format('Vela {0}', github.ref_name)"]]) {
-    assert.ok(bundle.includes(`${key}: \${{ startsWith(github.ref, 'refs/tags/') && matrix.os == 'macos-latest' && ${value} || '' }}`), 'only macOS may attach before package checks');
-  }
+  assert.doesNotMatch(bundle, /^\s*(?:tagName|releaseName|releaseDraft|releaseId):/m,
+    'no bundle leg creates or attaches to a release');
   const inventory = releaseJob(source, 'inventory');
   assert.match(inventory, /needs: \[bundle, arch\]/, 'inventory waits for package checks');
   assert.ok(inventory.includes("\\( -name '*.msi' -o -name '*-setup.exe' \\) -print0 | sort -z"), 'inventory collects both checked Windows formats');
@@ -204,7 +408,6 @@ test('Windows release guards reject a missing overlay, download, check or depend
     ['- name: Fetch the libmpv set (Windows)', '- name: Removed Windows download', /download feeds/],
     ['python -B packaging/libmpv/check-package-windows.py --set .libmpv/out/libmpv-windows-x86_64 --bundle-dir', 'echo skipped --bundle-dir', /installer must be checked/],
     ['needs: [npm-audit, cargo-audit, libmpv, libmpv-windows, libmpv-macos]', 'needs: [npm-audit, cargo-audit, libmpv]', /waits for all three sets/],
-    ["matrix.os == 'macos-latest' && github.ref_name", "matrix.os != 'ubuntu-22.04' && github.ref_name", /only macOS may attach/],
     ['            "${windows[@]}" \\\n', '', /attaches checked Windows/],
   ];
   for (const [before, after, reason] of breaks) {

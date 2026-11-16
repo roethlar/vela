@@ -441,16 +441,8 @@ test('the release workflow puts the set into every Linux package and checks each
   // that builds, which is before the check), and the inventory job, which
   // needs both package jobs, attaches the three bundles. The AppImage
   // tooling is told not to strip, so that it leaves the set as it is.
-  has(
-    bundle,
-    "tagName: ${{ startsWith(github.ref, 'refs/tags/') && matrix.os == 'macos-latest' && github.ref_name || '' }}\n",
-    'the Linux leg does not attach to the release',
-  );
-  has(
-    bundle,
-    "releaseName: ${{ startsWith(github.ref, 'refs/tags/') && matrix.os == 'macos-latest' && format('Vela {0}', github.ref_name) || '' }}\n",
-    'nor name one',
-  );
+  assert.doesNotMatch(bundle, /^\s*(?:tagName|releaseName|releaseDraft|releaseId):/m,
+    'no bundle leg creates or attaches to a release');
   assert.match(bundle, /uses: tauri-apps\/tauri-action@v1\n\s+env:\n(?:\s+[A-Z_]+: .*\n)*?\s+NO_STRIP: '1'\n/);
   assert.ok(
     bundle.indexOf('- uses: tauri-apps/tauri-action@v1') < bundle.indexOf('- name: Require the libmpv set in every Linux bundle'),
@@ -458,7 +450,7 @@ test('the release workflow puts the set into every Linux package and checks each
   );
   const attach = jobOf(release, 'inventory');
   has(attach, "\\( -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \\) -print0 | sort -z\n", 'the inventory finds the Linux bundles');
-  has(attach, '          gh release upload "$GITHUB_REF_NAME" \\\n            "${linux[@]}" \\\n', 'and attaches them');
+  has(attach, '          gh release upload "$GITHUB_REF_NAME" \\\n            "${macos[@]}" \\\n            "${linux[@]}" \\\n', 'and attaches them with the checked macOS DMG');
 
   // No package is ever checked as one that must NOT hold the set, and the
   // set is not itself a released file: the inventory takes `vela-*` only.

@@ -125,7 +125,11 @@ Vela's own window on Linux with Wayland.
 
 Native packages are attached for macOS, Windows, Debian/Ubuntu, RPM-based
 Linux, Arch Linux, and AppImage users. `SHA256SUMS` covers every promised
-package.
+package. All packages are attached to a tagged draft only after every package
+job's checks pass; a re-run refuses to change an already published release.
+Manual workflow runs only produce workflow artifacts. The macOS download is
+the checked universal DMG. The duplicate `.app.tar.gz`, which was never in
+`SHA256SUMS`, is no longer released; it contained the same app as the DMG.
 
 The macOS app is signed and notarized. The Windows installers are not signed
 in this release (those of 1.0.60 were): Windows SmartScreen shows "Windows
