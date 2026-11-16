@@ -163,6 +163,15 @@ pub(crate) fn allow_restoration(recent: &mut VecDeque<Instant>, now: Instant) ->
     true
 }
 
+/// Whether a draw shows black rather than mpv's frame: a hold in force
+/// when the draw ends, or one in force when it began. mpv reads its colour
+/// targets when a render starts, so a frame begun under a hold can carry
+/// the previous range's encoding even if the switch is released, and the
+/// layer retagged, before the draw is flushed.
+pub(crate) fn draws_black(held_at_start: u64, held_now: u64) -> bool {
+    held_at_start != 0 || held_now != 0
+}
+
 /// Like Linux's HDR controller, acknowledgement alone is insufficient:
 /// a conditional profile can have replaced the value in that same core
 /// iteration. Reobserve after each reply, using a fresh registration, and
@@ -253,6 +262,14 @@ impl Targets {
 mod tests {
     use super::*;
     use std::cell::RefCell;
+
+    #[test]
+    fn a_draw_begun_or_ended_under_a_hold_is_black() {
+        assert!(!draws_black(0, 0));
+        assert!(draws_black(3, 0), "released while mpv rendered");
+        assert!(draws_black(0, 4), "held while mpv rendered");
+        assert!(draws_black(3, 4), "released and held again");
+    }
 
     #[test]
     fn pq_bt2020_uses_edr() {

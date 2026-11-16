@@ -5,7 +5,7 @@
 #![allow(deprecated)] // CAOpenGLLayer is the intentionally selected render API.
 
 use super::libmpv::{Player, Renderer};
-use super::session::macos_hdr::{choose_surface, Range, SurfaceFormat};
+use super::session::macos_hdr::{choose_surface, draws_black, Range, SurfaceFormat};
 use objc2::{
     define_class, msg_send,
     rc::{Allocated, Retained},
@@ -476,11 +476,14 @@ impl DrawingState {
             drawing.last_fbo = fbo;
         }
         let renderer = drawing.renderer.as_ref().unwrap();
+        // Before mpv renders: a release during the render must not show a
+        // frame encoded for the previous range (draws_black).
+        let held_at_start = self.held.load(Ordering::Acquire);
         renderer
             .0
             .draw_into(drawing.last_fbo, width, height, self.gl.format.depth())?;
         let held = self.held.load(Ordering::Acquire);
-        if held != 0 {
+        if draws_black(held_at_start, held) {
             // mpv may leave FBO zero bound. Its documented post-render state
             // has colour writes enabled; disable scissor and clear the whole
             // CA target. Black has the same meaning under both colour tags.

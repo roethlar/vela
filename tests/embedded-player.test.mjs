@@ -1049,3 +1049,13 @@ test('the shipped library is tested itself, in every full embedded E2E run', () 
   assert.match(runner, /function runStep\(cmd, args, env = \{\}\) \{\s+if \(isWindows && cmd === 'npm'\) \(\{ command: cmd, args \} = npmCommand\(args\)\);\s+const res = spawnSync\(cmd, args, \{ stdio: 'inherit', cwd: repoRoot, env: \{ \.\.\.process\.env, \.\.\.env \} \}\);\s+if \(res\.status !== 0\) \{[\s\S]{0,80}process\.exit\(1\);/);
   assert.match(read('tests/e2e/README.md'), /`npm run test:libmpv`/);
 });
+
+test('a macOS draw begun under a colour hold stays black if the hold is released while mpv renders', () => {
+  // The rule is `draws_black` (macos_hdr.rs, unit-tested); this holds its
+  // wiring: the hold is read before mpv renders and again after, and both
+  // readings decide the clear.
+  assert.match(
+    code(read('src-tauri/src/player/embedded/macos_gl.rs')),
+    /let held_at_start = self\.held\.load\(Ordering::Acquire\);\s+renderer\s+\.0\s+\.draw_into\([^;]*\)\?;\s+let held = self\.held\.load\(Ordering::Acquire\);\s+if draws_black\(held_at_start, held\) \{/,
+  );
+});
