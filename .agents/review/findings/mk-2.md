@@ -3,7 +3,7 @@
 **Severity**: MEDIUM — an optional feature is fused into the mandatory request,
 so a server that rejects the marker parameter loses playback entirely rather
 than losing markers.
-**Status**: In progress
+**Status**: Verified
 **Branch**: none — repo policy is direct commits on `main` (AGENTS.md Git
 Safety leaves branch policy to the repo)
 **Commit**: `2971672` (version 1.0.7)

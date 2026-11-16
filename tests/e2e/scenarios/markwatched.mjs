@@ -11,6 +11,8 @@ let mock; // seed → run → cleanup share the module instance
 
 export default {
   name: 'markwatched',
+  rows: [],
+  noRows: 'mark watched and unwatched; plays nothing',
 
   async seed({ configRoot }) {
     mock = await startMockJellyfin(); // default single unwatched movie, no stream

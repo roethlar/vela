@@ -3,9 +3,18 @@ Vela's intro / credits / commercial skip control.
 
 Vela resolves the marker ranges the user's own media server publishes for the
 item being played, writes them to a private per-launch payload file, and hands
-this script the path on the CHILD PROCESS ENVIRONMENT ONLY. The path never
-travels in mpv's script-opts list: that list is comma-split, and Windows and
-user paths do not survive it (the same lesson the auth-include path taught).
+this script the path. How depends on the player:
+
+  * mpv as its own program gets the path on its CHILD PROCESS ENVIRONMENT
+    (VELA_MARKERS_PAYLOAD), never on its command line.
+  * A player inside Vela's own process has no environment of its own, and
+    setting the variable on Vela itself would leak it to every later child.
+    It passes the path as the script option `vela-markers-payload` instead.
+
+The option wins when both are present. It must be given with
+--script-opts-append, one option per use: --script-opts=a=b,c=d is
+comma-split, and Windows and user paths do not survive that (the same lesson
+the auth-include path taught). An appended option is taken whole.
 
 Nothing here is upstream mpv code. Vela-authored, MIT, like the rest of the
 repo — see PROVENANCE.md.
@@ -15,8 +24,16 @@ the filename and silently ignore the dashed form Vela passes):
   --script-opts-append=vela-markers-intro-policy=off|button|autoskip
   --script-opts-append=vela-markers-credits-policy=off|button|autoskip
   --script-opts-append=vela-markers-commercial-policy=off|button|autoskip
+  --script-opts-append=vela-markers-payload=<path>     (in-process player only)
+  --script-opts-append=vela-markers-draw=yes|no        (default yes)
 
-Vela always passes all three explicitly. The "off" defaults below are therefore
+With `draw=no` the script draws no button and takes no click: a player inside
+Vela's own process gets no pointer, and Vela's page shows the button instead.
+A marker is then armed all the same (`user-data/vela-markers/active`, the
+`activate-skip` binding and the Space binding), without waiting for an OSD
+size, and `button-bounds` stays empty.
+
+Vela always passes all three policies explicitly. The "off" defaults below are therefore
 unreachable in a real launch; they exist so that loading this script by hand,
 or with a policy Vela never sent, cannot make the player seek without being
 told to. An unrecognized value is likewise treated as off — the player is the
@@ -32,6 +49,10 @@ local options = {
     ["intro-policy"] = "off",
     ["credits-policy"] = "off",
     ["commercial-policy"] = "off",
+    -- Path of the payload file; empty means "look in the environment".
+    ["payload"] = "",
+    -- Whether the script draws the skip button itself (see the header).
+    ["draw"] = true,
 }
 require "mp.options".read_options(options, "vela-markers")
 
@@ -70,7 +91,11 @@ end
 -- crash before this point can leave only owner-private marker timings behind,
 -- which the next launch's prefix prune collects.
 local function load_payload()
-    local path = os.getenv("VELA_MARKERS_PAYLOAD")
+    -- The script option first, the environment second (see the header).
+    local path = options["payload"]
+    if type(path) ~= "string" or path == "" then
+        path = os.getenv("VELA_MARKERS_PAYLOAD")
+    end
     if not path or path == "" then
         return {}
     end
@@ -218,6 +243,20 @@ local function draw_button(marker)
     return true
 end
 
+-- Arms a marker without drawing it, for `draw=no`: the state and the Space
+-- binding only. No overlay, no mouse area, no OSD size needed.
+local function arm_quietly(marker)
+    if not button_visible then
+        mp.add_forced_key_binding("SPACE", SPACE_BINDING, activate_skip)
+    end
+    button_visible = true
+    mp.set_property_native("user-data/vela-markers/active", marker.kind)
+    return true
+end
+
+-- What arms a marker: the drawn button, or the quiet arm.
+local arm = options["draw"] and draw_button or arm_quietly
+
 local function marker_at(position)
     for _, marker in ipairs(markers) do
         if position >= marker.start_s and position < marker.end_s then
@@ -259,7 +298,7 @@ local function on_position(_, position)
         mp.osd_message("Skipped " .. marker.kind, 1.5)
         return
     end
-    if armed ~= marker and draw_button(marker) then
+    if armed ~= marker and arm(marker) then
         armed = marker
     end
 end
@@ -286,7 +325,7 @@ if #markers > 0 then
     -- the same rectangle when the window is resized or fullscreened.
     mp.observe_property("osd-dimensions", "native", function()
         if armed then
-            draw_button(armed)
+            arm(armed)
         end
     end)
     mp.register_event("end-file", reset)

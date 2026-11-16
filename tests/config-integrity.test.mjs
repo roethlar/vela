@@ -1,13 +1,23 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
+import { parse } from "svelte/compiler";
+import ts from "typescript";
 
 const config = fs.readFileSync("src-tauri/src/config.rs", "utf8");
 const connections = fs.readFileSync("src-tauri/src/connections.rs", "utf8");
 const commands = fs.readFileSync("src-tauri/src/commands.rs", "utf8");
 const durable = fs.readFileSync("src-tauri/src/durable.rs", "utf8");
 const lib = fs.readFileSync("src-tauri/src/lib.rs", "utf8");
-const playback = fs.readFileSync("src-tauri/src/playback.rs", "utf8");
+// One play's supervision lives in playback.rs; how a launch is described and
+// started lives in the player module (.agents/plans/embedded-player.md, Slice
+// 1). The assertions below that were written against playback.rs now read all
+// of it together, so a property may not hide by moving between those files.
+const playerLaunch = fs.readFileSync("src-tauri/src/player/launch.rs", "utf8");
+const playerExternal = fs.readFileSync("src-tauri/src/player/external.rs", "utf8");
+const playerHandle = fs.readFileSync("src-tauri/src/player/mod.rs", "utf8");
+const playbackSupervision = fs.readFileSync("src-tauri/src/playback.rs", "utf8");
+const playback = [playbackSupervision, playerLaunch, playerExternal, playerHandle].join("\n");
 const playlists = fs.readFileSync("src-tauri/src/playlists.rs", "utf8");
 const plexApi = fs.readFileSync("src-tauri/src/plex_api.rs", "utf8");
 const plexLibrary = fs.readFileSync("src-tauri/src/plex_library.rs", "utf8");
@@ -17,6 +27,855 @@ const tauriConfig = fs.readFileSync("src-tauri/tauri.conf.json", "utf8");
 const backend = `${commands}\n${playback}`;
 const page = fs.readFileSync("src/App.svelte", "utf8");
 const mockPlex = fs.readFileSync("tests/e2e/mockplex.mjs", "utf8");
+
+// Settings persistence: one regression test per value control. Like the
+// Player window tests, run the component's own scripts and parsed bindings
+// against a backend whose write application and reply delivery are separate.
+// These are not mounted-webview tests.
+const settingsControls = [
+  { label: "Video player", id: "video-player", group: "videoPlayer", key: "player", initial: "embedded", choice: "external", newer: "embedded" },
+  { label: "Continue Playing", id: "continue-playing", group: "continuation", key: "mode", initial: "on", choice: "off", newer: "only-tv" },
+  { label: "mpv path (blur, Browse and Clear)", id: "mpv-path", group: "path", initial: "/stored/mpv", choice: "/chosen/mpv", newer: "/newer/mpv" },
+  { label: "Advanced mpv options", id: "mpv-extra", group: "advanced", key: "extraArgs", initial: "--profile=fast", choice: "--osd-level=3", newer: "--video-sync=display-resample" },
+  { label: "Use my own mpv config", group: "advanced", key: "useOwnConfig", initial: true, choice: false, newer: true },
+  { label: "Black-bar cropping", id: "mpv-autocrop", group: "advanced", key: "autocrop", initial: "auto", choice: "off", newer: "manual" },
+  { label: "Playback quality", id: "playback-quality", group: "advanced", key: "playbackQuality", initial: "automatic", choice: "original", newer: "test-tier" },
+  { label: "Skip intros", id: "skip-intros", group: "advanced", key: "skipIntros", initial: "autoskip", choice: "button", newer: "off" },
+  { label: "Skip credits", id: "skip-credits", group: "advanced", key: "skipCredits", initial: "autoskip", choice: "button", newer: "off" },
+  { label: "Skip commercials", id: "skip-commercials", group: "advanced", key: "skipCommercials", initial: "autoskip", choice: "button", newer: "off" },
+  { label: "Duplicate playback source", name: "playback-source-policy", group: "preferences", key: "policy", initial: "fastest", choice: "best", newer: "compatible" },
+  { label: "Resolution override", id: "playback-resolution-override", group: "preferences", key: "resolutionOverride", initial: "2160p", choice: "", newer: "1080p" },
+  { label: "HDR override", id: "playback-hdr-override", group: "preferences", key: "hdrOverride", initial: "enabled", choice: "", newer: "disabled" },
+];
+
+function settingsApp(source = fs.readFileSync("src/lib/Settings.svelte", "utf8")) {
+  const ast = parse(source, { modern: true });
+  const elements = [];
+  const errorRenders = [];
+  function walk(node, label) {
+    if (!node || typeof node !== "object") return;
+    if (node.type === "RegularElement") {
+      if (node.name === "label") label = node;
+      elements.push({ node, label });
+    }
+    if (node.type === "RenderTag" && node.expression.callee?.name === "saveError") {
+      errorRenders.push(source.slice(node.expression.arguments[0].start, node.expression.arguments[0].end));
+    }
+    for (const [key, value] of Object.entries(node)) if (key !== "parent") walk(value, label);
+  }
+  walk(ast.fragment);
+  const attribute = (node, name) => node.attributes.find((a) => a.type === "Attribute" && a.name === name);
+  const text = (a) => Array.isArray(a?.value) ? a.value.map((v) => v.data ?? "").join("") : "";
+  const expression = (a) => {
+    const tag = Array.isArray(a?.value) ? a.value[0] : a?.value;
+    return tag?.expression ? source.slice(tag.expression.start, tag.expression.end) : undefined;
+  };
+  const button = (name) => {
+    const found = elements.filter(({ node }) => node.name === "button" && expression(attribute(node, "onclick")) === name);
+    assert.equal(found.length, 1, `one button calls ${name}`);
+    return found[0].node;
+  };
+  const controls = settingsControls.map((spec) => {
+    const found = elements.filter(({ node, label }) => {
+      if (spec.id) return text(attribute(node, "id")) === spec.id;
+      if (spec.name) return text(attribute(node, "name")) === spec.name;
+      return node.name === "input" && label && source.slice(label.start, label.end).includes("Use my own mpv config");
+    });
+    assert.equal(found.length, 1, `one ${spec.label} control`);
+    const node = found[0].node;
+    const binding = node.attributes.find((a) => a.type === "BindDirective");
+    assert.ok(binding, `${spec.label} is bound`);
+    const bound = source.slice(binding.expression.start, binding.expression.end);
+    const edit = expression(attribute(node, "oninput")) ?? expression(attribute(node, "onchange")) ?? "() => {}";
+    const blur = expression(attribute(node, "onblur"));
+    const [setting, draft] = {
+      videoPlayer: ["videoPlayerSetting", "videoPlayerDraft"],
+      continuation: ["continuePlayingSetting", "continueDraft"],
+      path: ["mpvSetting", "mpvDraft"],
+      advanced: ["advancedSetting", "advancedDraft"],
+      preferences: ["playbackSetting", "playbackDraft"],
+    }[spec.group];
+    const errors = errorRenders.filter((expression) => expression.includes(`${draft}.feedback.error`));
+    assert.equal(errors.length, 1, `${spec.label} renders its error once`);
+    return `${JSON.stringify(spec.label)}: {
+      get value() { return ${bound}; },
+      // Svelte runs the explicit handler before its binding listener.
+      edit(value) { this.pending = (${edit})({ currentTarget: { value, checked: value } }); ${bound} = value; },
+      leave() { return ${blur ? `(${blur})()` : "this.pending"}; },
+      get busy() { return ${setting}.status.pending > 0; },
+      get error() { return ${errors[0]}; }
+    }`;
+  });
+  const program = ast.instance.content;
+  const instance = ts.createSourceFile("Settings.ts", source.slice(program.start, program.end), ts.ScriptTarget.ES2022, true);
+  const statements = instance.statements.filter((statement) => {
+    if (ts.isImportDeclaration(statement)) return false;
+    // Tests control when the opening's real load runs.
+    return !(ts.isExpressionStatement(statement) && statement.expression.getText(instance) === "load()");
+  });
+  const status = elements.find(({ node }) => text(attribute(node, "class")) === "save-status").node;
+  const statusTag = status.fragment.nodes.find((node) => node.type === "ExpressionTag");
+  const statusExpression = source.slice(statusTag.expression.start, statusTag.expression.end);
+  const statusValues = ["saving", "notSaved", "justSaved"].map((name) => {
+    const declaration = instance.statements.flatMap((statement) => statement.declarationList?.declarations ?? [])
+      .find((declaration) => declaration.name.getText(instance) === name);
+    assert.equal(declaration.initializer.expression.getText(instance), "$derived");
+    return `const ${name} = ${declaration.initializer.arguments[0].getText(instance)};`;
+  }).join("\n");
+  const actions = ["browseMpv", "clearMpvPath", "installMpv"].map((name) => `${name}: ${expression(attribute(button(name), "onclick"))}`);
+  const certificate = elements.find(({ node }) => text(attribute(node, "id")) === "player-skip-certificate-checks").node;
+  const certificateBinding = certificate.attributes.find((a) => a.type === "BindDirective").expression;
+  const certificateBound = source.slice(certificateBinding.start, certificateBinding.end);
+  const certificateChange = expression(attribute(certificate, "onchange"));
+  const certificateDisabled = expression(attribute(certificate, "disabled"));
+  const certificateError = errorRenders.find((expression) => expression.includes("tlsDraft.feedback.error"));
+  const code = ts.transpileModule([
+    source.slice(ast.module.content.start, ast.module.content.end),
+    "return () => {",
+    "const destroyed = []; const onDestroy = (fn) => destroyed.push(fn);",
+    ...statements.map((statement) => statement.getText(instance)),
+    `return { load, ${actions.join(",")}, insertPreset, controls: { ${controls.join(",")} },`,
+    `get saveStatus() { ${statusValues} return ${statusExpression}; },`,
+    `certificate: {
+      load: loadPlayerTls,
+      get checked() { return ${certificateBound}; },
+      get disabled() { return ${certificateDisabled}; },
+      get error() { return ${certificateError}; },
+      change(checked) {
+        const pending = (${certificateChange})({ currentTarget: { checked } });
+        ${certificateBound} = checked;
+        return pending;
+      }
+    },`,
+    "get err() { return err; }, get qualityTiers() { return qualityTiers; }, close() { destroyed.splice(0).forEach((fn) => fn()); } }; };",
+  ].join("\n"), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+  return (backend) => ({
+    open: new Function("invoke", "openDialog", "$state", "$derived", "$props", "onMount", "localStorage", code)(
+      backend.invoke, async () => "/browsed/mpv", (value) => value, (value) => value,
+      () => ({ onClose() {}, onChanged() {}, onLinkPlex() {} }), () => {}, { getItem() { return null; } },
+    ),
+  });
+}
+
+function settingsBackend(spec) {
+  const state = {
+    videoPlayer: { player: "external", offered: true, note: null },
+    path: "/stored/mpv", continuation: { mode: "only-tv" },
+    advanced: {
+      extraArgs: "", useOwnConfig: false, autocrop: "off", playbackQuality: "original",
+      skipIntros: "button", skipCredits: "button", skipCommercials: "button",
+      qualityTiers: [{ id: "test-tier", label: "Test tier", bitrateKbps: 1000, width: 1280, height: 720 }],
+    },
+    preferences: { policy: "best", resolutionOverride: null, hdrOverride: null },
+  };
+  if (spec.group === "path") state.path = spec.initial;
+  else state[spec.group][spec.key] = spec.initial;
+  const backend = { state, holdLoads: false, failLoads: false, holdWrites: false, refuse: false, failDisplay: false, loads: [], writes: [] };
+  const mpv = () => ({
+    available: true, path: state.path ?? "/automatic/mpv", configuredPath: state.path,
+    canAutoInstall: true, installCommand: null, installDescription: "test installer", installUrl: "",
+  });
+  const profile = { widthPx: 1920, heightPx: 1080, hdr: "disabled", evidence: "native" };
+  backend.value = () => (spec.group === "path" ? state.path : state[spec.group][spec.key]) ?? "";
+  backend.invoke = (command, args) => {
+    if (command === "get_sources") {
+      if (backend.failLoads) return Promise.reject(new Error("initial load failed"));
+      return backend.holdLoads ? new Promise((resolve) => backend.loads.push(() => resolve([]))) : Promise.resolve([]);
+    }
+    if (command === "check_mpv") return Promise.resolve(mpv());
+    if (command === "get_mpv_advanced") return Promise.resolve(structuredClone(state.advanced));
+    if (command === "get_continue_playing") return Promise.resolve(state.continuation.mode);
+    if (command === "get_mpv_window_mode") return Promise.resolve("remember");
+    if (command === "get_player") return Promise.resolve(structuredClone(state.videoPlayer));
+    if (command === "get_playback_preferences") {
+      if (backend.failDisplay) return Promise.reject(new Error("display refresh failed"));
+      return Promise.resolve({ ...state.preferences, detectedDisplay: profile, effectiveDisplay: profile });
+    }
+    return new Promise((resolve, reject) => {
+      const write = {
+        args, reply: undefined,
+        apply() {
+          if (command === "set_continue_playing") write.reply = state.continuation.mode = args.mode;
+          else if (command === "set_player") {
+            state.videoPlayer.player = backend.playerAnswer ?? args.player;
+            state.videoPlayer.note = state.videoPlayer.player === "embedded" ? "Restart Vela to start using it." : null;
+            write.reply = structuredClone(state.videoPlayer);
+          }
+          else if (command === "set_mpv_advanced") Object.assign(state.advanced, args, { extraArgs: args.extraArgs.trim() });
+          else if (command === "set_playback_preferences") Object.assign(state.preferences, args);
+          else if (command === "set_mpv_path" || command === "install_mpv") {
+            state.path = command === "install_mpv" ? "/installed/mpv" : args.path;
+            write.reply = mpv();
+          } else throw new Error(`unexpected command: ${command}`);
+        },
+        deliver(refused = false) {
+          if (refused) reject(new Error("settings save refused"));
+          else resolve(write.reply);
+        },
+      };
+      backend.writes.push(write);
+      if (!backend.holdWrites) {
+        if (!backend.refuse) write.apply();
+        write.deliver(backend.refuse);
+      }
+    });
+  };
+  return backend;
+}
+
+const settingsTurn = () => new Promise((resolve) => setImmediate(resolve));
+
+test("Settings choices use the new DOM value before binding (assignment-removal red-proof)", async () => {
+  const source = fs.readFileSync("src/lib/Settings.svelte", "utf8");
+  const mutant = source.replace("    draft.value[key] = value;\n", "");
+  assert.notEqual(mutant, source, "the mutation must remove the handler's binding assignment");
+  for (const spec of settingsControls.filter((control) => control.id !== "mpv-path" && control.id !== "mpv-extra")) {
+    const savesChoice = async (source) => {
+      const backend = settingsBackend(spec);
+      const a = settingsApp(source)(backend).open();
+      try {
+        await a.load();
+        a.controls[spec.label].edit(spec.choice);
+        await a.controls[spec.label].leave();
+        assert.equal(backend.value(), spec.choice, `${spec.label}: the handler must save the new DOM value`);
+      } finally {
+        a.close();
+      }
+    };
+    await savesChoice(source);
+    await assert.rejects(() => savesChoice(mutant), { name: "AssertionError", message: /new DOM value/ });
+  }
+});
+
+const groupedSettings = [
+  { group: "advanced", first: "Use my own mpv config", second: "Black-bar cropping", sibling: "Advanced mpv options" },
+  { group: "preferences", first: "Duplicate playback source", second: "HDR override", sibling: "Resolution override" },
+];
+
+for (const { group, first, second, sibling } of groupedSettings) {
+  const firstSpec = settingsControls.find((control) => control.label === first);
+  const secondSpec = settingsControls.find((control) => control.label === second);
+  const siblingSpec = settingsControls.find((control) => control.label === sibling);
+
+  test(`Settings ${group}: grouped saves wait for the accepted initial load and preserve siblings`, async () => {
+    const backend = settingsBackend(siblingSpec);
+    const app = settingsApp()(backend);
+    backend.holdLoads = true;
+    const a = app.open();
+    const loadingA = a.load();
+    a.controls[first].edit(firstSpec.initial);
+    const saving = a.controls[first].leave();
+    a.close();
+    const b = app.open();
+    const loadingB = b.load();
+    await settingsTurn();
+    assert.equal(backend.writes.length, 0, "no grouped write may guess the unloaded siblings");
+    backend.loads.shift()();
+    await loadingA;
+    await settingsTurn();
+    assert.equal(backend.writes.length, 0, "an obsolete load must not release the waiting write");
+    backend.loads.shift()();
+    await loadingB;
+    await saving;
+    assert.equal(backend.state[group][firstSpec.key], firstSpec.initial);
+    assert.equal(backend.value(), siblingSpec.initial, "an untouched nondefault sibling survives");
+    assert.equal(b.controls[sibling].value, siblingSpec.initial);
+    b.close();
+  });
+
+  test(`Settings ${group}: queued sibling edits compose after success or refusal across openings`, async () => {
+    for (const reopen of [true, false]) for (const refuse of [false, true]) {
+      const backend = settingsBackend(siblingSpec);
+      const app = settingsApp()(backend);
+      const a = app.open();
+      await a.load();
+      backend.holdWrites = true;
+      a.controls[first].edit(firstSpec.initial);
+      const savingA = a.controls[first].leave();
+      await settingsTurn();
+      if (reopen) a.close();
+      const b = reopen ? app.open() : a;
+      if (reopen) await b.load();
+      b.controls[second].edit(secondSpec.initial);
+      const savingB = b.controls[second].leave();
+      await settingsTurn();
+      assert.equal(backend.writes.length, 1, "the next group waits for the preceding reply");
+      if (!refuse) backend.writes[0].apply();
+      backend.writes[0].deliver(refuse);
+      await savingA;
+      await settingsTurn();
+      assert.equal(backend.writes.length, 2);
+      assert.equal(backend.writes[1].args[firstSpec.key], backend.state[group][firstSpec.key],
+        `the sibling uses the latest confirmation (reopen=${reopen}, refuse=${refuse})`);
+      backend.writes[1].apply();
+      backend.writes[1].deliver();
+      await savingB;
+      assert.equal(backend.state[group][secondSpec.key], secondSpec.initial);
+      assert.equal(backend.value(), siblingSpec.initial);
+      assert.equal(b.controls[first].value, backend.state[group][firstSpec.key]);
+      b.close();
+    }
+  });
+
+  test(`Settings ${group}: a failed initial load refuses grouped saves without writing defaults`, async () => {
+    const backend = settingsBackend(siblingSpec);
+    const a = settingsApp()(backend).open();
+    backend.failLoads = true;
+    const loading = a.load();
+    a.controls[first].edit(firstSpec.initial);
+    await loading;
+    await a.controls[first].leave();
+    assert.equal(backend.writes.length, 0, "a failed load must never become a default-filled write");
+    assert.match(a.controls[first].error, /initial load failed/);
+    assert.equal(a.controls[first].busy, false);
+    backend.failLoads = false;
+    await a.load();
+    a.controls[first].edit(firstSpec.initial);
+    await a.controls[first].leave();
+    assert.equal(backend.state[group][firstSpec.key], firstSpec.initial);
+    assert.equal(backend.value(), siblingSpec.initial, "retry after a good load preserves siblings");
+    a.close();
+  });
+}
+
+test("Settings advanced: a choice does not submit unblurred text or resubmit refused text", async () => {
+  const spec = settingsControls.find((control) => control.key === "extraArgs");
+  const backend = settingsBackend(spec);
+  const a = settingsApp()(backend).open();
+  await a.load();
+  const text = a.controls[spec.label];
+  const choice = a.controls["Skip intros"];
+  text.edit(spec.choice);
+  choice.edit("off");
+  await choice.leave();
+  assert.equal(backend.value(), spec.initial, "text waits for blur even if a sibling changes");
+  assert.equal(text.value, spec.choice, "the unsubmitted text remains editable");
+  backend.holdWrites = true;
+  const savingText = text.leave();
+  await settingsTurn();
+  choice.edit("autoskip");
+  const savingChoice = choice.leave();
+  backend.writes[1].deliver(true);
+  await savingText;
+  await settingsTurn();
+  assert.equal(backend.writes[2].args.extraArgs, spec.initial, "a later choice must not retry rejected text");
+  backend.writes[2].apply();
+  backend.writes[2].deliver();
+  await savingChoice;
+  assert.equal(text.value, spec.initial);
+  a.close();
+});
+
+for (const spec of settingsControls) {
+  test(`Settings ${spec.label}: drafts, refused saves and ordered replies`, async () => {
+    const backend = settingsBackend(spec);
+    const app = settingsApp()(backend);
+    const a = app.open();
+    const control = a.controls[spec.label];
+
+    // A choice made before the first answer survives even when it equals
+    // the displayed default and the stored value is something else.
+    backend.holdLoads = true;
+    const opening = a.load();
+    control.edit(spec.choice);
+    backend.loads.shift()();
+    await opening;
+    assert.equal(control.value, spec.choice, "a slow initial load must keep the user's draft");
+    backend.holdLoads = false;
+    await control.leave();
+    assert.equal(backend.value(), spec.choice);
+
+    // The same load cannot overwrite a choice saved while it was waiting.
+    backend.holdLoads = true;
+    const reload = a.load();
+    control.edit(spec.newer);
+    await control.leave();
+    backend.loads.shift()();
+    await reload;
+    backend.holdLoads = false;
+    assert.equal(control.value, backend.value(), "a slow load must not undo a confirmed save");
+    backend.refuse = true;
+    control.edit(spec.choice);
+    await control.leave();
+    assert.equal(control.value, backend.value(), "a refused choice must revert to the confirmed value");
+    assert.match(control.error, /save refused/);
+    assert.equal(control.busy, false);
+    backend.refuse = false;
+
+    // Editing again while a save is out makes a new draft, not a value its
+    // old successful (or refused) reply is allowed to replace.
+    backend.holdWrites = true;
+    const index = backend.writes.length;
+    control.edit(spec.choice);
+    const saving = control.leave();
+    control.edit(spec.newer);
+    await settingsTurn();
+    backend.writes[index].apply();
+    backend.writes[index].deliver();
+    await saving;
+    assert.equal(control.value, spec.newer, "the old reply must keep an edit made after the save started");
+    assert.equal(backend.value(), spec.choice);
+
+    // A applies, closes without its reply, and B reads that applied value.
+    // B's next write must wait for A's reply, retaining B's changed choice.
+    const first = index + 1;
+    const savingA = control.leave();
+    await settingsTurn();
+    backend.writes[first].apply();
+    a.close();
+    const b = app.open();
+    if (spec.key === "playbackQuality") {
+      assert.deepEqual(b.qualityTiers, a.qualityTiers, "a reopened quality select retains the catalog for its confirmed tier");
+    }
+    await b.load();
+    const reopened = b.controls[spec.label];
+    assert.equal(reopened.value, backend.value());
+    reopened.edit(spec.choice);
+    const savingB = reopened.leave();
+    await settingsTurn();
+    assert.equal(backend.writes.length, first + 1, "reopened B must wait for A's reply before writing");
+    backend.writes[first].deliver();
+    await savingA;
+    await settingsTurn();
+    assert.equal(backend.writes.length, first + 2);
+    backend.writes[first + 1].apply();
+    backend.writes[first + 1].deliver();
+    await savingB;
+    assert.equal(backend.value(), spec.choice, "the queued write keeps the change's value");
+    assert.equal(reopened.value, backend.value());
+    backend.holdWrites = false;
+    backend.refuse = true;
+    reopened.edit(spec.newer);
+    await reopened.leave();
+    assert.equal(reopened.value, backend.value(), "a refusal after reopening restores the latest confirmation");
+    backend.refuse = false;
+
+    if (spec.group === "preferences") {
+      backend.failDisplay = true;
+      reopened.edit(spec.newer);
+      await reopened.leave();
+      assert.match(reopened.error, /display refresh failed/);
+      assert.equal(backend.value(), spec.newer);
+      assert.equal(reopened.value, backend.value(), "a failed display refresh does not undo a successful write");
+    }
+    if (spec.group === "videoPlayer") {
+      backend.playerAnswer = "external";
+      reopened.edit("embedded");
+      await reopened.leave();
+      assert.equal(reopened.value, "external", "the control shows the backend's answer, not the submitted choice");
+      backend.refuse = true;
+      reopened.edit("embedded");
+      await reopened.leave();
+      assert.equal(reopened.value, backend.value(), "a refusal restores that backend answer");
+      assert.match(reopened.error, /save refused/);
+    }
+    if (spec.group === "path") {
+      backend.refuse = true;
+      await b.clearMpvPath();
+      assert.equal(reopened.value, backend.value(), "refused Clear restores the path");
+      await b.browseMpv();
+      assert.equal(reopened.value, backend.value(), "refused Browse restores the path");
+      backend.refuse = false;
+      await b.browseMpv();
+      assert.equal(reopened.value, "/browsed/mpv");
+      await b.clearMpvPath();
+      assert.equal(reopened.value, "");
+    }
+    if (spec.key === "extraArgs") {
+      backend.holdLoads = true;
+      const loading = b.load();
+      const inserting = b.insertPreset("--keep-open=no");
+      const draft = reopened.value;
+      backend.loads.shift()();
+      await loading;
+      assert.equal(reopened.value, draft, "Insert keeps its text through a slow load");
+      await inserting;
+      assert.equal(backend.value(), draft.trim());
+      assert.equal(reopened.value, draft, "a successful save keeps the author's argument formatting");
+    }
+    b.close();
+  });
+}
+
+test("Settings Install mpv: installation and path saves share their confirmation order", async () => {
+  const spec = settingsControls.find((control) => control.group === "path");
+  const backend = settingsBackend(spec);
+  const app = settingsApp()(backend);
+  const a = app.open();
+  await a.load();
+  backend.holdWrites = true;
+  const installing = a.installMpv();
+  backend.writes[0].apply();
+  a.close();
+  const b = app.open();
+  await b.load();
+  const path = b.controls[spec.label];
+  path.edit("/after-install/mpv");
+  const saving = path.leave();
+  await settingsTurn();
+  assert.equal(backend.writes.length, 1, "a path save must wait for the installer reply");
+  backend.writes[0].deliver();
+  await installing;
+  await settingsTurn();
+  backend.writes[1].apply();
+  backend.writes[1].deliver();
+  await saving;
+  assert.equal(path.value, "/after-install/mpv");
+  assert.equal(path.value, backend.value());
+
+  // On Windows installation (and set_mpv_path on every platform) can store
+  // a path before check_mpv fails. The error must not roll it back in the UI.
+  const retry = b.installMpv();
+  await settingsTurn();
+  backend.writes[2].apply();
+  backend.writes[2].deliver(true);
+  await retry;
+  assert.match(path.error, /save refused/);
+  assert.equal(path.value, backend.value(), "re-read a path that may have been stored before an error");
+  b.close();
+});
+
+test("Settings saves edited text when it closes, and typing alone sends nothing", async () => {
+  for (const id of ["mpv-path", "mpv-extra"]) {
+    const spec = settingsControls.find((control) => control.id === id);
+    const backend = settingsBackend(spec);
+    const app = settingsApp()(backend);
+    const a = app.open();
+    await a.load();
+    backend.holdWrites = true;
+    a.controls[spec.label].edit(spec.choice);
+    await settingsTurn();
+    assert.equal(backend.writes.length, 0, `${id}: typing alone must send nothing`);
+    a.close();
+    await settingsTurn();
+    assert.equal(backend.writes.length, 1, `${id}: closing must submit the edited text`);
+    backend.writes[0].apply();
+    backend.writes[0].deliver();
+    await settingsTurn();
+    const reopened = app.open();
+    assert.equal(backend.value(), spec.choice);
+    assert.equal(reopened.controls[spec.label].value, spec.choice, `${id}: confirmation survives closing`);
+    reopened.close();
+  }
+});
+
+for (const spec of settingsControls) {
+  test(`Settings ${spec.label}: a save refused after closing reaches current and future openings`, async () => {
+    const backend = settingsBackend(spec);
+    const app = settingsApp()(backend);
+    const a = app.open();
+    await a.load();
+    backend.holdWrites = true;
+    a.controls[spec.label].edit(spec.choice);
+    // Text is submitted by teardown; choices have already submitted.
+    a.close();
+    await settingsTurn();
+    assert.equal(backend.writes.length, 1);
+    const b = app.open();
+    await b.load();
+    assert.equal(b.saveStatus, "Saving…");
+    backend.writes[0].deliver(true);
+    await settingsTurn();
+    assert.match(b.controls[spec.label].error, /save refused/, "the reopened section explains the refusal");
+    assert.equal(b.controls[spec.label].value, backend.value());
+    assert.equal(b.saveStatus, "Not saved");
+    b.close();
+    const c = app.open();
+    assert.match(c.controls[spec.label].error, /save refused/, "the outcome also survives reopening after the reply");
+    assert.equal(c.saveStatus, "Not saved");
+    c.close();
+  });
+
+  test(`Settings ${spec.label}: a later successful save clears the failure in every opening`, async () => {
+    const backend = settingsBackend(spec);
+    const app = settingsApp()(backend);
+    const a = app.open();
+    await a.load();
+    backend.refuse = true;
+    a.controls[spec.label].edit(spec.choice);
+    await a.controls[spec.label].leave();
+    assert.match(a.controls[spec.label].error, /save refused/);
+    backend.refuse = false;
+    const b = app.open();
+    await b.load();
+    const other = b.controls[spec.group === "continuation" ? "Video player" : "Continue Playing"];
+    other.edit(spec.group === "continuation" ? "embedded" : "off");
+    await other.leave();
+    assert.match(a.controls[spec.label].error, /save refused/, "a different setting's success does not erase the failure");
+    b.controls[spec.label].edit(spec.newer);
+    await b.controls[spec.label].leave();
+    assert.equal(a.controls[spec.label].error, null, "a later success clears the old opening's error");
+    assert.equal(b.controls[spec.label].error, null);
+    assert.equal(a.saveStatus, "Saved");
+    assert.equal(b.saveStatus, "Saved");
+    a.close();
+    b.close();
+  });
+}
+
+function certificateBackend() {
+  const backend = settingsBackend(settingsControls[0]);
+  const invoke = backend.invoke;
+  backend.certificateReads = [];
+  backend.certificateWrites = [];
+  backend.invoke = (command, args) => {
+    if (command === "get_mpv_tls_verify") return new Promise((resolve, reject) => {
+      backend.certificateReads.push({ resolve, reject });
+    });
+    if (command === "set_mpv_tls_verify") return new Promise((resolve, reject) => {
+      backend.certificateWrites.push({ verify: args.verify, resolve, reject });
+    });
+    return invoke(command, args);
+  };
+  return backend;
+}
+
+test("Settings certificate: an obsolete read never enables an uninitialized checkbox", async () => {
+  for (const newestFirst of [false, true]) for (const verify of [false, true]) {
+    const backend = certificateBackend();
+    const app = settingsApp()(backend);
+    const a = app.open();
+    const loadingA = a.certificate.load();
+    a.close();
+    const b = app.open();
+    const loadingB = b.certificate.load();
+    assert.equal(b.certificate.disabled, true);
+    if (newestFirst) {
+      backend.certificateReads[1].resolve(verify);
+      await loadingB;
+    }
+    backend.certificateReads[0].resolve(!verify);
+    await loadingA;
+    assert.equal(b.certificate.disabled, !newestFirst, "only an accepted read may enable the checkbox");
+    if (!newestFirst) {
+      backend.certificateReads[1].resolve(verify);
+      await loadingB;
+    }
+    assert.equal(b.certificate.disabled, false);
+    assert.equal(b.certificate.checked, !verify, "the enabled checkbox shows the accepted stored value");
+    assert.equal(backend.certificateWrites.length, 0);
+    // A refresh can be pending after a confirmed value is already available.
+    const refresh = b.certificate.load();
+    assert.equal(b.certificate.disabled, false);
+    const saving = b.certificate.change(verify);
+    assert.equal(backend.certificateWrites[0].verify, !verify);
+    backend.certificateWrites[0].resolve(!verify);
+    await saving;
+    backend.certificateReads[2].resolve(verify);
+    await refresh;
+    assert.equal(b.certificate.checked, verify, "a stale read cannot replace a save confirmation");
+    b.close();
+    const c = app.open();
+    assert.equal(c.certificate.disabled, false);
+    assert.equal(c.certificate.checked, verify);
+    c.close();
+  }
+});
+
+test("Settings certificate: an obsolete success cannot enable the checkbox after the current read fails", async () => {
+  const backend = certificateBackend();
+  const app = settingsApp()(backend);
+  const a = app.open();
+  const loadingA = a.certificate.load();
+  a.close();
+  const b = app.open();
+  const loadingB = b.certificate.load();
+  backend.certificateReads[1].reject(new Error("certificate read failed"));
+  await loadingB;
+  assert.equal(b.certificate.disabled, true);
+  assert.match(b.certificate.error, /Could not read the certificate setting/);
+  backend.certificateReads[0].resolve(false);
+  await loadingA;
+  assert.equal(b.certificate.disabled, true, "a discarded success does not initialize the setting");
+  b.close();
+  const c = app.open();
+  const loadingC = c.certificate.load();
+  backend.certificateReads[2].resolve(false);
+  await loadingC;
+  assert.equal(c.certificate.disabled, false);
+  assert.equal(c.certificate.checked, true);
+  assert.equal(c.certificate.error, null);
+  c.close();
+});
+
+test("Settings certificate: accepted confirmations clear read errors without hiding save failures", async () => {
+  const backend = certificateBackend();
+  const app = settingsApp()(backend);
+  const a = app.open();
+  const loadingA = a.certificate.load();
+  backend.certificateReads[0].reject(new Error("certificate read failed"));
+  await loadingA;
+  assert.match(a.certificate.error, /Could not read the certificate setting/);
+  const b = app.open();
+  const loadingB = b.certificate.load();
+  backend.certificateReads[1].resolve(false);
+  await loadingB;
+  assert.equal(a.certificate.disabled, false);
+  assert.equal(a.certificate.checked, true);
+  assert.equal(a.certificate.error, null, "an accepted shared read clears an obsolete read error");
+
+  const refresh = b.certificate.load();
+  backend.certificateReads[2].reject(new Error("certificate read failed"));
+  await refresh;
+  assert.match(b.certificate.error, /Could not read the certificate setting/);
+  const refused = a.certificate.change(false);
+  backend.certificateWrites[0].reject(new Error("certificate save refused"));
+  await refused;
+  assert.match(b.certificate.error, /certificate save refused/);
+  const reread = b.certificate.load();
+  backend.certificateReads[3].resolve(false);
+  await reread;
+  assert.match(b.certificate.error, /certificate save refused/, "a read does not erase a save failure");
+
+  const failedRefresh = b.certificate.load();
+  backend.certificateReads[4].reject(new Error("certificate read failed"));
+  await failedRefresh;
+  const saved = a.certificate.change(false);
+  backend.certificateWrites[1].resolve(true);
+  await saved;
+  for (const opening of [a, b]) {
+    assert.equal(opening.certificate.error, null, "an accepted shared save clears obsolete read errors too");
+    assert.equal(opening.certificate.checked, false);
+    assert.equal(opening.saveStatus, "Saved");
+    opening.close();
+  }
+});
+
+// The index of the brace that closes the one at `open`. Reads Rust well enough
+// to ignore the braces that are not code: those in comments, in string
+// literals and in character literals.
+//
+// A string literal in Rust is a quote with, optionally, a prefix written
+// directly before it: none, `b` or `c` for one with escapes, and `r`, `br` or
+// `cr` with any number of `#` for a raw one. So words are read as words, and
+// a word that runs into a quote is a prefix. One this reader does not know is
+// refused, never guessed at: whatever it misreads here, it hides from the
+// checks that use it. (It once knew only `r` and `br`, and looked no further
+// than 62 `#`: review finding ps-2, round 3.)
+function matchingBrace(text, open) {
+  assert.equal(text[open], "{", "matching starts at an opening brace");
+  const isWordStart = (c) => c !== undefined && /[A-Za-z_]/.test(c);
+  const isWord = (c) => c !== undefined && /[A-Za-z0-9_]/.test(c);
+  // From an opening quote to just past its closing one; a backslash takes the
+  // next character with it.
+  const afterString = (quote) => {
+    let at = quote + 1;
+    while (at < text.length && text[at] !== '"') at += text[at] === "\\" ? 2 : 1;
+    return at + 1;
+  };
+  let depth = 0;
+  let i = open;
+  while (i < text.length) {
+    const c = text[i];
+    if (text.startsWith("//", i)) {
+      const end = text.indexOf("\n", i);
+      if (end === -1) break;
+      i = end + 1;
+    } else if (text.startsWith("/*", i)) {
+      // Block comments nest in Rust.
+      let level = 1;
+      i += 2;
+      while (i < text.length && level > 0) {
+        if (text.startsWith("/*", i)) {
+          level += 1;
+          i += 2;
+        } else if (text.startsWith("*/", i)) {
+          level -= 1;
+          i += 2;
+        } else {
+          i += 1;
+        }
+      }
+    } else if (c === '"') {
+      i = afterString(i);
+    } else if (isWordStart(c)) {
+      let wordEnd = i + 1;
+      while (isWord(text[wordEnd])) wordEnd += 1;
+      const word = text.slice(i, wordEnd);
+      let hashes = 0;
+      while (text[wordEnd + hashes] === "#") hashes += 1;
+      const quote = wordEnd + hashes;
+      if (text[quote] !== '"') {
+        // An ordinary word. (`r#name`, a raw identifier, is the word `r`,
+        // a `#`, and the word `name`; `b'x'` is the word `b` and a
+        // character literal.)
+        i = wordEnd;
+      } else if (["r", "br", "cr"].includes(word)) {
+        // A raw string ends at a quote followed by as many `#` as opened it;
+        // nothing inside it is an escape.
+        const end = text.indexOf(`"${"#".repeat(hashes)}`, quote + 1);
+        assert.notEqual(end, -1, "a raw string must end");
+        i = end + 1 + hashes;
+      } else if (hashes === 0 && ["b", "c"].includes(word)) {
+        i = afterString(quote);
+      } else {
+        assert.fail(
+          `a literal with a prefix this reader does not know: ${word}${"#".repeat(hashes)}"`,
+        );
+      }
+    } else if (c === "'") {
+      if (text[i + 1] === "\\") {
+        // An escaped character: '\n', '\'', '\\', '\u{7f}'.
+        const end = text.indexOf("'", i + 3);
+        assert.notEqual(end, -1, "a character literal must end");
+        i = end + 1;
+      } else if (text[i + 2] === "'") {
+        i += 3; // 'x', including '{' and '"'
+      } else if (text[i + 3] === "'" && text.codePointAt(i + 1) > 0xffff) {
+        i += 4; // one character outside the basic plane
+      } else {
+        i += 1; // a lifetime or a loop label, not a literal
+      }
+    } else {
+      if (c === "{") depth += 1;
+      if (c === "}") {
+        depth -= 1;
+        if (depth === 0) return i;
+      }
+      i += 1;
+    }
+  }
+  assert.fail("no closing brace");
+}
+
+// The part of a Rust file that is compiled into the app: all of it except its
+// test module, without comment lines.
+//
+// Where the module sits and how the code around it is laid out do not matter:
+// the module is cut out from its `mod tests {` to the brace that closes it,
+// and everything else is returned, before it and after it. (An earlier version
+// took what came before the module and required the module to be last, judged
+// by indentation. Indented code after the module was compiled into the app and
+// read by nothing: review finding ps-2, twice.)
+function shippedCode(source, file) {
+  const text = source.replace(/\r\n/g, "\n");
+  const marker = "\n#[cfg(test)]\nmod tests {";
+  const at = text.indexOf(marker);
+  assert.notEqual(at, -1, `${file} must have a test module`);
+  assert.equal(text.indexOf(marker, at + 1), -1, `${file} must have exactly one test module`);
+  const close = matchingBrace(text, at + marker.length - 1);
+  const code = `${text.slice(0, at)}\n${text.slice(close + 1)}`;
+  // Two checks that the module ends where it was taken to end. A test left
+  // outside it means the end was put too early; no function left at all means
+  // the module took the code with it.
+  assert.doesNotMatch(
+    code,
+    /^\s*#\[(tokio::)?test\b/m,
+    `${file}: a test was found outside the test module`,
+  );
+  assert.match(code, /\bfn \w+\s*[(<]/, `${file}: no code compiled into the app was found`);
+  return code
+    .split("\n")
+    .filter((line) => !/^\s*\/\//.test(line))
+    .join("\n");
+}
+
+function linesMentioning(code, pattern) {
+  return code
+    .split("\n")
+    .filter((line) => pattern.test(line))
+    .map((line) => line.trim());
+}
 
 function attributesBefore(source, declaration) {
   const at = source.indexOf(declaration);
@@ -58,6 +917,18 @@ test("durable settings reads never default or disappear through Result helpers",
     fs.readFileSync("src-tauri/src/lib.rs", "utf8"),
     /load_config\(\)\.unwrap_or_else/,
   );
+  // Nor at the end of a longer chain: every statement that reads the
+  // settings, up to its `;`, keeps the error.
+  for (const source of [backend, lib]) {
+    for (const call of source.matchAll(/load_config\(\)/g)) {
+      const statement = source.slice(call.index, source.indexOf(";", call.index) + 1);
+      assert.doesNotMatch(
+        statement,
+        /\.(?:ok|unwrap_or_default|unwrap_or)\s*\(/,
+        `a settings read must not turn an unreadable file into a default: ${statement}`,
+      );
+    }
+  }
 });
 
 test("boot checks the durable gate before any normal app request", () => {
@@ -261,8 +1132,141 @@ test("Tauri emits a Windows-compatible artwork protocol origin", async () => {
   }
 });
 
+test("brace matching reads Rust strings, characters and comments", () => {
+  // `shippedCode` below depends on finding where a test module ends. Each
+  // case is one way a brace can appear in Rust without being code; `z }` is a
+  // later brace the match must not run on to.
+  const matched = (rust) => {
+    const open = rust.indexOf("{");
+    return rust.slice(open, matchingBrace(rust, open) + 1);
+  };
+  assert.equal(matched("m { a { b } c } z }"), "{ a { b } c }");
+  assert.equal(matched('m { "}" } z }'), '{ "}" }', "a brace in a string");
+  assert.equal(matched('m { "\\"}" } z }'), '{ "\\"}" }', "after an escaped quote in a string");
+  assert.equal(matched('m { "\\\\" } z }'), '{ "\\\\" }', "a string that ends in a backslash");
+  assert.equal(matched("m { '}' } z }"), "{ '}' }", "a brace character");
+  assert.equal(matched("m { '\\'' '}' } z }"), "{ '\\'' '}' }", "after an escaped quote character");
+  assert.equal(matched("m { '\\u{7d}' } z }"), "{ '\\u{7d}' }", "braces of a unicode escape");
+  assert.equal(matched("m { '\"' } z }"), "{ '\"' }", "a quote character opens no string");
+  assert.equal(matched("m { // }\n } z }"), "{ // }\n }", "a brace in a line comment");
+  assert.equal(
+    matched("m { /* } /* } */ } */ } z }"),
+    "{ /* } /* } */ } */ }",
+    "braces in nested block comments",
+  );
+  assert.equal(matched('m { r"}" } z }'), '{ r"}" }', "a raw string");
+  assert.equal(matched('m { r#"a"}"# } z }'), '{ r#"a"}"# }', "a raw string with a quote in it");
+  assert.equal(matched('m { r"\\" } z }'), '{ r"\\" }', "a raw string has no escapes");
+  assert.equal(matched('m { br#"}"# b"}" } z }'), '{ br#"}"# b"}" }', "byte strings");
+  assert.equal(matched('m { c"}" cr"}" } z }'), '{ c"}" cr"}" }', "C strings");
+  assert.equal(
+    matched('m { cr#""{""# } z }'),
+    '{ cr#""{""# }',
+    "a raw C string with quotes and a lone brace in it",
+  );
+  const manyHashes = "#".repeat(70);
+  assert.equal(
+    matched(`m { r${manyHashes}"}"#"${manyHashes} } z }`),
+    `{ r${manyHashes}"}"#"${manyHashes} }`,
+    "a raw string with more hash marks than anyone writes",
+  );
+  assert.equal(
+    matched('m { let r#type = bar; let other = r; { } } z }'),
+    "{ let r#type = bar; let other = r; { } }",
+    "a raw identifier, and words that merely end in a prefix letter, are not literals",
+  );
+  assert.equal(matched("m { b'}' b'\\'' } z }"), "{ b'}' b'\\'' }", "byte characters");
+  // What it does not know, it refuses.
+  assert.throws(() => matched('m { k#"}"# } z }'), /a prefix this reader does not know: k#"/);
+  assert.throws(() => matched('m { rb"}" } z }'), /a prefix this reader does not know: rb"/);
+  assert.throws(() => matched('m { b#"}"# } z }'), /a prefix this reader does not know: b#"/);
+  assert.throws(() => matched('m { r#"} z }'), /a raw string must end/);
+  assert.equal(
+    matched("m { fn f<'a>(x: &'a str) -> &'a str { x } } z }"),
+    "{ fn f<'a>(x: &'a str) -> &'a str { x } }",
+    "a lifetime is not a character",
+  );
+  assert.throws(() => matched("m { a "), /no closing brace/);
+  assert.throws(() => matched("m { // }"), /no closing brace/);
+});
+
+test("the reader of shipped Rust code takes everything but the test module", () => {
+  const tests = [
+    "",
+    "#[cfg(test)]",
+    "mod tests {",
+    "    use super::*;",
+    "    #[test]",
+    "    fn inside_the_tests() {",
+    '        assert_eq!(format!("{{}}"), "}");',
+    "        let _closing = '}'; // }",
+    "    }",
+    "}",
+    "",
+  ].join("\n");
+  const before = "fn before() -> &'static str {\n    \"a\"\n}\n";
+  const read = (source) => shippedCode(source, "sample.rs");
+
+  // Code before the module, and code after it in the first column.
+  const around = read(`${before}${tests}fn after() {}\n`);
+  assert.match(around, /fn before\(\)/);
+  assert.match(around, /fn after\(\)/);
+  assert.doesNotMatch(around, /inside_the_tests/, "the module itself is left out");
+  // Code after the module that does not start in the first column. This is
+  // the layout that went unread (review finding ps-2).
+  const indented = read(`${before}${tests}    fn indented_after(spec: &PlaySpec) {\n        spec.http_headers.len();\n    }\n`);
+  assert.match(indented, /fn indented_after/);
+  assert.match(indented, /spec\.http_headers\.len\(\);/);
+  // A module above the code it tests.
+  assert.match(read(`use std::io;\n${tests}fn below() {}\n`), /fn below\(\)/);
+  // Comment lines are dropped; code lines are not.
+  const commented = read(`${before}// fn in_a_comment() {}\n${tests}`);
+  assert.doesNotMatch(commented, /in_a_comment/);
+
+  // The layout a reader that misjudged a literal fell for (review finding
+  // ps-2, round 3): a lone brace in a raw C string inside the tests, its twin
+  // in code after them. The code after them must still be read.
+  const paired = read(
+    [
+      before,
+      "",
+      "#[cfg(test)]",
+      "mod tests {",
+      '    const _OPEN: &std::ffi::CStr = cr#""{""#;',
+      "    #[test]",
+      "    fn inside_the_tests() {}",
+      "}",
+      "",
+      "fn after_with_its_twin(spec: &PlaySpec) -> usize {",
+      '    let _close = cr#""}""#;',
+      "    spec.http_headers.len()",
+      "}",
+      "",
+    ].join("\n"),
+  );
+  assert.match(paired, /fn after_with_its_twin/);
+  assert.match(paired, /spec\.http_headers\.len\(\)/);
+  assert.doesNotMatch(paired, /inside_the_tests/);
+
+  // What must be refused rather than read as "nothing to check".
+  assert.throws(() => read(`use std::io;\n${tests}`), /no code compiled into the app was found/);
+  assert.throws(() => read(before), /must have a test module/);
+  assert.throws(() => read(`${before}${tests}${tests}`), /exactly one test module/);
+  assert.throws(
+    () => read(`${before}${tests}#[test]\nfn outside() {}\n`),
+    /a test was found outside the test module/,
+  );
+});
+
 test("mpv authentication stays in a private include until its exact child is reaped", () => {
-  assert.match(playback, /struct HeaderInclude[\s\S]{0,800}impl Drop for HeaderInclude/);
+  // The include is removed when what owns it goes. (This used to be held by
+  // how close the two stood in the file, which broke when a method was added
+  // between them; it is now held by what the `Drop` does.)
+  assert.match(playback, /pub\(crate\) struct HeaderInclude \{\s+path: std::path::PathBuf,\s+\}/);
+  assert.match(
+    playback,
+    /impl Drop for HeaderInclude \{\s+fn drop\(&mut self\) \{\s+if self\.remove_now\(\)\.is_err\(\) \{/,
+  );
   assert.match(playback, /struct ManagedChild[\s\S]{0,180}_header_include: Option<HeaderInclude>/);
   assert.match(playback, /mpv-headers-\{\}-\{nonce\}\.conf/);
   assert.match(playback, /opts\.mode\(0o600\)/);
@@ -270,12 +1274,24 @@ test("mpv authentication stays in a private include until its exact child is rea
     playback,
     /harden_existing_regular\(path\)[\s\S]{0,500}write_content\(&mut f, content\.as_bytes\(\)\)/,
   );
+  // The reaper keeps a player until its end is confirmed. That is three links:
+  // the reaper asks the handle, the handle asks the process, and only a
+  // confirmed end releases the player (and the include it owns).
   assert.match(
     lib,
-    /retain_mut\(\|child\|[\s\S]{0,120}retain_child_after_try_wait\(&child\.try_wait\(\)\)/,
+    /retain_mut\(\|child\|[\s\S]{0,120}retain_after_poll\(&child\.has_ended\(\)\)/,
+  );
+  assert.match(
+    playerHandle,
+    /PlayerHandle::External\(child\) => child\.try_wait\(\)\.map\(\|status\| status\.is_some\(\)\)/,
+  );
+  assert.match(
+    playerHandle,
+    /fn retain_after_poll\(ended: &std::io::Result<bool>\) -> bool \{\s+!matches!\(ended, Ok\(true\)\)\s+\}/,
   );
   assert.match(playback, /partial_header_include_write_removes_the_credential_file/);
-  assert.match(playback, /process_query_result_reaps_only_a_confirmed_exit/);
+  assert.match(playback, /the_reaper_drops_a_player_only_on_a_confirmed_end/);
+  assert.match(playback, /an_external_player_reports_its_end_only_after_the_process_exits/);
   assert.match(
     commands,
     /remove_consumed_header_include\(\)[\s\S]{0,180}child\.kill\(\)/,
@@ -284,7 +1300,56 @@ test("mpv authentication stays in a private include until its exact child is rea
     lib,
     /reap_queue[\s\S]{0,500}remove_consumed_header_include\(\)[\s\S]{0,200}queue\.clear\(\)/,
   );
-  assert.match(playback, /cmd\.arg\(format!\("--include=\{\}"/);
-  assert.doesNotMatch(playback, /--http-header-fields=/);
+  // The include reaches mpv as one option of the described launch, which the
+  // external player renders as `--include=<path>`.
+  assert.match(playerLaunch, /LaunchArg::set\("include", include\.path\.to_string_lossy\(\)\)/);
+  assert.match(playerExternal, /cmd\.arg\(arg\.to_cli\(\)\);/);
+  // Stream authentication must not reach mpv as an option. An option used to
+  // be command-line text, and this test looked for that text; an option is now
+  // data (`LaunchArg`), which that text never matched. So the check is made on
+  // what cannot be respelled, over the code that describes and starts a launch:
+  const launchCode = shippedCode(playerLaunch, "player/launch.rs");
+  const shipped = [
+    shippedCode(playbackSupervision, "playback.rs"),
+    launchCode,
+    shippedCode(playerExternal, "player/external.rs"),
+    shippedCode(playerHandle, "player/mod.rs"),
+  ].join("\n");
+  // 1. a play's headers are declared once and read in two places, the test for
+  //    "are there any" and the call that writes the include;
+  assert.deepEqual(linesMentioning(shipped, /http_headers/), [
+    "pub http_headers: Vec<(String, String)>,",
+    "let header_include = if spec.http_headers.is_empty() {",
+    "let include = write_header_include(&spec.http_headers)?;",
+  ]);
+  // 2. mpv's header option is named once, as the content of that include, under
+  //    any spelling or option constructor;
+  assert.deepEqual(linesMentioning(shipped, /http-header-fields/i), [
+    'let content = format!("http-header-fields=\\"{joined}\\"\\n");',
+  ]);
+  // 3. inside the code that writes the include, every line that names the
+  //    headers, the text they are joined into or the file's content is one of
+  //    these: nothing copies them anywhere else;
+  assert.deepEqual(linesMentioning(launchCode, /(?<![\w-])(headers|joined|content)(?![\w-])/), [
+    "fn write_header_include(headers: &[(String, String)]) -> Result<HeaderInclude, String> {",
+    "write_header_include_at(&path, headers)",
+    "headers: &[(String, String)],",
+    "write_header_include_at_with(path, headers, |file, content| file.write_all(content))",
+    "headers: &[(String, String)],",
+    "for (name, value) in headers {",
+    "let joined = headers",
+    'let content = format!("http-header-fields=\\"{joined}\\"\\n");',
+    "if let Err(error) = write_content(&mut f, content.as_bytes()) {",
+  ]);
+  // 4. none of this code changes Vela's own environment, which every program
+  //    Vela starts inherits in full;
+  assert.doesNotMatch(shipped, /\b(set_var|remove_var)\b/);
+  // 5. and what the player is really started with, arguments and whole
+  //    environment, is checked as well, in Rust.
+  assert.match(
+    playerExternal,
+    /fn stream_auth_reaches_the_player_only_through_the_private_include\(\) \{/,
+  );
+  assert.match(playerExternal, /for \(key, value\) in effective_env\(&cmd, &own\) \{/);
   assert.doesNotMatch(plexSource, /X-Plex-Token=.*auth_token/);
 });

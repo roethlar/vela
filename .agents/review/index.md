@@ -1,5 +1,171 @@
 # Review status
 
+**Final round before the release of Vela 1.0.65, 2026-11-16 (closed 2026-11-16):** five codereview codex
+hunts (called plainly; standard): four, one per slice, over
+`7b17f63..c093289` (release engineering to `2ffbffe`), and a fifth over the
+two commits that landed afterwards (`2ffbffe..c618d31`): `findings` in
+each. Fourteen candidates, fourteen admitted, none declined, all repaired:
+codex wrote each repair and the working agent's review closed it. A sixth
+hunt, over the one commit that took Azure signing out of the release
+workflow (`67de4aa..fc991a8`, the agent's own): one LOW finding about
+records, corrected. Record:
+`.agents/review/codereview-2026-11-16-release.md`.
+
+| ID    | Severity | Impact (one line) | Status | Commit | Reviewer |
+|-------|----------|-------------------|--------|--------|----------|
+| fr-1  | MEDIUM   | Changing one Settings control can save over another setting that is stored with it | `[x]` | `72270d8` | codex/default/standard; codex wrote the repair; reviewed by the agent |
+| fr-2  | MEDIUM   | A Settings save that is refused after the dialog has closed is never shown | `[x]` | `88aa965` | codex/default/standard; codex wrote the repair; reviewed by the agent |
+| fr-3  | MEDIUM   | The certificate checkbox can become usable while showing a value that was never loaded | `[x]` | `00693e5` | codex/default/standard; codex wrote the repair; reviewed by the agent |
+| fr-4  | LOW      | The Settings tests pass when a choice saves its previous value | `[x]` | `1f3c4f5` | codex/default/standard; codex wrote the repair; reviewed by the agent |
+| fr-5  | LOW      | Settings and the guide say a change of player waits for a restart; going back to mpv's own window does not | `[x]` | `861cc3f` | codex/default/standard; codex wrote the repair; reviewed by the agent |
+| fr-6  | MEDIUM   | A right-click, or a track chosen, while a wheel command is unanswered is dropped with "The player is busy" | `[x]` | `e453ad1` | codex/default/standard; codex wrote the repair; reviewed by the agent |
+| fr-7  | MEDIUM   | A long wheel burst adds up to a seek the player refuses, and all of it is lost | `[x]` | `0cd99a2` | codex/default/standard; codex wrote the repair; reviewed by the agent |
+| fr-8  | LOW      | The volume can drift by one point near 0 and near 100 | `[x]` | `1f35c2b` | codex/default/standard; codex wrote the repair; reviewed by the agent |
+| fr-9  | LOW      | The view's tests pass with several of its rules removed | `[x]` | `b7e2caa` | codex/default/standard; codex wrote the repair; reviewed by the agent |
+| fr-10 | MEDIUM   | A Jellyfin start report whose answer was lost is sent again, and the server counts the play twice | `[x]` | `935e964` | codex/default/standard; codex wrote the repair; reviewed by the agent |
+| fr-11 | MEDIUM   | A report's failure is logged with whatever the server put in its status line | `[x]` | `9d05964` | codex/default/standard; codex wrote the repair; reviewed by the agent |
+| fr-12 | MEDIUM   | CI compiles the macOS app for one of the two architectures the release builds | `[x]` | `ceed9be` | codex/default/standard; codex wrote the repair; reviewed by the agent |
+| fr-13 | LOW      | The guide says any value of `WEBKIT_DISABLE_DMABUF_RENDERER` rules out the embedded player; `0` and empty do not | `[x]` | `5e48e11` | codex/default/standard; codex wrote the repair; reviewed by the agent |
+| fr-14 | MEDIUM   | The end-to-end judge let a play report its stop twice | `[x]` | `9171b2e` | codex/default/standard; codex wrote the repair; reviewed by the agent |
+| fr-15 | LOW      | The records still told whoever releases to repair Azure signing, and said a run by hand signs everything | `[x]` | `88092f8` | codex/default/standard; records only, corrected by the agent |
+
+**Player window review (mpv window state, size, the setting), 2026-11-14 (closed 2026-11-14):** three codereview codex
+hunts, one per slice (called plainly; the host's codex config resolves to
+gpt-6-astra @ max; standard), over `f1e0c9c..9815e10`: `findings` in each.
+Seven candidates, seven admitted, none declined. Record:
+`.agents/review/codereview-2026-11-14-player-window.md`.
+
+| ID   | Severity | Impact (one line)                                                      | Status | Commit | Reviewer |
+|------|----------|------------------------------------------------------------------------|--------|--------|----------|
+| pw-1 | MEDIUM   | The copy is chosen for one screen and the window can open on another   | `[x]`  | `68d6211`, `7b34af2`, `52138d0`, `8526d28`, `eb2f1c2`, `c9e7245`..`79384d9` | codex/default/standard esc:T5(ceiling) |
+| pw-2 | MEDIUM   | A play in the embedded player is ranked for the previous mpv window's screen | `[x]`  | `6bb2db6`, `577fe5b`, `2eb5626`, `fec6128`, `f9acc1f`, `1fa21c6`, `2b8c690`, `ec250c7` | codex/default/standard esc:T5(ceiling) |
+| pw-3 | MEDIUM   | A width and a height never reported together can be carried as the window's size | `[x]`  | `2dd9eb7` | codex/default/standard |
+| pw-4 | MEDIUM   | Quitting Vela waits, without limit, for the settings file to be written | `[x]`  | `5de1305` | codex/default/standard |
+| pw-5 | MEDIUM   | An older play's window, or an earlier look at the current one, can be saved over a newer one | `[x]`  | `cbd93ae` | codex/default/standard |
+| pw-6 | MEDIUM   | After a play in the embedded player, the next mpv window is treated as the first of the run again | `[x]`  | `55be8fc`, `0e5ea59` | codex/default/standard |
+| pw-7 | LOW      | When saving the Player window setting fails, the control shows the choice that was not saved | `[x]`  | `ac25240`, `0ee2e0d`, `1430f2e`, `0cc2e03` | codex/default/standard esc:T5(ceiling); the last repair: codex wrote it; reviewed by the agent |
+| pw-8 | MEDIUM   | The end-to-end scenario for the player window fails about one external run in four, and the parity verdict with it (the scenario's fault) | `[x]`  | `26660a9`, `71395c3` (the other scenarios), `0ae5b64`..`bb3b84e` | codex/default/standard esc:T5(ceiling) |
+| pw-9 | MEDIUM   | When mpv ends before Vela has connected to it, the play's end is held back five seconds, and the next play of a full-screen run opens windowed | `[x]`  | `0b313a2`, `c861796` | codex wrote it; reviewed by the agent |
+
+**Embedded player Slice 6 review (the parity tests), 2026-11-14 (closed 2026-11-14):** codereview codex
+(called plainly; the host's codex config resolves to gpt-6-astra @ max;
+standard) over `ab95c49..ac3e563`: `findings`. Eight candidates, eight
+admitted, none declined. Record:
+`.agents/review/codereview-2026-11-14-embedded-parity.md`.
+
+| ID   | Severity | Impact (one line)                                                      | Status | Commit | Reviewer |
+|------|----------|------------------------------------------------------------------------|--------|--------|----------|
+| pa-1 | MEDIUM   | The automatic-skip test passes by ordinary playback, without a skip    | `[x]`  | `25287b6`, `17d415f`, `343707b`, `da7ef27`, `716abc6`, `9dfad5e`, `8ed9acb` | codex/default/standard esc:T5(ceiling) |
+| pa-2 | MEDIUM   | The external player's cropping is tested in automatic mode only; the row says off, manual, auto | `[x]`  | `9bcdfbc`, `a9ed237`, `2a42345` | codex/default/standard |
+| pa-3 | MEDIUM   | Half of a split row can be deleted and the guard still says the plan's list is all there | `[x]`  | `ddbb743` | codex/default/standard |
+| pa-4 | MEDIUM   | A timer started through Node's timer modules is not seen by the import watch | `[x]`  | `c294a09`, `be3f1f4`, `cc85c2d` | codex/default/standard esc:T5(ceiling); closed as it stands by the owner, 2026-11-14 |
+| pa-5 | MEDIUM   | The verdict takes a known failure that was skipped for one that failed | `[x]`  | `115cbaa`, `dbb91b4`, `0d8ccbd`, `bf86854` | codex/default/standard esc:T5(ceiling); closed as it stands by the owner, 2026-11-14 |
+| pa-6 | MEDIUM   | A run can say it built the app it ran when it built elsewhere and ran an older binary | `[x]`  | `f00cdc4`, `8cf3a05`, `3d2ecca` | codex/default/standard esc:T5(ceiling); the last repair: codex wrote it; reviewed by the agent |
+| pa-7 | MEDIUM   | Nothing checks that Plex is told the play has stopped                  | `[x]`  | `17d9a81`, `7e1dda5`, `f07fd8c`, `4906831`, `d504a1e`, `c618d31` | codex/default/standard esc:T5(ceiling); closed as it stood by the owner, 2026-11-14; the last round's comments repaired 2026-11-16: codex wrote it; reviewed by the agent |
+| pa-8 | LOW      | A name every object has, such as toString, is accepted as a test-only route | `[x]`  | `ade0278` | codex/default/standard |
+
+**Embedded player, packaging review, 2026-11-14 (closed 2026-11-14, all six verified):** codereview codex
+(called plainly; the host's codex config resolves to gpt-6-astra @ max;
+standard) over `2f0d191..4b8293e`: `findings`. Six candidates, six
+admitted, none declined. Record:
+`.agents/review/codereview-2026-11-14-libmpv-packaging.md`.
+
+| ID   | Severity | Impact (one line)                                                      | Status | Commit | Reviewer |
+|------|----------|------------------------------------------------------------------------|--------|--------|----------|
+| pk-1 | HIGH     | Checking an AppImage runs it                                           | `[x]`  | `53f2ecd`, `3d1593e`, `e3ac36e` | codex/default/standard esc:T5(ceiling) |
+| pk-2 | HIGH     | The libraries of a set that failed its checks are loaded anyway        | `[x]`  | `12fa2fa`, `9b12157` (and `1348782`) | codex/default/standard |
+| pk-3 | MEDIUM   | A plain Arch build can put an older package, with the set in it, into dist/ | `[x]`  | `26910e5`, `07ebee4` | codex/default/standard |
+| pk-4 | MEDIUM   | A package whose directories above the set cannot be entered still passes | `[x]`  | `2faadcf` | codex/default/standard |
+| pk-5 | MEDIUM   | Licence copies of an Arch package may be links out of it, or unreadable, and pass | `[x]`  | `8876601` (and `547726c`) | codex/default/standard |
+| pk-6 | MEDIUM   | A temporary directory with a space in its name fails a good package    | `[x]`  | `25fb666`, `a60f802`, `b26f6b6` (and `3e008bf`) | codex/default/standard esc:T5(ceiling) |
+
+**Embedded player Slice 5 review, 2026-11-14 (closed 2026-11-14):** codereview codex
+(called plainly; the host's codex config resolves to gpt-6-astra @ max;
+standard) over `0aeeff0..3d2fef6`: `findings`. Two candidates, two
+admitted, none declined. Record:
+`.agents/review/codereview-2026-11-14-embedded-controls.md`.
+
+| ID   | Severity | Impact (one line)                                                      | Status | Commit | Reviewer |
+|------|----------|------------------------------------------------------------------------|--------|--------|----------|
+| pc-1 | MEDIUM   | A line that arrives in pieces is read past the limit of whoever waits for it | `[x]`  | `a909c20` | codex/default/standard |
+| pc-2 | MEDIUM   | A play that ends in an error leaves Vela's window in fullscreen for 50 seconds | `[x]`  | `4118fea`, `c872dad`, `060a5fd`, `c681cd4` | codex/default/standard esc:T5(ceiling); the last repair: codex wrote it; reviewed by the agent |
+
+**Embedded player Slice 4 review, 2026-11-13 (closed 2026-11-14, all three verified):** codereview codex
+(called plainly; the host's codex config resolves to gpt-6-astra @ max;
+standard) over `74f44b6..e8db400`: `findings`. Three candidates, three
+admitted, none declined. Record:
+`.agents/review/codereview-2026-11-13-embedded-hdr.md`.
+
+| ID   | Severity | Impact (one line)                                                      | Status | Commit | Reviewer |
+|------|----------|------------------------------------------------------------------------|--------|--------|----------|
+| hd-1 | MEDIUM   | An old description of the output can replace a newer one               | `[x]`  | `499a0d3` | codex/default/standard |
+| hd-2 | MEDIUM   | A profile mpv applies by itself when a file loads can undo the HDR target | `[x]`  | `7639c0a` | codex/default/standard |
+| hd-3 | MEDIUM   | The drawing thread waits for mpv each time it sets the HDR target      | `[x]`  | `0e7adca` | codex/default/standard |
+
+**Embedded player Slice 3 review, 2026-11-13 (closed 2026-11-13):** codereview codex
+(called plainly; the host's codex config resolves to gpt-6-astra @ max;
+standard) over `053cb36..0a63799` with `a02db80`: `findings`. Nine
+candidates, nine admitted, none declined. Record:
+`.agents/review/codereview-2026-11-13-embedded-core.md`.
+
+| ID   | Severity | Impact (one line)                                                      | Status | Commit | Reviewer |
+|------|----------|------------------------------------------------------------------------|--------|--------|----------|
+| ec-1 | HIGH     | A window closed while a play is starting leaves that play a pointer to a surface that is gone | `[x]`  | `fffc3bd` | codex/default/standard |
+| ec-2 | HIGH     | A start that times out lets go of a worker that is still running       | `[x]`  | `af4f142`, `d7d850a`, `7fa009b` | codex/default/standard esc:T5(ceiling) |
+| ec-3 | MEDIUM   | The settings read at start-up waits forever on a settings path that is not a regular file | `[x]`  | `d804fc8`, `867a694`, `d66bb7b` | codex/default/standard esc:T5(ceiling) |
+| ec-4 | MEDIUM   | An include inside a profile the user selects is applied after Vela's protected options | `[x]`  | `85b38ff`, `f80bf0c`, `1b7b6b4` | codex/default/standard esc:T5(ceiling) |
+| ec-5 | MEDIUM   | Close can stop the play that replaced the one it was for               | `[x]`  | `2a04402` | codex/default/standard |
+| ec-6 | MEDIUM   | An embedded start that fails after the checks passed fails the play instead of falling back | `[x]`  | `31eacad`, `ff147c2` | codex/default/standard esc:T5(ceiling) |
+| ec-7 | MEDIUM   | A stream-auth file whose removal fails once is never removed           | `[x]`  | `9026b4f` | codex/default/standard |
+| ec-8 | LOW      | A failed embedded start leaves the marker payload file behind          | `[x]`  | `e66a928` | codex/default/standard |
+| ec-9 | LOW      | Every embedded play adds a registry the compositor keeps for the life of Vela | `[x]`  | `2f65c44`, `2e3ad7e` | codex/default/standard esc:T5(ceiling) |
+
+**Embedded player Slice 2 review, 2026-11-13 (closed):** codereview codex
+(called plainly; the host's codex config resolves to gpt-6-astra @ max;
+standard) over `1cedb48..90db1a6`: `findings`. Four candidates, four
+admitted, none declined; all four fixed and verified by codex (sel-1
+after two reopens, sel-4 after one). Record:
+`.agents/review/codereview-2026-11-13-player-selection.md`.
+
+| ID    | Severity | Impact (one line)                                                      | Status | Commit | Reviewer |
+|-------|----------|------------------------------------------------------------------------|--------|--------|----------|
+| sel-1 | MEDIUM   | A play that fails on an unreadable settings file leaves its session and transcode behind | `[x]`  | `88c631b`, `51652d9`, `320b023` | codex/default/standard esc:T5(ceiling) |
+| sel-2 | LOW      | A quality step-down makes the fallback explanation appear a second time | `[x]`  | `12828ca` | codex/default/standard |
+| sel-3 | LOW      | A play replaced within 1.5 s uses up the fallback explanation unseen    | `[x]`  | `50e57e4`, `db0b8b6` | codex/default/standard |
+| sel-4 | LOW      | The test for play's refusal passes with the refusal removed             | `[x]`  | `47eec9a`, `29445f2` | codex/default/standard esc:T5(ceiling) |
+
+**Embedded player Slice 1 review, 2026-11-13 (closed):** codereview codex
+(called plainly; the host's codex config resolves to gpt-6-astra @ max;
+standard) over `b19d7d1..b719a65`, Slice 1 paths only: `findings`. Two
+candidates, two admitted, none declined; both are about tests, neither
+changes what the external player does. Record:
+`.agents/review/codereview-2026-11-13-player-seam.md`.
+
+| ID   | Severity | Impact (one line)                                                     | Status | Commit | Reviewer |
+|------|----------|-----------------------------------------------------------------------|--------|--------|----------|
+| ps-1 | MEDIUM   | The Rust suite fails at random: two tests delete each other's file     | `[x]`  | `4fbff87`, `1d7c405` | codex/default/standard |
+| ps-2 | LOW      | A credential-in-arguments regression passes the JavaScript checks      | `[x]`  | `94d067e`, `bdecf65`, `b84baeb`, `2c50ae5`, `e1ff242`, `053cb36` | codex/default/standard esc:T5(ceiling); reopened four times on the guard; closed as it stands, 2026-11-14 (`ps-2.contested.md`, A) |
+
+**Embedded player Slice 0b review, 2026-11-13 (closed):** codereview codex
+(called plainly; the host's codex config resolves to gpt-6-astra @ max;
+standard) over `5f1d9b6..b19d7d1`: `findings`. Three candidates, three
+admitted, none declined; all three fixed and verified by codex (lm-2
+after one reopen). Record:
+`.agents/review/codereview-2026-11-13-libmpv-set.md`.
+
+| ID   | Severity | Impact (one line)                                                     | Status | Commit | Reviewer |
+|------|----------|-----------------------------------------------------------------------|--------|--------|----------|
+| lm-1 | MEDIUM   | The CI decode check passes when a decoder produces nothing            | `[x]`  | `ec97d6e` | codex/default/standard |
+| lm-2 | MEDIUM   | A set missing its licence texts passes the "every file" integrity check | `[x]` | `7ca7e75`, `9cb85ea` | codex/default/standard esc:T5(ceiling) |
+| lm-3 | MEDIUM   | The pin test stays green when an unverified archive reaches the compiler | `[x]`  | `1e2b953`, `29026c2` | codex/default/standard |
+
+**Embedded player PLAN review recorded 2026-11-12:** openreview codex
+(gpt-6-astra @ max, grade not declared) over `c692305..cf35ddf`:
+`acceptable_with_changes`. Three plan findings admitted (ep-1 HIGH, ep-2
+HIGH, ep-3 MEDIUM); the owner adopted all three on 2026-11-12 and the
+plan is revised; the revised text is not re-reviewed. Record:
+`.agents/review/openreview-2026-11-12-embedded-player-plan.md`.
+
 **macOS AirPlay PLAN review recorded 2026-08-20:** owner-directed
 `openreview claude` used Claude Code 2.1.237 / `claude-opus-5` / `xhigh` over
 `32ef827f..9a79bb3`. Two completed verdicts are retained: first
@@ -907,12 +1073,12 @@ dispatches pinned (base = ec94715, head = a055556) for the batch pass, and
 
 | ID | Severity | Impact (one line) | Status | Fix commit |
 |----|----------|-------------------|--------|------------|
-| cir-1 | MEDIUM | Pre-split recovery can promise preserved connections, then require every server to be reauthorized | `[ ]` | pending |
+| cir-1 | MEDIUM | Pre-split recovery can promise preserved connections, then require every server to be reauthorized | resolved by owner; review waived | `e08ce44` |
 | dlr-s8-4 | MEDIUM | Package collection can republish stale installers | `[x]` | `bff2905` |
 | dlr-s8-3 | MEDIUM | Live Jellyfin can fail on Home before a real library renders | `[x]` | `5532e93`, guard `8366b4f` |
 | dlr-s8-2 | MEDIUM | E2E reuses a skewed WebKit driver despite an exact packaged match | `[x]` | `ec7c43e` |
 | dlr-s8-1 | MEDIUM | Local package scripts can install/build with an unpinned Node/npm pair | `[x]` | `4cba5db` |
-| fwer-1 | HIGH | Failed watch edit can blank/lose the loaded grid and manufacture a view failure | `[~]` | pending |
+| fwer-1 | HIGH | Failed watch edit can blank/lose the loaded grid and manufacture a view failure | `[x]` | `b5c170a` |
 | dlr-s1-1 | MEDIUM | Windows release cannot run the direct npm.cmd version assertion | `[x]` | `adc0104` |
 | lrs-1 | MEDIUM | Empty-Home redirect's navEpoch bump suppresses the refresh failure banner; user lands in a stale library silently | `[x]` | see log |
 | lrs-2 | MEDIUM | Refresh case 5 passes with the content-leg navEpoch gate removed (loadMore reads live state) | `[x]` | see log |

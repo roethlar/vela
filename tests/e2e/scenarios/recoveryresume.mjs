@@ -25,6 +25,8 @@ function paths(configRoot) {
 
 export default {
   name: 'recoveryresume',
+  rows: [],
+  noRows: 'resuming a recovery interrupted by a crash; plays nothing',
 
   seed({ configRoot }) {
     const files = paths(configRoot);

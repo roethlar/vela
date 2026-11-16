@@ -1,0 +1,322 @@
+# pa-7: nothing checks that Plex is told the play has stopped
+
+**Severity**: MEDIUM — row 2 includes the final stop. For Plex, `multiplex` waits for any timeline request and any progress request. With the final "stopped" timeline never sent, the periodic "playing" ones still satisfy it; the other scenario of row 2, `watchstate`, is Jellyfin's and cannot see it.
+**Status**: Verified — closed as it stood by the owner on 2026-11-14; the last round's two comments repaired on 2026-11-16 (codex ported and finished the repair; reviewed by the working agent)
+**Branch**: —
+**Commit**: `17d9a81`, `7e1dda5`, `f07fd8c`, `4906831`, `d504a1e` (repair), `c618d31` (repair, round 3)
+
+## Evidence
+
+Reviewer, verbatim: "tests/e2e/scenarios/multiplex.mjs:72 claims row 2, but :243 accepts any /:/timeline request and :247 separately checks /:/progress. Neither assertion checks timeline state. If the final update_timeline('stopped') in src-tauri/src/playback.rs:1150 is omitted while periodic 'playing' reports and final progress remain, these assertions still pass."
+
+## Predicted observable failure
+
+Reviewer, verbatim: "The verdict can credit Plex's final-stop behaviour even though Plex receives no stopped timeline report. The other row-2 scenario, watchstate, exercises Jellyfin and cannot detect that omission."
+
+Reviewer's suggested direction, verbatim: "Assert a final Plex timeline request with state=stopped, the correct item, and the final position. Distinguish it from reports sent while playback was running."
+
+## What
+
+The defect is as the reviewer describes. For Plex, `multiplex` (row 2, both
+players) waited for any `/:/timeline` request and any `/:/progress`
+request. The periodic "playing" timeline reports satisfied the first wait,
+so a play that never sent its final `update_timeline("stopped")`
+(`start_tracking_plex` in `src-tauri/src/playback.rs`) still passed.
+Nothing checked that a "playing" report arrives while the play runs either.
+
+The helper who attacked the first fix found a hole in it. Its check on the
+stopped report's time was `>= 6000 && <= 10000`, and the mock's item lasts
+exactly 10000 ms. With the stopped call's time and duration arguments
+swapped, a report at the item's full length, which tells Plex the item was
+watched to the end, passed in both players.
+
+## Approach
+
+In `tests/e2e/scenarios/multiplex.mjs`:
+
+- While the play runs, the scenario waits for a timeline report with
+  `state=playing` to reach Plex A.
+- After the stop it waits for one with `state=stopped`, and requires: it is
+  the only stopped report and the last timeline report; only "playing"
+  reports come before it, at least one; it names the item (`ratingKey` 1,
+  `key` `/library/metadata/1`); it carries the item's duration, 10000; its
+  time is between 6000 and 10000; no report carries a greater time; and
+  its time is where the play stopped: no earlier than mpv's position read
+  just before the stop less 500 ms, at most 2 s after it, and below 10000.
+
+For that reading `playAndQuit` in `tests/e2e/helpers.mjs` takes an optional
+`beforeStop(mpv)` step, run after the seek has been observed and just
+before the stop. It defaults to nothing, so other callers are unchanged.
+In passing runs mpv was at about 7458 to 7500 ms and the report said 7458
+(external) and 7825 (embedded).
+
+Made, attacked, repaired, confirmed and landed as `pa-1` was.
+
+## Files changed
+
+- `tests/e2e/scenarios/multiplex.mjs`
+- `tests/e2e/helpers.mjs`
+- `tests/e2e/judge.mjs` (the follow-up)
+- `tests/e2e-judge.test.mjs` (the follow-up)
+
+## Guard proof
+
+The scenario is the guard, and what proves it is a run with the product
+broken. Each of these was a local change to `start_tracking_plex`, built,
+run in the external and in the embedded player, and restored (the app was
+rebuilt and passed afterwards):
+
+- The stopped call skipped: "timed out waiting for the final "stopped"
+  timeline report to reach Plex A".
+- No "playing" reports: "timed out waiting for a "playing" timeline report
+  ...".
+- The stopped time sent as 1000: "the stopped report carries the final
+  position ...".
+- `ratingKey` 2: "the stopped report names the item played".
+- Time and duration swapped: "the stopped report's position (10000 ms) is
+  where the play stopped: mpv was at 7458 ms just before the stop, and the
+  clip ends at 10000 ms". The older 6000-to-10000 check passed in that run.
+- The time sent 1000 ms early: the same sentence, 6458 against 7458. The
+  older check passed here too.
+- The duration sent as the position: "the stopped report carries the item's
+  duration (10000 ms in the mock)".
+- The final report sent as "playing" (the confirming helper, on the merged
+  content): the first sentence above, in each player.
+
+On the committed content: 5 of 5 passing runs in each player by the
+repairing helper, 5 of 5 in each by the attacking one, and both full
+suites on the merged content.
+
+The follow-up (`7e1dda5`, `f07fd8c`, `4906831`). As first landed, nothing
+that plain `node --test` runs failed when this fix was taken out, and the
+reviewer's sandbox cannot run the end-to-end suite. Now:
+
+- The rules are a function of their own, `plexStopProblems` in
+  `tests/e2e/judge.mjs`: one sentence per broken rule, none when all is
+  well. The rules are those listed above, unchanged.
+- What the scenario hands the rules is a function too, `assertPlexStopped`
+  in `multiplex.mjs` (exported): of all the requests Plex A received it
+  takes the `/:/timeline` ones, prints them, and requires no problem for
+  item 1, a 10000 ms duration, the 6000 ms seek and mpv's position just
+  before the stop. `run()` waits for the stopped report as before and
+  calls it.
+- Unit tests in `tests/e2e-judge.test.mjs` compare exact lists of
+  sentences: the list seen in passing runs gives none; the argument swap
+  the first fix let through (time 10000, duration 7458); a report 1 s
+  early, just over 500 ms early, and exactly 500 ms early (which passes);
+  more than 2 s late, and exactly 2 s late (passes); no stopped report,
+  two, one that is not last; a report that is not "playing" before it; a
+  wrong `ratingKey`; a wrong `key`; a "playing" report further on; a
+  position that was never read; a time that is no number; a stop at
+  exactly the seek; a duration written "10000.0". `assertPlexStopped` is
+  run on recorded requests, a passing set and the swap, and with a stop
+  short of the seek.
+
+Red-proofs of the follow-up, each restored from the commit: every rule of
+`plexStopProblems` taken out in turn (fourteen injections; each failed its
+own test, showing the missing sentence); the fix itself taken out (the
+bounds against mpv's position removed: the swap test failed); in
+`assertPlexStopped`, the position fixed at a constant, the filter widened,
+the print removed, the duration, the `ratingKey` and the `key` changed
+(each failed); the seek set to 0 at first SURVIVED, a hole in the guard
+that `4906831` closed (it then failed). End to end, with the stopped
+report's time and duration swapped in `start_tracking_plex` and the app
+built, `multiplex` failed at `assertPlexStopped` with the swap's two
+sentences; restored and rebuilt, it passed 3 of 3 in each player.
+
+Made by a helper agent (Claude Opus 5.5) on a local branch, attacked by a
+second, repaired by a third, read by the coordinating agent, and landed
+one commit per helper commit, each with `npm run check` green.
+
+## Coder dispute (if any)
+
+## Known gaps
+
+- A stopped report between 0.5 and 2 s late would pass.
+- `key` was not broken apart from `ratingKey`; "exactly one stopped report"
+  and "the stopped report comes last" were not each broken on their own
+  (each would take a product change of its own).
+- The other scenarios that call `playAndQuit` were not run one by one after
+  the helper changed; they ran in both full suites on the merged content.
+- Still held only by end-to-end runs: that `run()` calls
+  `assertPlexStopped`, that the position is read from mpv in `beforeStop`,
+  and the waits for the "playing" and the "stopped" report.
+
+## Reviewer comments
+
+Raised by: codex / host default / host default / standard, codereview
+generation pass over `ab95c49..ac3e563`, 2026-11-14 07:27 UTC
+(`.agents/review/codereview-2026-11-14-embedded-parity.md`). Reviewer's
+title: "The Plex coverage does not prove the final stopped timeline". Reviewer's severity: MEDIUM.
+
+### Verification round 1, recorded 2026-11-14 12:32 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1da01-4575-78d3-9528-b557aedcdc75`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 12:21 UTC, finished 12:30 UTC.
+- Reviewed head `2a42345091b17ed54fb89ab281882e7e85f7f505`, base
+  `25287b6a6d1edc30d96c59bef88c17ab3810d6a2` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **reopened**. Comments, verbatim:
+  - tests/e2e/judge.mjs:96 — The 2000 ms upper bound can reject correct playback: multiplex samples before stopPlayAsUser performs embedded UI waits, and showPlayerBar alone allows 3000 ms. Using the actual stop helper and Driver.waitFor with simulated controls appearing after 2250 ms produced a 7458 ms sample and a correct 9717 ms stop, which assertPlexStopped rejected. Conversely, an immediate stop at 7458 accepts an incorrect 8958 report. Observe the position through stopping, or stabilize it before sampling, and guard delayed controls explicitly; the recorded E2E runs do not cover this. Missing-stop, removed-bound, and wrong-seek mutations failed for their intended reasons; after restoration, all 26 tests passed.
+
+Orchestrator: a valid verdict, reopened on one comment, and it is right
+both ways: a correct stop that took longer than two seconds could be
+refused, and a report up to two seconds late was let through.
+
+### Repair (round 2), `d504a1e`
+
+The stopped report's time was held to mpv's position read once, before the
+stop began, with two seconds allowed after it. In the embedded player the
+stop is a click on the view's Close control; the control can take seconds
+to come up, and the play goes on meanwhile.
+
+Now the position is read all through the stop. `positionsWhile` in
+`tests/e2e/helpers.mjs` takes one reading before the stop begins and then
+one every 50 ms until the stop has acted, and hands each over; the last one
+is where the play was when it stopped, however long the stop took. A
+reading that does not answer within 300 ms (mpv has gone) is left out, and
+nothing is handed over once the stop has ended. `playAndQuit` takes
+`positionAtStop` for this, in place of `beforeStop`; `multiplex` is its
+only user. The reading before the stop is what the external player's stop
+leaves: that stop is mpv's own quit, and the scenario's connection goes
+with it at once. (The first form of this repair lacked that reading, and
+`multiplex` failed three runs of three in the external player with no
+position read at all; the end-to-end runs caught it before it landed.)
+
+The rule in `plexStopProblems` (`tests/e2e/judge.mjs`): the stopped
+report's time is within 500 ms of the last reading, either way, and short
+of the item's end. The sentences now say "mpv was last seen at N ms as it
+was stopped".
+
+Files: `tests/e2e/helpers.mjs`, `tests/e2e/judge.mjs`,
+`tests/e2e/scenarios/multiplex.mjs`, `tests/e2e-judge.test.mjs`.
+
+Guard, in `tests/e2e-judge.test.mjs`:
+
+- "the position is read all through a stop that takes long, and the report
+  is held to the last reading": the reviewer's case against a stand-in for
+  mpv (the play at 7458 ms when the stop begins, a stop that takes
+  2250 ms): the last reading is within 150 ms of where the stop acted; a
+  correct report at 9717 ms passes against it, and would not against the
+  reading from before the stop.
+- "reading the position ends with the stop, when mpv has gone, and when the
+  stop fails": mpv gone part way; nothing read after the stop; a stop that
+  ends the play at once still has the reading from before it; a stop that
+  fails is not swallowed.
+- "a stopped report away from where the play stopped fails": just over
+  500 ms late fails and exactly 500 ms passes; the reviewer's late report
+  (7458 read, 8958 reported) fails.
+- "multiplex has the position read through the stop of its play": the text
+  of `playAndQuit` and of the scenario.
+
+The cases that allowed two seconds were changed to half a second; that
+allowance was the defect.
+
+Red-proofs by the coordinating agent, the file put back and checked byte
+for byte after each: the allowance made two seconds again; the reading
+before the stop taken out; the readings during the stop taken out; the
+stop made without the reading. Each failed its test.
+
+End to end, on the repair's content: `multiplex` passed 3 runs of 3 in the
+external player and 4 of 4 in the embedded one (first reading about 7458
+to 7500 ms; reports 7458 external, 7783 embedded). `npm run check` was
+green before the commit (483 tests).
+
+Not covered: as listed above, with half a second in place of two. That
+`run()` passes `positionAtStop`, and the waits for the two reports, are
+still held by end-to-end runs and by the text test only.
+
+### Verification round 2 (repair-delta redispatch), recorded 2026-11-14 13:43 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+  escalated: T5 (ceiling)
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1da43-1dfa-7e53-ac7b-41a852e5528b`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 13:33 UTC, finished 13:43 UTC.
+- Reviewed head `d504a1ed8f0a83d6a183ea5bdf8866a253286923`, base
+  `54409079deac906fd16d3eef739d096c1e79c440` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **reopened**. Comments, verbatim:
+  - tests/e2e/helpers.mjs:476 — The last reading still need not represent the stop. stopPlayAsUser closes this connection immediately after requesting quit/click/key, then allows 4000 ms for termination; subsequent sampling cannot observe playback during that interval. Neither player guarantees termination within 500 ms. A simulated 900 ms delay using the actual stop helper and MpvIpc produced last/final positions of 7459/8360 ms externally and 7610/8560 ms embedded: correct reports failed, while stale reports passed. start_tracking_plex obtains its final position from an independent observer that can continue receiving updates after this connection closes. Keep observation alive through termination or stabilize playback before sampling, and guard delayed stop handling explicitly.
+  - tests/e2e-judge.test.mjs:495 — The no-late-reading assertion snapshots the count after positionsWhile returns, but that helper awaits its watcher before returning. Removing the watcher’s running check left all 32 tests passing while a probe delivered a reading at 150 ms after the action ended at 120 ms. Assert against action completion inside the callback, including an outstanding read. The allowance, initial-reading, ongoing-reading and wiring mutations did fail their guards; after restoring the pinned code, all 32 tests passed.
+
+### Closed as it stands, by the owner (2026-11-14)
+
+The owner set tests aside that day until the app is done and a release is
+in view (`.agents/decisions.md`, 2026-11-14, "Tests are not a priority
+until the app is done and a release is in view"), and this finding, which
+is about tests alone, closes as it is on `main`. The comments of the last
+verification round above are not repaired; they are its known limits, to
+be taken up, if at all, in the release's test pass.
+
+A third repair, by helper agents (the play paused and moved before it is
+stopped), was being written when the owner said so. It was not reviewed and
+not landed, and exists only on the local branch `pa7-r3`
+(worktree `~/dev/vela-agent-keep/wt/pa7-r3`) on `continuum`, not pushed; it may
+not be there later.
+
+### Repair (round 3), `c618d31`, 2026-11-16: the release's test pass
+
+On 2026-11-16 the owner asked for the release to be made ready, which
+ended the setting-aside of tests (`.agents/decisions.md`, that date). The
+repair parked on the branch `pa7-r3` was taken up: codex ported it onto
+`main`'s tests (twenty files had moved under it) and finished it (worktree
+`cx-pa7port`); the working agent reviewed and landed it.
+
+What it does, against the two comments of verification round 2:
+
+- "The last reading still need not represent the stop." A play whose
+  final position is asked for is no longer read while it moves. It is held
+  still first (`stopStill`, `tests/e2e/helpers.mjs`): paused; moved, still
+  paused, to 9 s, a position it has not been within half a second of
+  (checked against how far it had got, and against the position it
+  actually lands on); waited on until mpv says, three reads running, that
+  it is there, paused and not seeking. `multiplex` then waits until Plex
+  has had Vela's "playing" report of that position (`untilPlexSawHeld`),
+  the play is checked to be still held, and only then stopped. A paused
+  play does not move, so where it stopped depends neither on when it was
+  read nor on how long the stop took to act. `plexStopProblems` judges the
+  stopped report against the position the play was held at.
+- "The no-late-reading assertion snapshots the count [too late]."
+  `positionsWhile` and its guard are gone. The test of what replaced it
+  ("the held-position callback finishes before the stop, including an
+  outstanding read") checks inside the callback that nothing is handed
+  over once the stop has been asked.
+
+Also: the judge accepts one identical copy of the stopped report, because
+`e50aa83` sends a report again when its connection failed and both copies
+can arrive; a copy that differs in item, position or duration, a third
+copy, or any report after the stop fails.
+
+Guard proof: `node tests/pa7-redproof.mjs` (in the tree, not part of
+`npm run check`) injects 54 regressions one at a time into the helper, the
+judge and the scenario, runs the named test, and puts the file back byte
+for byte. Run by codex and again by the working agent: 54 of 54 fail their
+test for the reason expected. `npm run check`: 591 tests, none skipped.
+
+End to end (the working agent, on `continuum`): in the external player
+`multiplex` passed 3 of 3 and the other scenarios that use the helper 7 of
+7 and 4 of 4. In the embedded player `multiplex` FAILED 3 of 3, on a
+defect of the product it was built to see: the stopped report said 8822,
+8819 and 8822 ms after a "playing" report at the held 9000 ms. That is the
+observation a helper had reported on 2026-11-14 and nobody had verified.
+It was traced (a stop freed the renderer before mpv was told to end the
+file, and mpv reported the audio's position as the play's last) and fixed
+at `3e0a485`; with the fix `multiplex` passed 3 of 3 in the embedded
+player with a stopped report at 9000 ms, and sixteen embedded scenarios
+that stop a play passed 16 of 16.
+
+What this proves is the final report of a play that was paused when it
+was stopped. Nothing here proves where Vela reports a play stopped while
+it was moving; that cannot be judged to half a second from outside.
+
+Closed on the working agent's review, the repair being codex's (owner's
+decision of 2026-11-14). No further codex verification was dispatched.

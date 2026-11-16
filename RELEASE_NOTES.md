@@ -1,32 +1,115 @@
-# Unreleased
+# Vela 1.0.65
 
-## Fixes
-
-- Keep macOS AirPlay/HomePod video and audio synchronized by preferring mpv's
-  AVFoundation audio output, with CoreAudio retained as fallback and expert
-  overrides preserved.
-- Update `h2` to 0.4.16 to address `RUSTSEC-2026-0258`, an unbounded empty DATA
-  frame denial-of-service vulnerability.
-- Update `rustls` to 0.23.45 to address `RUSTSEC-2026-0285`, TLS 1.3
-  handshake messages accepted across encryption-level boundaries.
-- Update `devalue` to 5.9.4 to address `GHSA-9rgm-9g3h-6x36` and related
-  build-time serialization advisories.
-
-# Vela 1.0.60
-
-Vela 1.0.60 ships signed release binaries: the macOS app is Developer ID
-signed and notarized, and the Windows installers are Authenticode signed.
+This release opens each video's mpv window the way you left the last one,
+checks the certificate of HTTPS media servers when playing, saves Settings as
+you change them, and adds an experimental player that shows video inside
+Vela's own window on Linux with Wayland.
 
 ## Highlights
 
-- Install on macOS without a Gatekeeper approval prompt — the universal DMG
-  (Apple Silicon and Intel) is Developer ID signed and notarized by Apple.
-- Install on Windows without a SmartScreen warning — both the MSI and the NSIS
-  installer are Authenticode signed through Azure Trusted Signing.
-- Read a refreshed end-user README with real-library screenshots; the deep
-  user reference moved to `docs/usage.md` and the build/dev documentation to
-  `docs/development.md`.
-- Pick up dependency security fixes (postcss, SvelteKit, nanoid).
+- Every video of a session opens the way you left the one before it: full
+  screen or not, maximized or not, its size and its screen. Settings → Player
+  → Player window chooses how the first video after Vela starts opens.
+- Settings saves each change as you make it. The Save buttons on the Player
+  tab are gone.
+- The player now checks the certificate of an HTTPS media server. If your
+  server uses a self-signed certificate or a private authority, read
+  "Upgrading and going back" before you update.
+- Experimental, Linux on Wayland: play inside Vela's own window, with Vela's
+  own controls, keys and mouse actions, by choosing Settings → Player → Video
+  player. mpv's own window stays the default on every system.
+- Servers that share a name can be told apart by their Plex, Jellyfin or Emby
+  mark.
+
+## Upgrading and going back
+
+- **An HTTPS server with a self-signed or privately signed certificate stops
+  playing after this update**, until you either name the authority's
+  certificate file to mpv with `tls-ca-file` (in the Advanced mpv options or
+  your own mpv config) or turn on Settings → Player → mpv player → Skip
+  server certificate checks. Browsing is not affected, and neither are plain
+  HTTP servers or servers with a publicly trusted certificate. Until now mpv
+  did not check, so the stream's sign-in token was sent without knowing who
+  received it.
+- **Going back to Vela 1.0.58, 1.0.59 or 1.0.60 after using this version
+  stops at Settings recovery**, because those versions refuse a `config.json`
+  with settings they do not know. This version writes such settings when you
+  play a video (the player window is remembered even if you never open its
+  setting), when you choose a Player window other than "As you last left it",
+  when you choose Vela's window as the video player, and when you change Skip
+  server certificate checks, even back to off. Starting fresh settings there
+  resets every setting except your server connections.
+
+## Changes
+
+- Show a Plex, Jellyfin, or Emby mark wherever a server's name appears, so
+  servers that share a name can be told apart.
+- List server playlists directly under their heading, each with its server's
+  mark; a server with no playlists to show takes no space, and the heading
+  disappears when there are none.
+- Emby's experimental status is now shown on its row in Settings.
+- Within one run of Vela, open every video's mpv window the way the previous
+  one was left: full screen or not, maximized or not, and on the same screen.
+  This includes videos you start yourself, not only the next item of a
+  playlist or Continue Playing. What Vela carries over takes precedence over
+  custom mpv options such as `--fullscreen`.
+- Keep the mpv window's size from one video to the next as well. A video that
+  opens full screen or maximized returns to that size when you leave full
+  screen. The window's position is not carried. The carried size takes
+  precedence over a custom `--geometry`.
+- Add Settings → Player → Player window, which chooses how the first video
+  opens after Vela starts: "As you last left it" (the default; quit from full
+  screen and the next session opens full screen), "Full screen", or "Default"
+  (mpv and your own options decide).
+- With the Prefer Compatible source policy, choose the copy for the screen the
+  video will open on, which is now the screen of the previous player window.
+- Settings saves each change as you make it; the Save buttons on the Player
+  tab are gone. A choice is saved the moment it changes, and text (the mpv
+  path, the Advanced mpv options) when you leave its field or close Settings.
+  The header says "Saved", or "Not saved" with the reason in the section
+  concerned.
+- Add an experimental second player that shows the video inside Vela's own
+  window: Settings → Player → Video player (shown on Linux). It has its own
+  control bar, keys and mouse actions (click to pause, double-click for full
+  screen, the wheel for volume). It runs in a Wayland session and is off by
+  default. Switching to mpv's own window applies to the next video. To use
+  Vela's window, restart Vela if this run started without embedded playback.
+  Whenever it cannot be used, the video plays in mpv's own window and a line
+  on screen says why. It uses its own copy of mpv's library, which the Linux
+  packages now carry; Settings says so when it is missing. Details are in
+  `docs/usage.md`.
+
+## Fixes
+
+- Send a playback report again, once, when the connection it was sent on had
+  already been closed by the server. The final report of a play could be lost
+  this way, leaving the server showing the item as playing and without its
+  last position.
+- Check the certificate of an HTTPS media server when playing (see "Upgrading
+  and going back").
+- When mpv cannot play a video at all, end the play at once. Vela used to wait
+  about five seconds before the next playlist item started or the page came
+  back.
+- With "Use my own mpv config" on, make mpv exit when a file finishes even if
+  your `mpv.conf`, or a profile it includes, tells mpv to stay open. Continue
+  Playing and playlists stopped there, and the finished item's watched state
+  was not saved.
+- On Arch Linux, show the skip button and skip intros, credits and
+  commercials. The Arch package left out the script that does it; the other
+  packages were not affected.
+- On Windows, make mpv exit when a file finishes. It previously stayed open and
+  idle, so Continue Playing and playlists never advanced and the finished
+  item's watched state and resume position were not saved.
+- Keep macOS AirPlay/HomePod video and audio synchronized by preferring mpv's
+  AVFoundation audio output, with CoreAudio retained as fallback and expert
+  overrides preserved.
+- Update `h2` to 0.4.20 (`RUSTSEC-2026-0258`) and `rustls` to 0.23.46 with
+  `rustls-webpki` 0.103.16 (`RUSTSEC-2026-0285`, `RUSTSEC-2026-0348`,
+  `RUSTSEC-2026-0349` and two further rustls advisories).
+- Update the front end's build dependencies for published advisories:
+  `devalue` 5.9.4 (`GHSA-9rgm-9g3h-6x36` and related), Vite 8.3.5,
+  `source-map-js` 1.2.2, SvelteKit 2.70.4 and its static adapter 3.0.11. Vela
+  ships a static page and was not exposed by the SvelteKit advisories.
 
 ## Downloads
 
@@ -34,9 +117,19 @@ Native packages are attached for macOS, Windows, Debian/Ubuntu, RPM-based
 Linux, Arch Linux, and AppImage users. `SHA256SUMS` covers every promised
 package.
 
-The macOS and Windows artifacts are signed; the Linux packages and the Arch
-package are unsigned, as before. mpv 0.38 or newer remains a separate required
-installation.
+The macOS app is signed and notarized. The Windows installers are not signed
+in this release (those of 1.0.60 were): Windows SmartScreen shows "Windows
+protected your PC" before running one; choose "More info", then "Run anyway",
+and check the file against `SHA256SUMS` if you want to be sure of it. The Linux
+packages and the Arch package are unsigned, as before. mpv 0.38 or newer
+remains a separate required installation: it is the default player on every
+system.
+
+The Linux packages are about 15 MB larger than before. They now carry the
+library the experimental embedded player uses: an LGPL build of mpv and of the
+libraries it needs, as separate shared libraries, with each component's
+licence text, built from the sources pinned in `packaging/libmpv/versions.txt`.
+The macOS and Windows packages do not carry it.
 
 ## Server status
 
@@ -47,8 +140,16 @@ installation.
 
 ## Known limitations
 
-The rare queued watch-edit race disclosed in 1.0.0 remains an accepted
-limitation. Full setup and privacy details are in the
+- The rare queued watch-edit race disclosed in 1.0.0 remains an accepted
+  limitation.
+- The embedded player is experimental: Linux on Wayland only, not yet with the
+  NVIDIA proprietary driver, its picture is drawn by a different mpv renderer
+  than mpv's own window, and it does not crop HDR video. `docs/usage.md` lists
+  the differences.
+- With two monitors of the same model, Vela cannot tell them apart, and the
+  player window can open on the other one.
+
+Full setup and privacy details are in the
 [README](https://github.com/roethlar/vela#readme).
 
-[Changes since 1.0.59](https://github.com/roethlar/vela/compare/v1.0.59...v1.0.60)
+[Changes since 1.0.60](https://github.com/roethlar/vela/compare/v1.0.60...v1.0.65)

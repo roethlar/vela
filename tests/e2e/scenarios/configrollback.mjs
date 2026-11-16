@@ -42,6 +42,8 @@ function historyName(version) {
 
 export default {
   name: 'configrollback',
+  rows: [],
+  noRows: 'rolling back a damaged settings file; plays nothing',
 
   seed({ configRoot }) {
     const files = paths(configRoot);

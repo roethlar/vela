@@ -1,0 +1,322 @@
+# pw-8: the end-to-end scenario for the player window fails about one external run in four, and with it the parity verdict
+
+**Severity**: MEDIUM — `windowsetting`, the scenario that holds the player-window work end to end, failed about one external run in four at its fullscreen checks, and four of the last five full runs. It is not a recorded known failure, so every such run failed the parity verdict. The cause turned out to be in the scenario, not in Vela.
+**Status**: Verified
+**Branch**: —
+**Commit**: `26660a9`
+
+## Evidence
+
+Raised by the coordinating agent from end-to-end runs on 2026-11-14, not
+by the reviewer. The scenario failed in a helper's full external run of a
+merged copy, then in the full external runs at `9bcdfbc`, `ac25240` and
+`8cf3a05`, always in one of three places, each just after the scenario had
+changed fullscreen over its own connection to mpv and at once gone on:
+
+- after leaving fullscreen and ending the play, `config.json` still said
+  fullscreen ("the end of the play remembers how it left the window":
+  expected false, got true);
+- after entering fullscreen and at once quitting Vela, `config.json` never
+  got fullscreen ("timed out waiting for the window of the play still
+  showing when Vela quit");
+- the play after one that was quit at once opened windowed.
+
+Three helpers measured it before the seven fixes of this review landed and
+after: 3 failures in 16 runs at the review's base, and similar rates on
+the fix branches.
+
+## Predicted observable failure
+
+A full external run fails on `windowsetting`, and `npm run e2e:verdict`
+fails with it, about one time in four, with nothing wrong in Vela.
+
+## What
+
+Settled by a helper agent with a local build that printed the order of
+events (never committed), and confirmed by a second helper.
+
+Nothing is lost inside Vela. Vela learns how a window is left only over
+its own connections to mpv's socket: a reader of the window state and a
+watcher for the end of the file. It opens them by trying every 100 ms, and
+the first try usually comes before mpv has made the socket, so Vela is
+connected up to about 100 ms after mpv starts listening. The scenario
+found the socket, connected, paused, changed fullscreen and quit mpv (or
+asked Vela to exit) within 1 to 4 ms of the socket appearing. About one
+play in fifteen, all of that fell between two of Vela's tries, and mpv
+ended with only the scenario's connection open (mpv's own log shows one
+client). It never told Vela anything.
+
+In 34 traced runs there were 6 failures, and in every failing play Vela's
+reader had never connected. In every play where it had, the traced order
+was: mpv's fullscreen event read, applied, the end of the file read, the
+reader's end of file, then the end callback and its look at the window,
+then the settings written. With a delay of 60 ms or more between the
+change and the end, no changed play failed in 32.
+
+A person cannot do what the scenario did: mpv's window is not there yet a
+few milliseconds after its socket appears. So this is the scenario's
+fault at all three places. (The helpers who first measured the failures
+had two readings, "mpv delivers the change in under a millisecond" and
+"Vela's observation lags"; both were right: delivery is fast, and Vela was
+not yet connected.)
+
+## Approach
+
+The scenario's `play()` now waits, after the play's recorded start, until
+mpv has accepted three connections on its socket: the scenario's own and
+Vela's two (the only ones Vela opens for a play like this one, with no
+notice to show and no Automatic quality). The count is read from
+`/proc/net/unix`. Nothing a user sees says that Vela is connected, so no
+wait on something visible was possible; this is a wait on the sockets, not
+a sleep, and nothing asserted afterwards changed.
+
+The comment at the end of a play in `src-tauri/src/commands.rs` said "The
+IPC connection has closed by now, so this is the final state". It now says
+what is true in each case: when the reader read mpv's connection to its
+end, this is all the play reported; when mpv ended before the reader had
+connected, only the size the play opened at is handed on; when the play
+was stopped by a newer play or by Vela quitting, the reader may have
+stopped with lines unread. No behaviour changes.
+
+Made by a helper agent (Claude Opus 5.5) on a local branch, attacked by a
+second, repaired by a third (the comment, and corrected figures), and read
+and landed as one commit by the coordinating agent, which moved the
+counting into a function that plain `node --test` holds.
+
+What the helpers found in Vela while tracing this is another finding,
+`pw-9`.
+
+## Files changed
+
+- `tests/e2e/scenarios/windowsetting.mjs`
+- `tests/e2e/judge.mjs`
+- `tests/e2e-judge.test.mjs`
+- `src-tauri/src/commands.rs` (a comment)
+
+## Guard proof
+
+In `tests/e2e-judge.test.mjs`:
+
+- "pw-8: the connections a socket has accepted are counted from
+  /proc/net/unix": the count on a made-up text of that file (the listening
+  socket, three accepted ends, one still connecting, a connecting end with
+  no path, another socket whose path only begins the same).
+- "pw-8: windowsetting hands a play back only once Vela is connected to
+  its mpv": the scenario's text, where the wait for three is the last step
+  before `play()` returns, by its one way out, and the count is asked
+  nowhere else.
+
+Red-proofs by the coordinating agent, the file put back and checked byte
+for byte after each: the count taking a socket still connecting; the count
+taking a path that only begins the same; the scenario waiting for one
+connection; the wait there but never run. Each failed its test.
+
+End to end (the helpers'): with Vela's reader held back by a local change
+to the product, the scenario passed with the wait and failed without it.
+On the fixed scenario `windowsetting` passed 76 runs of 76 across the
+three helpers (25, 31 and 20 with 5 in pairs with `playlistplay`), ten of
+them with sixteen busy loops running; `playback`, `resume`, `playlistplay`
+and `watchstate` passed twice and `--embedded playback embeddedplay` once.
+
+`npm run check` and `cargo +stable check --locked` were green before the
+commit. Both full suites and the parity verdict are being run at
+`26660a9`; the plan's log has the result.
+
+## Coder dispute (if any)
+
+## Known gaps
+
+- The wait counts connections, at least three, not Vela's reader itself.
+  If Vela one day opens another connection for such a play, the wait could
+  be met early and the old failure would come back. It would come back as
+  a failure, not as a false pass. The scenario's comment says so.
+- `/proc/net/unix` makes the wait Linux-only, as the end-to-end suite is.
+- At Vela's exit nothing waits for the reader to have read what is already
+  in the socket. With the reader connected the margin was about 2 ms in 40
+  traced exits and no change was lost; no person can reach it.
+- Other scenarios were not gone through for the same race; only
+  `playlistplay` was run alongside.
+- Nothing in `npm run check` shows that the wait cures the failure; that
+  rests on the traced cause and on the end-to-end runs.
+
+## Reviewer comments
+
+Raised by: the coordinating agent, from end-to-end runs, 2026-11-14
+(`.agents/review/codereview-2026-11-14-player-window.md`, "Raised after
+the intake"). Not a codex finding; codex verifies the fix like any other.
+
+### Verification round 1, recorded 2026-11-14 13:33 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1da3a-7807-7fc0-b7ca-d285a0c04d71`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 13:23 UTC, finished 13:33 UTC.
+- Reviewed head `26660a9547f0003923fae99d831fe7dda32d97a2`, base
+  `76952afbfada22811abf698deffbfbc6c8e42945` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **reopened**. Comments, verbatim:
+  - tests/e2e/scenarios/windowsetting.mjs:120 — The connection wait leaves a real connected-reader exit race. Exit kills mpv and persists without waiting for the reader to drain. A deterministic Rust probe paused the connected reader after receiving a complete fullscreen=true event; exit persistence returned with fullscreen=false. The recorded 2 ms margin is no scheduling guarantee. This defect should not remain: bound the reader-drain wait before taking the exit snapshot.
+  - src-tauri/src/commands.rs:5925 — “The window-state reader has stopped by now” is false on cancellation. wait_tick and spawn_end_watcher can finish on stop_flag independently of done. The probe confirmed that the end callback can persist while the reader remains running. Qualify this claim.
+  - tests/e2e-judge.test.mjs:454 — The skipped-wait guard is incomplete: inserting an unbraced `if (false)` immediately before the await leaves both tests passing. Executing that play() with stubs confirmed it returns without calling acceptedConnections. Exercise the wait’s execution rather than only matching its text. Removing the wait and corrupting the count each failed as expected; restoring the pinned files passed.
+
+Orchestrator: a valid verdict, reopened on three comments, and all three
+are right. The first is a fault in the product that the scenario's wait
+had left standing: when Vela quits it saves the window before its reader
+has read all that mpv sent. A repair is being built (2026-11-14) on a
+local branch by helper agents: quitting waits, for at most half a second
+and inside the two seconds it already allows, until the reader has
+finished; the comment the reviewer found untrue is put right; and the
+guard runs the scenario's own `play()`. It will be recorded here as
+"Repair (round 2)".
+
+### Follow-up to the known gaps: the other scenarios, `71395c3` (and `ad3b82d`)
+
+"Other scenarios were not gone through for the same race" no longer
+holds. Codex went through all of them as a coding task (the owner's
+request of 2026-11-14 to split the coding with codex) and the
+coordinating agent reviewed and landed the result:
+`.agents/review/pw-8.other-scenarios.md` has the rule, codex's survey of
+every scenario and helper, how it was checked, and what was not done. In
+short: the wait is one helper, `velaConnected`, used in sixteen files
+(three connections for a play in mpv's own window, four for an embedded
+one), each use held by a test; one full run of each suite passed but for
+the recorded failures and one fault of `mergedview`'s own, fixed at
+`ad3b82d`.
+
+This change also answers part of the reviewer's third comment: the
+`windowsetting` guard now reads the last two statements of `play()`, so
+a wait under an unbraced `if (false)` fails it, and the helper the
+scenario calls is itself run by tests. It still does not run `play()`;
+the repair does that.
+
+### Repair (round 2): `0ae5b64` to `bb3b84e` (nine commits)
+
+By the reviewer's comment:
+
+1. *Vela's exit saves the window before its reader has read all that mpv
+   sent.* Fixed in the product (`0ae5b64`, `2efaac9`). When Vela quits,
+   the hand-over of the last external play's window first waits until
+   that play's window reader has FINISHED, for at most 500 ms
+   (`EXIT_READER_DRAIN_LIMIT`), inside the hand-over's own thread, so the
+   exit as a whole still waits at most the two seconds it did
+   (`EXIT_WINDOW_HANDOVER_LIMIT`, finding `pw-4`). The reader says it has
+   finished through the observation it shares with the record
+   (`ReaderProgress`), on every way out of its thread, by a guard that
+   acts on drop. The exit kills the player first, hands over second and
+   sets the stop flag third, so a connected reader reads what mpv had
+   sent and reaches the end of its connection; that order is held by a
+   test. No play in mpv's own window, or a reader already finished: no
+   wait. Tauri raises both of its exit events for one exit, so a reader
+   the exit has given up on once is not waited for a second time.
+2. *"The window-state reader has stopped by now" is untrue for a
+   cancelled play.* The comment now says that a cancelled play's reader
+   may still be running, with lines unread (`829972f`).
+3. *The guard did not run the scenario's wait.* `windowsetting`'s own
+   `play()` is now run by a test with stand-ins, and `run()` is held to
+   that `play()` and to `setFullscreen()` (`ca4ad24`, `bb3b84e`). The
+   scenario also waits, after a change of full screen, until mpv has
+   reported the change on the scenario's own connection (`7e40709`).
+
+Files: `src-tauri/src/commands.rs`, `src-tauri/src/playback.rs`,
+`src-tauri/src/lib.rs` (a comment), `tests/e2e/scenarios/windowsetting.mjs`,
+`tests/e2e/mpv.mjs`, `tests/e2e-judge.test.mjs`,
+`tests/player-window-ui.test.mjs`, `tests/e2e/README.md`.
+
+**How it was made and checked.** Three helper agents on Opus 5.5 (author,
+attacker, repairer; the attacker's four findings were fixed, each with a
+test). On the final content the helpers ran `windowsetting` ten times in
+the external player (10 of 10), `exitplay` twice in each player and
+`embeddedplay` once. The coordinating agent merged the nine commits onto
+`main`, ran the full check there (green: 690 Rust tests, 536 Node tests;
+the two audit commands exit as recorded) and, end to end, `windowsetting`
+three times, `exitplay`, `playlistplay` and `replaceplay` in the external
+player and `exitplay`, `embeddedplay` and `playlistplay` in the embedded
+one, all passing. It made no red-proofs of its own: the owner set work on
+tests aside that day.
+
+**What changes for a user.** Quitting Vela while a video shows in mpv's
+own window now saves a change of full screen or of size that mpv had
+already sent and Vela had not yet taken in. Quitting takes as long as
+before (about a tenth of a second in the venue), except that it can take
+up to half a second longer, once, when Vela quits within the first
+seconds of a play whose mpv it has not yet connected to, or when the
+configured mpv is a wrapper that leaves the real mpv running.
+
+Known gaps:
+
+- A play CANCELLED by a newer play stops its reader on the stop flag,
+  with lines it had already received unread. If no play in mpv's own
+  window follows, the window saved can be one change out of date. This is
+  taken up with the second half of `pw-9` (the reader's end), under the
+  owner's word of 2026-11-14 that what is obviously broken is fixed.
+- Between mpv reporting a change on the scenario's connection and on
+  Vela's lies mpv's own delivery; nothing measures it.
+- The wrapper case and the real exit handler running twice were not run;
+  they rest on Tauri's documentation and the code.
+
+### Verification round 2 (repair-delta redispatch), recorded 2026-11-14 19:15 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+  escalated: T5 (ceiling)
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1db77-30b0-74c0-913b-0e38f5030bf1`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 19:09 UTC, finished 19:15 UTC.
+- Reviewed head `bb3b84e2d7569d030d024ccf95fb3709cb3e88bb`, base
+  `81598d3998d43c5f293bbb16320575f58561a6e9` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **accepted**. No comments.
+
+Orchestrator's acceptance: schema-valid payload, verdict in the enum, both
+SHAs equal the pins, both booleans literally true. Accepted. The fix is
+on `main`; the finding is closed.
+
+### Mutation check of round 2, 2026-11-16 (the release's test pass)
+
+Round 2 (`0ae5b64` to `bb3b84e`) was accepted by codex on 2026-11-14 with
+the red-proofs of the day; with a release in view the guards were checked
+again, one behaviour at a time. A helper agent (Opus 5.5, under the multi-agent workflow the owner switched on
+for this session, in a git worktree of its own) injected regressions into
+the product code one at a time, restored the file from git after each, and
+ran the guards against each.
+
+Result: seventeen mutations in its table. Sixteen fail a guard for the
+right reason: the wait for the reader before the hand-over, its place
+before the window is read, its giving up at the limit, the save after
+giving up, the wait being inside the two-second hand-over, the exit order
+in `lib.rs` (kill, hand over, stop flag), a reader given up on not being
+waited for twice and still ending as finished, the guard living to the end
+of the reader's thread, only the last play in mpv's own window being
+waited for, no wait for a finished reader, the record's lock not held
+during the wait, the 500 ms value, and the real limit being passed.
+
+Two things it found, neither repaired here:
+
+- With the wait made limitless, two unit tests in `playback.rs`
+  (`a_running_reader_is_waited_for_only_so_long`,
+  `a_reader_given_up_on_is_not_waited_for_again`) HANG instead of failing:
+  their wait runs on the test's own thread. They hold the behaviour, but a
+  regression would stop the suite, not fail it (an unfiltered `cargo test`
+  hung past 900 s). Two tests in `commands.rs` fail properly on the same
+  mutation.
+- "A reader thread that cannot be started is still marked finished" is
+  caught only through a race: with the guard moved into the thread, the
+  test fails because its wait ran before the thread had marked itself
+  reading. The spawn failure itself is never driven (the commit said so).
+
+Held only by pins on the source text (`tests/player-window-ui.test.mjs`):
+the exit order in `lib.rs`, the 500 ms value, and the production call
+passing the real limits. Still not covered, as the commit said: the real
+exit handler running twice, and a wrapper `mpv_path` whose kill does not
+end the real mpv.
+
+The first of the two was repaired the same day (`382acc8`, written by
+codex, reviewed by the working agent): the waits under test run on a
+thread of their own behind a watchdog, and with the reader's wait made an
+hour again both tests fail in five seconds instead of hanging. The second
+stands as described.

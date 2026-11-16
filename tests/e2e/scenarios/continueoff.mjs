@@ -12,8 +12,11 @@ import {
   mockSource,
   pollUntil,
   seedConfig,
+  velaConnected,
+  runPlayer,
 } from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
+import { shown } from '../proof.mjs';
 
 let mock;
 
@@ -61,6 +64,7 @@ const playbackInfoIds = () =>
 
 export default {
   name: 'continueoff',
+  rows: ['4', '14'],
 
   async seed({ configRoot }) {
     const mediaDir = makeClips(configRoot, ['off-a.mp4', 'off-b.mp4']);
@@ -109,9 +113,6 @@ export default {
        select.value = 'off';
        select.dispatchEvent(new Event('change', { bubbles: true }));`,
     );
-    await driver.click(
-      await driver.find('xpath', `//button[normalize-space(.)='Save Continue Playing']`),
-    );
     await pollUntil(
       () => readConfig().continue_playing === 'off',
       'the Off mode in config.json',
@@ -126,6 +127,10 @@ export default {
     );
     const socket = await waitForNewMpvSocket(before);
     const mpv = await MpvIpc.connect(socket);
+    // playback::play: this client + position/window reader + EOF watcher;
+    // Original quality, no notice or health sampler.
+    // Embedded adds player::report::spawn_reporter for the view's state.
+    await velaConnected(socket, runPlayer === 'embedded' ? 4 : 3);
     await mpv.setProp('pause', true);
     assert.ok(
       String(await mpv.getProp('path')).includes('/Videos/off-a/stream'),
@@ -159,5 +164,7 @@ export default {
       'Off must survive an app restart',
     );
     await screenshot('02-off-persisted');
+    // The end of its proof of its rows in this player (proof.mjs).
+    shown('4', '14');
   },
 };

@@ -38,6 +38,8 @@ async function waitForFault(driver, action) {
 
 export default {
   name: 'connectionrecovery',
+  rows: [],
+  noRows: 'recovery from a damaged connections file; plays nothing',
 
   seed({ configRoot }) {
     const files = paths(configRoot);

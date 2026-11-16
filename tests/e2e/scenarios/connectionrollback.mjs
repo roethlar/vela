@@ -31,6 +31,8 @@ function versionId(version) {
 
 export default {
   name: 'connectionrollback',
+  rows: [],
+  noRows: 'rolling back a damaged connections file; plays nothing',
 
   async seed({ configRoot }) {
     tls = createMockPlexTls(configRoot);

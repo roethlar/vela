@@ -2,13 +2,31 @@
 // deliberately does not use WebdriverIO — see .agents/plans/e2e-harness.md
 // (deviation 2026-07-05).
 import fs from 'node:fs/promises';
+import { appIdentity, getRunApp } from './app-binary.mjs';
+// Re-export the one setter; even another URL of this module uses the same
+// canonical locator module's selection and cannot set it a second time.
+export { setRunApp } from './app-binary.mjs';
 
 export class WebDriverError extends Error {}
 
 export class Driver {
+  // WebDriver's codes for the keys that are not characters.
+  static KEY = {
+    Escape: '',
+    Space: ' ',
+    ArrowLeft: '',
+    ArrowUp: '',
+    ArrowRight: '',
+    ArrowDown: '',
+  };
+
   constructor(baseUrl) {
     this.baseUrl = baseUrl;
     this.sessionId = null;
+    // A constructor argument cannot choose an app. Nor can a subclass or
+    // caller replace the session entry point: this own property is neither
+    // writable nor configurable and closes over the private implementation.
+    Object.defineProperty(this, 'newSession', { value: (...args) => this.#newSession(...args) });
   }
 
   async #cmd(method, path, body, { timeoutMs = 30000 } = {}) {
@@ -32,20 +50,37 @@ export class Driver {
     }
     const json = await res.json();
     if (!res.ok || json.value?.error) {
-      throw new WebDriverError(
+      const error = new WebDriverError(
         `${method} ${path} → ${json.value?.error ?? res.status}: ${json.value?.message ?? ''}`,
       );
+      error.code = json.value?.error;
+      throw error;
     }
     return json.value;
   }
 
-  async newSession(applicationPath) {
+  // Starts the run's one app, and only while that path is
+  // still the file it was when Cargo reported it (or the prediction was made):
+  // a file replaced since then is refused, not started.
+  async #newSession(...unexpected) {
+    if (unexpected.length > 0) {
+      throw new WebDriverError('newSession takes no path: every driver starts the run app');
+    }
+    const app = getRunApp();
+    if (!app) throw new WebDriverError('the run app has not been set');
+    const { appBinary, identity } = app;
+    const now = appIdentity(appBinary);
+    if (now !== identity) {
+      throw new WebDriverError(
+        `the app binary ${appBinary} is not the file it was when the run located it (then ${identity}; now ${now ?? 'no file'})`,
+      );
+    }
     const value = await this.#cmd(
       'POST',
       '/session',
       {
         capabilities: {
-          alwaysMatch: { 'tauri:options': { application: applicationPath } },
+          alwaysMatch: { 'tauri:options': { application: appBinary } },
         },
       },
       { timeoutMs: 60000 }, // covers the app launch
@@ -96,6 +131,101 @@ export class Driver {
   // (e.g. Svelte bind:value + keydown handlers) fire like they do for a user.
   async type(elementId, text) {
     await this.#cmd('POST', this.#s(`/element/${elementId}/value`), { text });
+  }
+
+  // WebDriver Actions: real, trusted input that goes wherever the page has
+  // put focus (keys) or to a point in the viewport (the pointer). Released
+  // after each call, so no key is left held for the next one.
+  async #actions(actions) {
+    await this.#cmd('POST', this.#s('/actions'), { actions });
+    await this.#cmd('DELETE', this.#s('/actions'));
+  }
+
+  // Presses and releases each key in turn. A key is a character, or one of
+  // WebDriver's codes such as Driver.KEY.ArrowLeft.
+  async pressKeys(...keys) {
+    const sequence = keys.flatMap((value) => [
+      { type: 'keyDown', value },
+      { type: 'keyUp', value },
+    ]);
+    await this.#actions([{ type: 'key', id: 'keyboard', actions: sequence }]);
+  }
+
+  // Moves the mouse pointer to (x, y) in the viewport and two pixels on, so
+  // that the page sees a pointermove even when the pointer was already there.
+  async movePointer(x, y) {
+    await this.#actions([
+      {
+        type: 'pointer',
+        id: 'mouse',
+        parameters: { pointerType: 'mouse' },
+        actions: [
+          { type: 'pointerMove', duration: 0, origin: 'viewport', x, y },
+          { type: 'pointerMove', duration: 0, origin: 'viewport', x: x + 2, y: y + 2 },
+        ],
+      },
+    ]);
+  }
+
+  // Two primary presses at one viewport point, so the browser produces a
+  // real double-click using the same input path as movePointer.
+  async doubleClick(x, y, gap = 100) {
+    await this.#actions([
+      {
+        type: 'pointer',
+        id: 'mouse',
+        parameters: { pointerType: 'mouse' },
+        actions: [
+          { type: 'pointerMove', duration: 0, origin: 'viewport', x, y },
+          { type: 'pointerDown', button: 0 },
+          { type: 'pointerUp', button: 0 },
+          { type: 'pause', duration: gap },
+          { type: 'pointerDown', button: 0 },
+          { type: 'pointerUp', button: 0 },
+        ],
+      },
+    ]);
+  }
+
+  async clickAt(x, y, button = 0) {
+    await this.#actions([{
+      type: 'pointer',
+      id: 'mouse',
+      parameters: { pointerType: 'mouse' },
+      actions: [
+        { type: 'pointerMove', duration: 0, origin: 'viewport', x, y },
+        { type: 'pointerDown', button },
+        { type: 'pointerUp', button },
+      ],
+    }]);
+  }
+
+  async rightClick(x, y) {
+    await this.clickAt(x, y, 2);
+  }
+
+  // WebKitGTK accepts Actions wheel input but delivers TWO trusted events:
+  // the requested delta, then its exact opposite (-40/+40 or -120/+120 on
+  // y, +40/-40 on x). Five -40 actions still collapse to one cancelling pair.
+  // The app handles both, so Actions cannot drive a net wheel change here.
+  // The probe also confirms one notch (wheelDelta 120) is 40 pixels.
+  // Always dispatch count WheelEvents in the page. They are untrusted but
+  // reach the view's handler just as real events do; no test therefore drives
+  // a real wheel. Do not replace this with Actions or a conditional fallback.
+  async wheel(x, y, deltaX, deltaY, count = 1) {
+    await this.exec(`
+      const [x, y, deltaX, deltaY, count] = arguments;
+      const target = document.elementFromPoint(x, y);
+      if (!target) throw new Error('No wheel target at ' + x + ', ' + y);
+      for (let i = 0; i < count; i++) {
+        target.dispatchEvent(new WheelEvent('wheel', {
+          bubbles: true, cancelable: true, clientX: x, clientY: y,
+          deltaMode: 0, deltaX, deltaY,
+        }));
+      }
+    `, [x, y, deltaX, deltaY, count]);
+    console.log(`wheel: synthetic WheelEvent (${count} events; no real wheel coverage)`);
+    return 'WheelEvent';
   }
 
   async screenshotTo(filePath) {

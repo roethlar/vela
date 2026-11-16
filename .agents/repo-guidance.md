@@ -11,8 +11,16 @@
   REMOVED (decision `.agents/decisions.md` 2026-07-08 — Vela is a
   multi-server client; do not resurrect them).
 - Playback is intentionally delegated to the system `mpv` binary in its own
-  window for HDR passthrough. Do not embed video in the webview unless the
-  owner explicitly changes that product decision.
+  window for HDR passthrough, and that external player stays the default
+  and is never removed. Since 2026-11-12 an embedded libmpv player is being
+  added next to it under the approved plan
+  `.agents/plans/embedded-player.md` (decisions `.agents/decisions.md`
+  2026-11-12): Linux on Wayland first, experimental, off by default, using
+  a libmpv that Vela ships. Embed video only as that plan describes; its
+  Status and log say how far it has landed. Since 2026-11-15 the choice is
+  offered in Settings (Player, "Video player"), marked experimental, by the
+  owner's ruling of that day (`.agents/decisions.md`): the owner is Vela's
+  only user, and what is built is to be usable from the app.
 - The frontend is a single-page Svelte 5 app built by Vite (no SvelteKit;
   decision `.agents/decisions.md` 2026-10-23). Root `index.html` loads
   `src/main.ts`, which mounts the root component. `$lib` is defined only in
@@ -46,7 +54,9 @@ from the retired `.agents/repo-map.json`, 2026-07-08; verified against
   workflows' `npm install --global npm@<version>` are only CI's tested
   baseline.
 - `npm ci` (repo root) — clean, lockfile-exact JavaScript install.
-- `npm audit` (repo root) — fail closed on known npm vulnerabilities.
+- `npm audit --audit-level=moderate` (repo root) — fail closed on known npm
+  vulnerabilities of moderate severity and above; low advisories are reported
+  but do not fail the gate (decision `.agents/decisions.md` 2026-11-02).
 - `npm run check` (repo root) — frontend type and Svelte validation.
 - `npm run build` (repo root) — production frontend build plus its post-build
   layout check (`scripts/check-frontend-build.mjs`), for any change that can
@@ -84,7 +94,10 @@ Rules the command list doesn't carry on its own:
 ## Remotes & Sync
 
 - `origin`: `http://magneto:3001/michael/vela.git` (Gitea 28.1.0; fetch and
-  push) — the canonical Gitea (owner, 2026-10-24). The former `origin`,
+  push) — the canonical Gitea (owner, 2026-10-24). The same server is also
+  reached over HTTPS as `https://gitea.internal/michael/vela.git` (owner,
+  2026-11-12: "the same as the recorded server, just behind https"); a clone
+  using either URL is correctly aligned. The former `origin`,
   `http://q:3000/michael/vela.git` on host `q`, is retired (owner,
   2026-10-24: "q is gone"); a clone whose `origin` still points there needs
   its remote realigned.
@@ -129,6 +142,12 @@ Rules the command list doesn't carry on its own:
   `src-tauri/gen/`, or generated `makepkg` output beneath `packaging/arch/`.
 
 ### Guard discipline (earned the hard way, r17-r24 of library-refresh-scan)
+
+**Owner, 2026-11-14: tests are not a priority until the app is done and a
+release is in view** (`.agents/decisions.md`, that date). Until the owner
+says otherwise, this section governs the tests a change to product code
+gets, and nothing more: do not spend review rounds or repairs on findings
+that are about tests alone; record them for the release's test pass.
 
 Carved out of `.agents/state.md` 2026-07-14 so it survives that entry's
 rotation. The evidence is the `## Code review log` in

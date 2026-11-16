@@ -49,7 +49,9 @@ implementation trace; headings marked resolved are not an active queue.
 
 - Automatic playlist and Continue Playing successors now retain the completed
   mpv process's actual fullscreen and maximized state. Manual starts keep their
-  configured defaults, and unknown state remains untouched. Implemented in Vela
+  configured defaults, and unknown state remains untouched. (Superseded in
+  1.0.65: every play of a run carries the window, manual starts included; see
+  `docs/usage.md`, "Player behavior notes".) Implemented in Vela
   0.1.59 under `.agents/plans/playback-window-state-continuity.md`; eight
   production regressions were separately proven red/restored-green, the exact-
   source Linux suite passed 28/28, and Claude accepted exact reviewed head

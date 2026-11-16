@@ -3,16 +3,20 @@
 // Watching card itself remains the sole visible Play/Resume control. The mpv
 // start-position checks prove the distinct verbs drive distinct behavior.
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import path from "node:path";
+import { Driver } from "../driver.mjs";
 import {
   goHome,
   makeClips,
   mockSource,
   openLibraryGrid,
   playAndQuit,
+  pollUntil,
   seedConfig,
 } from "../helpers.mjs";
 import { startMockJellyfin } from "../mockjf.mjs";
+import { shown } from '../proof.mjs';
 
 let mock;
 
@@ -66,6 +70,7 @@ async function clickMenuItem(driver, label) {
 
 export default {
   name: "playverbs",
+  rows: ["1", "3"],
 
   async seed({ configRoot }) {
     const mediaDir = makeClips(configRoot, ["fresh.mp4", "progress.mp4"]);
@@ -96,7 +101,7 @@ export default {
     await mock?.close();
   },
 
-  async run({ driver, screenshot }) {
+  async run({ driver, configRoot, screenshot }) {
     await openLibraryGrid(driver, { cardPrefix: "Fresh Movie" });
 
     assert.equal(
@@ -130,12 +135,28 @@ export default {
     );
     assert.ok(!progressLabels.includes("Play"), "the ambiguous plain Play verb is absent");
 
-    const resumedAt = await playAndQuit(driver, () => clickMenuItem(driver, "Resume"));
+    // Each play is stopped as its user stops it (playAndQuit): mpv's quit in
+    // the external player; in the embedded player one of the view's keys,
+    // `q` here and Escape below (the playback scenario uses its Close).
+    const resumedAt = await playAndQuit(driver, () => clickMenuItem(driver, "Resume"), {
+      key: "q",
+    });
     assert.ok(
       Math.abs(resumedAt - 5) < 2,
       `Resume must start near the server's 5s position, got ${resumedAt}s`,
     );
 
+    // The page refreshes its grid after a play ends, and that refresh replaces
+    // the card (its label goes from the server's 50% to where the play
+    // stopped). The play's stop does not wait for that: in the embedded player
+    // the view leaves first, so a card found at once could be the one being
+    // replaced, and the click then landed on nothing (venue finding atk-2).
+    // So the next step waits for the card the refresh brings: the one that
+    // shows where the Resume play stopped (it was seeked to 6 s of 10).
+    await driver.waitFor(
+      `return /— [6-8]\\d% watched/.test(document.querySelector('button.poster[aria-label^="Progress Movie"]')?.getAttribute('aria-label') ?? '')`,
+      "the Progress Movie card to show where the Resume play stopped",
+    );
     const progressCard = await driver.find(
       "css selector",
       'button.poster[aria-label^="Progress Movie"]',
@@ -155,18 +176,35 @@ export default {
       "the detail exposes both explicit in-progress verbs",
     );
 
+    const beforeBeginning = Date.now();
     const beganAt = await playAndQuit(driver, async () => {
       const beginning = await driver.find(
         "xpath",
         `//div[contains(@class,'detail')]//button[normalize-space(.)='Play from Beginning']`,
       );
       await driver.click(beginning);
-    });
+    }, { key: Driver.KEY.Escape });
     assert.ok(
       beganAt < 2,
       `Play from Beginning must override the server resume point, got ${beganAt}s`,
     );
 
+    // Play from Beginning opened the item's recent at offset 0 (the hero then
+    // says Play), and its stop stamps the position (Resume again). Home is
+    // read only once that stamp is in: before it, Home could show the
+    // in-between state, or the wait below be met by the state from before
+    // the refresh (venue finding atk-2).
+    await pollUntil(() => {
+      try {
+        const recents = JSON.parse(
+          fs.readFileSync(path.join(configRoot, "config", "vela", "config.json"), "utf8"),
+        ).recents ?? [];
+        const recent = recents.find((r) => r.item?.ratingKey === "jf-mock:progress");
+        return (recent?.item?.viewOffsetMs ?? 0) > 3000 && recent.ended_at_ms > beforeBeginning;
+      } catch {
+        return false;
+      }
+    }, "the Play from Beginning play's final position in recents");
     await goHome(driver);
     await driver.waitFor(
       `const card = document.querySelector('[aria-label="Continue watching"] .flowcard.center');
@@ -189,5 +227,7 @@ export default {
     );
     await driver.exec(`document.querySelector('.menubackdrop').click()`);
     await screenshot("01-explicit-playback-verbs");
+    // The end of its proof of its rows in this player (proof.mjs).
+    shown('1', '3');
   },
 };

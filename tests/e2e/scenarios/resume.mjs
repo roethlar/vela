@@ -11,6 +11,7 @@ import {
   makeClips, mockSource, seedConfig,
 } from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
+import { shown } from '../proof.mjs';
 
 const HERO_CLIP = `[aria-label="Continue watching"] [aria-label^="Resume Mock Movie"]`;
 
@@ -18,6 +19,7 @@ let mock;
 
 export default {
   name: 'resume',
+  rows: ['1'],
 
   async seed({ configRoot }) {
     const mediaDir = makeClips(configRoot, ['stream.mp4']);
@@ -74,5 +76,7 @@ export default {
       Math.abs(resumeStart - stamp / 1000) < 1.5,
       `resume must start at the stamped ${stamp}ms, got ${resumeStart}s`,
     );
+    // The end of its proof of its rows in this player (proof.mjs).
+    shown('1');
   },
 };

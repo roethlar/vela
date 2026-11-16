@@ -186,6 +186,9 @@ export function startMockJellyfin({
     // and silently falls back to mpv on PATH (playback.rs:207).
     failPlaybackInfo: false,
     playbackInfoDelayMs: 0, // one-shot: park the next PlaybackInfo (bound at arrival)
+    // Item ids whose stream the server has stopped serving: PlaybackInfo still
+    // answers, so the play starts, and the player is refused the stream itself.
+    failStreams: new Set(),
     // One-shot delay for the next authoritative Stopped response. The body is
     // captured immediately, but neither server progress nor the HTTP response
     // lands until the delay expires; playlist tests use it to replace a
@@ -700,6 +703,7 @@ export function startMockJellyfin({
         return json({ error: "stream credential must not be in the URL" }, 400);
       }
       if (!authed(req)) return unauthorized(path);
+      if (state.failStreams.has(stream[1])) return json({ error: "mock stream failure" }, 500);
       return serveRange(req, res, findMovie(stream[1]).mediaFile);
     }
     const image = /^\/Items\/([^/]+)\/Images\/(Primary|Backdrop\/0)$/.exec(path);

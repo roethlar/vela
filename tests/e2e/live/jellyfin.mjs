@@ -127,6 +127,8 @@ async function watchToggle(driver, index, label) {
 
 export default {
   name: "live-jellyfin",
+  rows: [],
+  noRows: "the real Jellyfin's failure reporting; plays nothing",
 
   async seed({ configRoot }) {
     if (!fs.existsSync(CREDS)) {

@@ -354,3 +354,106 @@ svelte-check (0/0), production build, `cargo +1.89.0 check --locked`,
 `cargo +stable check --locked`, `clippy --all-targets --locked -D warnings`,
 `cargo +stable test --locked`, and `cargo audit` (only the standing allowed
 RUSTSEC-2024-0429 notice) — all green.
+
+## Release candidate: Vela 1.0.65 (prepared 2026-11-16; NOT tagged, NOT published)
+
+Prepared by the working agent on the owner's word of 2026-11-16
+(`.agents/decisions.md`): "you have permission to update whatever you need
+to to get the release ready. then do a final round of reviews with codex,
+then come to me with actions you cannot do." Tagging and publishing are the
+owner's. 429 commits separated v1.0.60 from `main` when the work began; the
+notes (`RELEASE_NOTES.md`, headed "Vela 1.0.65") say what a user gets.
+
+What changed in how a release is made:
+
+- The four Linux packages carry the embedded player's library (Vela's own
+  LGPL build of libmpv, about 15 MB) and each is checked before it can
+  reach a draft: `.github/workflows/release.yml` gained a `libmpv` job, a
+  check of the AppImage, the deb, the rpm and the Arch package against the
+  set that was built, and a `cargo-audit` gate (`4ab145b`). The Linux leg no
+  longer attaches to the draft itself; the inventory job attaches the Linux
+  packages once both package jobs have passed. macOS and Windows packages
+  carry none of the library.
+- A package with the library names its licences (`c45fe51`).
+- CI compiles the backend on Windows and for both macOS architectures
+  (`687d533`, `ceed9be`), and runs the package-check tests it used to skip.
+- The Windows installers are no longer signed (`fc991a8`, the owner's
+  decision of 2026-11-16 to drop Azure Trusted Signing). Three commits
+  before it (`9e7554f`, `6b7dd7c`, `2ffbffe`) had made a Windows signing
+  failure say why in the workflow's log, which is how the reason (a 403
+  from the signing service) was found; they went with the signing.
+
+Verification at `382acc8` (the last commit that changes code or tests; later
+commits are records), on `continuum`:
+
+- The full check: toolchain assertion, `npm audit`, `npm run check` (672
+  Node tests, none skipped; svelte-check 0 errors, 0 warnings), the
+  production build, `cargo +1.89.0 check --locked`, stable check, clippy
+  with stable and with 1.100, `cargo +stable test --locked` (727 passed, 12
+  ignored). `cargo audit` is not installed there and was not run; GitHub's
+  CI runs it and it passes.
+- End to end, both suites in full, each building its app, on a clean
+  checkout at `8b16a46`: external 48 of 48, embedded 51 of 51, parity
+  verdict PASS. Between `8b16a46` and `382acc8` only unit-test code changed
+  (`688c9d1`, `382acc8`).
+- The 11 tests against the shipped library (`npm run test:libmpv`).
+- The Arch package built from `382acc8` with the library
+  (`scripts/build.sh --with-libmpv`): its package check passed, and its own
+  binary, unpacked, passed five scenarios in the external player and seven
+  in the embedded one. sha256 `2374c0d79ed625d73217772bad323329f879e59a9d2847e6ac432a7884bdc970`,
+  `~/dev/vela-agent-keep/pkg/vela-1.0.65-1-x86_64.pkg.tar.zst`.
+- GitHub CI: green on the commits before `382acc8`; several runs that day
+  show as failed because GitHub cancelled their macOS job while it waited
+  for a runner, and one because of a test that read a file too early
+  (repaired at `688c9d1`). Read the run for the commit that is tagged.
+
+The release workflow was run by hand on `main` four times (runs
+43879587091, 43882137476, 43884461044, 43887131049; a run by hand creates
+no release). Every Linux job passes: the AppImage, deb, rpm and Arch
+package are built with the library and each passes its check. In those
+four runs the macOS leg built and then failed at notarization (Apple: "A
+required agreement is missing or has expired") and the Windows leg built
+and then failed at signing (Azure: 403), both for reasons in the owner's
+accounts. So no macOS or Windows artifact of this version exists yet, and
+the inventory job has not run. Since then Azure signing is gone
+(`fc991a8`) and the owner has said the Apple agreement should be done.
+
+The final review (`.agents/review/codereview-2026-11-16-release.md`): five
+codex hunts, fourteen findings, all repaired and closed.
+
+What only the owner can do, in order, as it stands after the owner's answers
+of 2026-11-16 (`.agents/decisions.md`, that date, the last entry: Azure
+signing is dropped, and the builds are verified before any tag; the first
+form of this list had the tag before the look at the macOS and Windows
+builds, which the owner corrected):
+
+1. **Apple.** Notarization was refused: "A required agreement is missing or
+   has expired" (HTTP 403). The owner said on 2026-11-16 that this "should
+   be done". Whether it is shows in the macOS leg of the next run by hand.
+2. **Get the builds without a tag.** A run of the Release workflow by hand
+   on `main` (Actions, Release, "Run workflow") builds and checks
+   everything, signs and notarizes the macOS app, and publishes nothing. Its
+   packages are on the run's page under Artifacts (`vela-macos`,
+   `vela-windows`, `vela-linux`, `vela-arch`), or `gh run download <run>
+   --repo roethlar/vela`. The agent started run 43906795908 at `fc991a8` on the
+   owner's word ("run it"); its result is in `.agents/state.md`.
+3. **Verify the builds**, which only the owner can: on the Mac, the DMG
+   opens without a Gatekeeper prompt and plays; on Windows, the installer
+   runs (unsigned now: SmartScreen says "Windows protected your PC", "More
+   info", "Run anyway") and plays; on both, an HTTPS server plays and a
+   self-signed one is refused with the notice that says where the setting
+   is (the certificate check is new, and each platform's mpv has its own TLS
+   backend). On `continuum`: `sudo pacman -U
+   ~/dev/vela-agent-keep/pkg/vela-1.0.65-1-x86_64.pkg.tar.zst`, then the
+   by-eye checks of the embedded player (its plan, "Owner checks
+   outstanding" and "For the owner") and the player-window plan's
+   acceptance steps.
+4. **Tag and publish**, once the builds are good: an annotated tag
+   `v1.0.65` on the commit that was verified, pushed to `github`. The tag
+   builds again from that commit and makes a DRAFT release with every
+   package and `SHA256SUMS`; the draft is not public, and can be looked over
+   once more. Paste `RELEASE_NOTES.md` as its text and publish it.
+5. **Not needed for the release:** whether the Windows installers are
+   signed another way (open; the decisions entry lists what was offered),
+   and removing the six `AZURE_*` repository secrets and the Azure
+   subscription, which are the owner's.

@@ -6,6 +6,7 @@ import { MpvIpc, mpvSocketSnapshot, waitForNewMpvSocket } from '../mpv.mjs';
 import { pollUntil, makeClips, mockSource, seedConfig } from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
 import path from 'node:path';
+import { shown } from '../proof.mjs';
 
 const ENTER = '';
 
@@ -13,6 +14,7 @@ let mock;
 
 export default {
   name: 'search',
+  rows: ['1'],
 
   async seed({ configRoot }) {
     const mediaDir = makeClips(configRoot, ['alpha.mp4']);
@@ -79,5 +81,7 @@ export default {
     } finally {
       mpv.close();
     }
+    // The end of its proof of its rows in this player (proof.mjs).
+    shown('1');
   },
 };

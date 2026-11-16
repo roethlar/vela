@@ -97,10 +97,11 @@ portable and may at most point here.
   (Ubuntu 26.04 LTS aarch64, 12 CPU; OS re-verified 2026-07-15; provisioned
   with rustup, tauri-driver, Xvfb, bsdtar, webkit2gtk-4.1-dev, vendored arm64
   WebKitWebDriver, debug binary built). See the Linux VM section below.
-- The mac clone has a `vm` remote. **The push policy is ASK, and that includes
-  `vm`** (`.agents/push-policy.md`). Corrected 2026-10-24: the Mac's
-  `~/Dev/vela` has only `origin` (magneto Gitea) and `github`, with no `vm`
-  remote. Reach the VM with the git-bundle-plus-`scp` route (for example
+- The Mac's `~/Dev/vela` has only `origin` (magneto Gitea) and `github`, with
+  no `vm` remote (observed 2026-10-24; the older note that it had one was
+  pruned 2026-11-12). The push policy lives in `.agents/push-policy.md`
+  (`ask` until 2026-11-12, `always` since). Reach the VM with the
+  git-bundle-plus-`scp` route (for example
   `.agents/plans/remove-sveltekit.md`, Host constraints). To run E2E without pushing, `scp` the
   changed files into `~/dev/vela` and verify by checksum before running — no
   `git push`, no `git checkout -- .` on the VM's tree (that has silently
@@ -256,18 +257,12 @@ Recorded and verified 2026-07-20 through `ssh michael@netwatch-01`.
   installer exited successfully, and both file metadata and the uninstall
   registration report 1.0.0. Vela was not running before the silent upgrade,
   so no process needed to be stopped or relaunched.
-- Re-observed locally on 2026-10-23. The toolchain has changed since the
-  2026-07-20 record, so the native-build claim above no longer holds:
+- Re-observed locally on 2026-10-23; the toolchain had changed since the
+  2026-07-20 record:
   - Windows Server 2025 Standard, build 26100, PowerShell 7.6.7.
-  - **No Visual Studio Build Tools:** no `vswhere`, and no Visual Studio
-    install directory. Cargo check, clippy and test, and native packaging,
-    cannot link here until the Build Tools are reinstalled. The per-user
-    Vela at the path above is still present.
+  - The per-user Vela at the path above is still present.
   - Node 26.12.1 is installed host-wide from the official MSI
-    (`winget install OpenJS.NodeJS`), with its bundled npm 11.20.0. No
-    npm 12 is installed globally, so the toolchain check (`engines.npm`
-    `>=12`) fails here. Run npm through `npx -y npm@12.0.2` (CI's baseline)
-    instead, or put a scratch-prefix npm 12 first on `PATH` for the check.
+    (`winget install OpenJS.NodeJS`), with its bundled npm 11.20.0.
   - rustup is installed (`winget install Rustlang.Rustup`) with
     stable-x86_64-pc-windows-msvc only; 1.89.0 is not installed.
   - This clone has `core.autocrlf=true`, from the system gitconfig
@@ -286,6 +281,157 @@ Recorded and verified 2026-07-20 through `ssh michael@netwatch-01`.
     - `github` is `https://github.com/roethlar/vela`.
     Host `q` and its q:3000 Gitea are retired (owner, 2026-10-24). Use
     `GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never` for unattended Gitea calls.
+- Re-observed locally on 2026-11-02. These two observations replace the
+  2026-10-23 ones they made stale (no Build Tools; no global npm 12), which
+  were pruned on 2026-11-12:
+  - Visual Studio Build Tools 2026 (18.11.2, found by `vswhere`) are
+    installed again. `cargo +stable check --locked` compiles and links
+    (rustup 1.29.2, stable 1.99.1), so the Cargo gates run here;
+    1.89.0 is still not installed, so the MSRV check does not. Native
+    packaging works again too: `pwsh scripts/build.ps1` produced
+    `src-tauri\target\release\bundle\nsis\Vela_1.0.61_x64-setup.exe` on
+    2026-11-02 (release Rust build about 5 minutes; NSIS 3.11 fetched by
+    Tauri).
+  - npm 12.0.2 is installed globally into `%APPDATA%\npm` (the owner ran
+    `npm install --global npm@12.0.2`). `C:\Program Files\nodejs\npm.ps1`
+    still resolves first on `PATH`, but it defers to the user-global
+    install, so `npm --version` reports 12.0.2 and the toolchain check
+    passes without `npx -y npm@12.0.2`. The bundled npm 11.20.0 is untouched.
+    Before this install, an `npm install` under npm 11 had rewritten
+    `package-lock.json` with minor bumps (kit 2.70.3, Tauri 2.12.4 and
+    more); that rewrite was discarded, never committed.
+
+- Observed 2026-11-12 over SSH from `continuum` (whose ed25519 key the
+  owner installed that day; Windows needs the key in
+  `%ProgramData%\ssh\administrators_authorized_keys` for an administrator
+  account, and `ssh-copy-id` cannot do it because the remote shell is
+  `cmd.exe`):
+  - The host has two Windows installs. The one booted that day (`C:`) is
+    the build/validation OS above. The other is visible from it as `F:` and
+    is the owner's daily-use install: Vela 1.0.59 at
+    `F:\Users\michael\AppData\Local\Vela\vela.exe`, Vela data under
+    `F:\Users\michael\AppData\Roaming\vela\vela\config\`, and mpv
+    `v0.42.0-5-g55d3feb45` at
+    `F:\Users\michael\AppData\Local\Programs\mpv\mpv.exe`. The `C:` install
+    has mpv `v0.41.0-1421-ga687796d9` at the same relative path.
+  - Vela writes no log file on any platform; the only offline evidence on
+    `F:` is `config.json` (never read `connections.json`: it holds tokens).
+  - mpv started there with no console and no redirected standard handles
+    does not exit at end of file. Evidence and fix:
+    `.agents/plans/windows-mpv-idle-exit.md`.
+  - A long-running owner script (`oc-testing` per-core sensor logging) may
+    be active on this host; do not stop PowerShell processes you did not
+    start.
+
+## CachyOS desktop (`continuum`, `/home/michael/dev/vela`)
+
+Recorded and verified 2026-11-12, locally on the host.
+
+- CachyOS Linux (rolling, Arch family), x86_64, kernel 7.3.4-1-cachyos.
+  `sudo` needs the owner's password. (Corrected 2026-11-12: an earlier
+  note called it passwordless because `sudo -n` succeeded while the
+  owner's sudo timestamp was still cached; it failed later the same day.)
+  An agent cannot install packages here unattended: hand the owner the
+  exact command.
+- Toolchain: system `nodejs` 26.13.1 and `npm` 12.2.2 (both pacman packages,
+  inside the `engines` ranges; `node scripts/check-js-toolchain.mjs` passes).
+  rustup has stable 1.99.1 (not updated; rustup reports 1.100.0 available),
+  1.97.1, and 1.100.0 installed side by side on 2026-11-12 to reproduce a
+  CI clippy failure (`cargo +1.100.0 ...`). **1.89.0 is not installed**, so
+  the MSRV check does not run here until it is added. `cargo audit` is not
+  installed either. Local `+stable` therefore lags CI's stable: a green
+  local clippy does not predict CI until `stable` is updated.
+- Arch packages `nodejs` and `npm` separately, and `npm` was absent until
+  2026-11-12 (`pacman -S npm`, which also pulled `node-gyp`, `semver` and
+  `nodejs-nopt`). `scripts/build.sh` checks its pacman prerequisites first, but
+  neither that list nor any later step looks for `node` or `npm`, so on an
+  Arch host without `npm` the prerequisite check passes and the toolchain
+  check (`scripts/check-js-toolchain.mjs`) dies with a raw Node stack trace
+  (`npm: command not found`). Fixed 2026-11-12 at `e58a17e` and
+  `b519083` (`.agents/plans/build-missing-npm-diagnostic.md`): both scripts
+  now name the missing tool in one line and exit 1.
+- 1.0.63-1 was built here on 2026-11-12
+  (`packaging/arch/vela-1.0.63-1-x86_64.pkg.tar.zst`) and installed by the
+  owner the same day (the agent cannot: sudo, above). `scripts/build.sh` copies every package it finds in
+  `packaging/arch/` to `dist/`, so an older package left there (1.0.61)
+  is republished beside the new one; remove stale packages before relying
+  on `dist/`.
+- Vela is installed system-wide as the native pacman package: 1.0.63-1 as of
+  `aaa01c1` (`pacman -Q vela`), which replaced the 1.0.61-1 built from
+  `be82ca6`. The recipe is `npm ci`, then `scripts/build.sh` (release Rust
+  build about 80 seconds), then `pacman -U
+  packaging/arch/vela-<version>-1-x86_64.pkg.tar.zst`. Runtime deps present:
+  webkit2gtk-4.1 2.54.2, libsoup3 3.8.1, mpv 0.41.0. `ldd /usr/bin/vela`
+  resolves every library and `desktop-file-validate` accepts the desktop
+  entry (both re-run against 1.0.63-1). Remove with `sudo pacman -R vela`.
+- E2E venue since 2026-11-12: the owner installed `xorg-server-xvfb` and
+  `tauri-driver` (`cargo install tauri-driver --locked`, in
+  `~/.cargo/bin`); `ffmpeg`, `bsdtar`, `curl` and `mpv` were already
+  present. `npm run e2e` works here: the harness's SHA-pinned
+  WebKitWebDriver 2.52.3 drives system WebKitGTK 2.54.2. Unlike the VM this
+  host is x86_64. Run E2E from a disposable `git worktree` (with its own
+  `npm ci`) so a suite run and edits in the main tree do not collide.
+- The JS checks, stable-Rust check/clippy/test and E2E run here. The MSRV
+  check and `cargo audit` do not (see the toolchain bullet).
+- Embedded-libmpv spike, 2026-11-12: scratch code, clips and evidence are
+  in `~/dev/vela-spike-libmpv/` (not a repo; safe to delete once the plan's
+  log is no longer being checked against it). `wayland-protocols` 1.50 was
+  installed for it (`pacman -S wayland-protocols`). When the agent's session
+  is started under sudo it runs as root: reach the desktop session with
+  `sudo -u michael env XDG_RUNTIME_DIR=/run/user/1000
+  WAYLAND_DISPLAY=wayland-1 ...`, and run git as `michael` so the repo
+  gains no root-owned files. The display is `DP-3`, HDR on, peak 465 nits,
+  SDR white 265 nits, scale 1.7.
+- 2026-11-12, installed by the agent while the session was root, for the
+  embedded-player probes: `meson`, `cmake`, `weston` (pacman). `ninja`,
+  `nasm` and `autoconf` were already present. The owner's HDR test clips
+  are in `~/dev/hdr-tests`. codex runs as `michael` only (its config is in
+  that home directory): from a root session use `sudo -u michael bash -lc`.
+  The review dispatch files of that day are in
+  `/tmp/vela-openreview-embedded-player/` (disposable).
+- Remotes, as of 2026-11-12: `origin` =
+  `https://gitea.internal/michael/vela.git`, which is the canonical Gitea
+  of `.agents/repo-guidance.md` (Remotes & Sync) reached over HTTPS (owner,
+  2026-11-12); and `github` = `https://github.com/roethlar/vela.git`, added
+  by the owner on 2026-11-12. Both answer `git ls-remote` from this host.
+- 2026-11-12 (later session, running as `michael` inside the KDE Wayland
+  session, `WAYLAND_DISPLAY=wayland-1`): the owner installed `podman`
+  6.2.0 (rootless, overlay, `crun`) and `patchelf` for the shipped-library
+  build (`sudo pacman -S --needed podman patchelf`). Screen auto-lock is
+  off, so `spectacle` screenshots work unattended.
+- Claude Code here runs in a permission mode whose safety classifier
+  refused `git push` twice on 2026-11-12, although the repo's push policy
+  is `always`. It allowed the push once the owner had said in that session
+  to push each commit. A fresh session should expect the same: an
+  in-session yes from the owner, or the push stays refused (do not route
+  around it).
+- Shell commands in a Claude Code session here go through the `ptk` MCP
+  tool (PowerShell 7); a hook blocks the built-in shell. A command that
+  prints thousands of error lines can kill the ptk worker
+  (`worker_exited_unexpectedly`): redirect bulk output to a file.
+- Embedded-player Slice 0 leftovers, 2026-11-12 (all disposable):
+  - `~/dev/vela-spike-libmpv/`: the probe programs (`probe1`, `probe2`,
+    `pbuild.sh` rebuilds them), `p0/` (probe scripts, screenshots, clips)
+    and `libset/` (the library-set recipe, its downloaded sources, the
+    build tree `work22/` and the built set `out22/libmpv/`).
+    `VELA_LIBMPV=<path to libmpv.so.2>` makes a probe use that library.
+    Files under `libset/work22` belong to container sub-ids: remove them
+    with `podman unshare rm -rf`.
+  - podman images: `localhost/vela-libmpv-build:22.04` (the build
+    environment), plus `ubuntu:22.04`, `debian:12` and `fedora:latest`
+    used for load tests.
+  - `~/dev/vela-probe-wt`: a detached `git worktree` of this clone with
+    its own `npm ci` and debug build, for E2E runs. Refresh with
+    `git -C ~/dev/vela-probe-wt checkout --detach <sha>`; remove with
+    `git worktree remove`.
+  - Headless Wayland for E2E: `weston --backend=headless --renderer=gl
+    --socket=<name>` (weston 15.0.1), then run the harness with
+    `VELA_E2E_HEADED=1 GDK_BACKEND=wayland WAYLAND_DISPLAY=<name>` and an
+    empty `DISPLAY`. It offers no colour management and no fractional
+    scale.
+  - Compositor screenshots of the active window: `spectacle -b -n -a -o
+    <file>`. The display's reference white read 83 nits that evening (265
+    during the spike): the KDE brightness slider moves it.
 
 ## Linux VM (E2E host)
 
@@ -406,9 +552,10 @@ Recorded 2026-07-13; OS/toolchain re-verified 2026-07-15.
   but no current AMD64 runtime venue was available.
 
 - The E2E suite (`npm run e2e`) is Linux-only and runs here, not on the macOS
-  dev box: `michael@192.168.64.5`, clone at `~/dev/vela`, reachable from the
-  dev box as the `vm` git remote (`receive.denyCurrentBranch=updateInstead`, so
-  a plain `git push vm main` updates its working tree).
+  dev box: `michael@192.168.64.5`, clone at `~/dev/vela`. That clone accepts
+  a push into its checked-out branch
+  (`receive.denyCurrentBranch=updateInstead`), but the Mac no longer has the
+  `vm` git remote that used it (macOS dev host section, 2026-10-24).
 - **`cargo` is on the LOGIN shell PATH only** (`~/.cargo/bin`). A plain
   `ssh michael@192.168.64.5 'cd ~/dev/vela && npm run e2e'` gets a non-login
   shell and dies in the Tauri build with `failed to run 'cargo metadata'

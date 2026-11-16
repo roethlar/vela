@@ -1,0 +1,158 @@
+// The parity list of the two players, as data: the behaviour inventory of
+// .agents/plans/embedded-player.md ("Behaviour inventory (the parity list)")
+// and the recorded exemptions. The scenarios say which rows they stand for on
+// their own default export (`rows`; tests/e2e/README.md, "What a scenario
+// declares"); tests/e2e-parity.test.mjs puts the two together and fails when a
+// row is shown in one player and neither shown nor exempted in the other.
+//
+// Nothing here is read by the runner except PLAYERS and the row ids, which the
+// shared loader (scenario-loader.mjs) checks every scenario against.
+
+export const PLAYERS = ['external', 'embedded'];
+
+// A row is split where its halves are proven differently in the two players,
+// or, like row 9, by mode, so that each mode must be shown on its own (SPLITS).
+export const INVENTORY = [
+  { id: '1', behaviour: 'Play starts; resume at start_seconds' },
+  { id: '2', behaviour: 'Plex timeline and Jellyfin/Emby check-ins, final stop' },
+  { id: '3', behaviour: 'Final position on quit; recents stamp; playback-ended' },
+  { id: '4', behaviour: 'Clean end -> watched, Continue Playing modes' },
+  { id: '5', behaviour: 'Playlist and server-playlist advance' },
+  { id: '6', behaviour: 'Source choice / policy' },
+  { id: '7', behaviour: 'Stream auth header never in argv/URL/title' },
+  { id: '8a', behaviour: 'Skip markers: automatic skip' },
+  { id: '8b', behaviour: 'Skip markers: the skip button' },
+  { id: '9a', behaviour: 'Autocrop: off' },
+  { id: '9b', behaviour: 'Autocrop: manual' },
+  { id: '9c', behaviour: 'Autocrop: auto' },
+  { id: '10', behaviour: 'Automatic quality step-down relaunch' },
+  { id: '11', behaviour: 'Unrequested-play notice' },
+  { id: '12a', behaviour: 'A new play stops the previous one' },
+  { id: '12b', behaviour: 'App exit stops playback' },
+  { id: '13a', behaviour: 'User mpv arguments (Advanced)' },
+  { id: '13b', behaviour: 'Own-config mode' },
+  { id: '14', behaviour: 'Ends at end of file rather than idling' },
+];
+
+export const ROW_IDS = INVENTORY.map((row) => row.id);
+
+// The plan's rows that are split, and into exactly which parts (the plan's
+// Slice 6 log: "Three of the plan's rows are split where their halves are
+// proven differently (8, 12, 13)"). Row 9 is split by mode, Off, Manual and
+// Auto, so that each mode is a part a scenario must show in each player and
+// the scenario that stands for it must reach the end of that mode's leg
+// (review finding pa-2). The inventory must hold every part of a
+// split row and no other part, and an unsplit row whole, so that half of a
+// row cannot be dropped, or a part made up, by editing INVENTORY alone
+// (scenario-loader.mjs, inventoryProblems; review finding pa-3).
+export const SPLITS = {
+  8: ['8a', '8b'],
+  9: ['9a', '9b', '9c'],
+  12: ['12a', '12b'],
+  13: ['13a', '13b'],
+};
+
+// Scenarios that fail in a player because of a recorded PRODUCT defect, which
+// this test work may not fix. Such a scenario does NOT show its rows in that
+// player: a row/player pair whose only scenarios are known failures is printed
+// as RED by the parity test, never as shown. `failsWith` is the exact text the
+// failure carries, so that a different failure of the same scenario is not
+// taken for this one; `defect` is the evidence. `intermittent: true` marks a
+// race that does not fail every run: a pass is then accepted too, never a
+// different failure. Remove an entry once the product is fixed and the
+// scenario passes.
+export const KNOWN_FAILURES = [];
+
+// A row and player that no scenario of the suite shows, and why. An exemption
+// is not coverage: the parity test lists every one of them each time it runs.
+// Each says why no scenario can show it in this venue without a product
+// change (`reason`), and names what holds it instead: tests of other kinds
+// (`heldBy`: the file and the test names; the parity test checks that the
+// file exists and that each name occurs in it) and/or the step the owner takes by
+// hand (`ownerStep`). An exemption for a row a scenario already shows in that
+// player is refused as stale.
+export const EXEMPTIONS = [
+  {
+    row: '10',
+    player: 'external',
+    reason:
+      'A step-down needs a health verdict, which only genuinely degraded playback produces; nothing in this venue can degrade a play, and Vela has no development hook that forces a verdict (tests/e2e/live/transcode.mjs says the same of the live venue: it does not test Automatic). Adding such a hook is a product change.',
+    heldBy: [
+      {
+        file: 'src-tauri/src/automatic.rs',
+        tests: [
+          'a_sustained_drop_storm_steps_down',
+          'a_starving_cache_steps_down',
+          'healthy_playback_never_steps_down',
+          'a_replacement_stream_gets_the_longer_cooldown',
+          'stepping_stops_at_the_cap',
+          'the_step_count_survives_a_relaunch',
+        ],
+      },
+      {
+        file: 'src-tauri/src/commands.rs',
+        tests: ['a_step_down_replacement_is_still_managed_by_automatic', 'a_newer_verdict_replaces_an_unhandled_one'],
+      },
+      { file: 'src-tauri/src/player/select.rs', tests: ['an_automatic_relaunch_neither_explains_nor_forgets'] },
+    ],
+    ownerStep:
+      'Play a Plex film at quality Automatic in the external player over a link slow enough to starve it (or throttled), and see the play relaunched at a lower quality at about the same position, with the short quality notice on mpv\'s screen.',
+  },
+  {
+    row: '10',
+    player: 'embedded',
+    reason:
+      'As for the external player: no venue can force a verdict. The verdict, the ladder and the relaunch are the same code for both players (playback::play starts the health sampler on the IPC socket of whichever player runs; apply_step_down relaunches in the player it replaces), so the unit tests listed hold the decision for both; what they do not reach is an embedded play being stopped and created again by a step-down.',
+    heldBy: [
+      { file: 'src-tauri/src/automatic.rs', tests: ['a_sustained_drop_storm_steps_down', 'a_starving_cache_steps_down'] },
+      { file: 'tests/player-selection.test.mjs', tests: ['a relaunch stays in the player it replaces'] },
+      {
+        file: 'tests/player-view.test.mjs',
+        tests: ["a replaced play's late close does not dismiss the view of the play that replaced it"],
+      },
+    ],
+    ownerStep:
+      'As for the external player, with the embedded player selected: the relaunch must stay in the embedded player, the player view must stay up across it, and the play must go on at about the same position.',
+  },
+  {
+    row: '11',
+    player: 'external',
+    reason:
+      'The unrequested-play notice is shown for a play the user did not ask for, which is a step-down relaunch (src-tauri/src/playback.rs, osd_notice), and no venue can force a step-down (row 10). The D3 fallback notice that `playerfallback` checks is a different notice, for a play the user did ask for; it rides the same delivery (commands.rs, `osd_notice.or(fallback_notice)`; spawn_osd_notice sends `show-text` over the IPC socket), so that scenario is evidence that the delivery reaches the external mpv once per play, not a proof of this row.',
+    heldBy: [
+      {
+        file: 'src-tauri/src/playback.rs',
+        tests: [
+          'a_notice_that_reaches_the_player_is_reported_shown_once',
+          'a_notice_dropped_because_the_play_was_replaced_is_not_reported_shown',
+          'a_notice_the_player_did_not_take_is_not_reported_shown',
+          'a_notice_for_a_player_that_cannot_be_reached_is_not_reported_shown',
+        ],
+      },
+      { file: 'src-tauri/src/commands.rs', tests: ['the_step_down_notice_stays_short'] },
+      { file: 'tests/e2e/scenarios/playerfallback.mjs', tests: ['playerfallback'] },
+    ],
+    ownerStep:
+      'With the external player, provoke a step-down (row 10) and see its short quality notice on mpv\'s screen for about two seconds, once.',
+  },
+  {
+    row: '11',
+    player: 'embedded',
+    reason:
+      'As in the external player: the notice belongs to a step-down relaunch, which no venue can force (row 10). The delivery itself is player-agnostic (spawn_osd_notice sends `show-text` over the IPC socket of whichever player runs, and the library draws mpv\'s OSD), and its rules are held by the tests listed, against a test socket. Unlike the external player, no scenario even shows the delivery reaching the embedded player: the only other notice, the D3 fallback one, by definition plays in the external player.',
+    heldBy: [
+      {
+        file: 'src-tauri/src/playback.rs',
+        tests: [
+          'a_notice_that_reaches_the_player_is_reported_shown_once',
+          'a_notice_dropped_because_the_play_was_replaced_is_not_reported_shown',
+          'a_notice_the_player_did_not_take_is_not_reported_shown',
+          'a_notice_for_a_player_that_cannot_be_reached_is_not_reported_shown',
+        ],
+      },
+      { file: 'src-tauri/src/commands.rs', tests: ['the_step_down_notice_stays_short'] },
+    ],
+    ownerStep:
+      'With the embedded player selected, provoke a step-down (row 10) and see its short quality notice drawn over the picture in Vela\'s window for about two seconds.',
+  },
+];

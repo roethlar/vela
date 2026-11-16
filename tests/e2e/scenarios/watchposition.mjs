@@ -89,10 +89,15 @@ async function openExactLibrary(driver, { section, prefix, expected }) {
 
 async function scrollGridToEnd(driver) {
   await driver.waitFor(`return !!document.querySelector('main.grid')`, "the browse grid");
+  // One scroll event, not two: moving the grid makes WebKit send its own a
+  // moment later, and a synthetic one on top of it is a second request for the
+  // next page whenever the first has already been answered (pagefail,
+  // b066dc0). The synthetic event is for a grid that could not move.
   await driver.exec(`
     const grid = document.querySelector('main.grid');
+    const before = grid.scrollTop;
     grid.scrollTop = grid.scrollHeight;
-    grid.dispatchEvent(new Event('scroll'));
+    if (grid.scrollTop === before) grid.dispatchEvent(new Event('scroll'));
   `);
 }
 
@@ -277,6 +282,8 @@ async function waitForPageThree(driver, before) {
 
 export default {
   name: "watchposition",
+  rows: [],
+  noRows: "the scroll position across a watch edit; plays nothing",
 
   async seed({ configRoot }) {
     mock = await startMockJellyfin({

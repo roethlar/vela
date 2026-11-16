@@ -41,6 +41,8 @@ async function waitForFault(driver, action) {
 
 export default {
   name: 'configrecovery',
+  rows: [],
+  noRows: 'recovery from a damaged settings file; plays nothing',
 
   async seed({ configRoot }) {
     tls = createMockPlexTls(configRoot);

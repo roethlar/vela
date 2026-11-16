@@ -11,8 +11,11 @@ import {
   mockSource,
   pollUntil,
   seedConfig,
+  velaConnected,
+  runPlayer,
 } from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
+import { shown } from '../proof.mjs';
 
 const COMPLETED_ID = 'hub-completed';
 const FOLLOWUP_ID = 'hub-followup';
@@ -91,6 +94,10 @@ async function startCompletedEpisode(driver, seen) {
   const socket = await waitForNewMpvSocket(seen);
   seen.add(socket);
   const mpv = await MpvIpc.connect(socket);
+  // playback::play: this client + position/window reader + EOF watcher;
+  // Original quality, no notice or health sampler.
+  // Embedded adds player::report::spawn_reporter for the view's state.
+  await velaConnected(socket, runPlayer === 'embedded' ? 4 : 3);
   await mpv.setProp('pause', true);
   const loaded = String(
     await pollUntil(
@@ -157,6 +164,7 @@ function resetForFailure(configRoot) {
 
 export default {
   name: 'completionhub',
+  rows: ['4', '14'],
 
   async seed({ configRoot }) {
     const mediaDir = makeClips(configRoot, ['hub-completed.mp4']);
@@ -341,5 +349,7 @@ export default {
       'failure must stop after the tracker and unconditional post-attempt refreshes',
     );
     await screenshot('02-failure-fallback');
+    // The end of its proof of its rows in this player (proof.mjs).
+    shown('4', '14');
   },
 };

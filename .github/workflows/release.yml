@@ -4,14 +4,24 @@ name: Release
 # Actions tab (workflow_dispatch) to get downloadable artifacts, or push a
 # `v*` tag to also attach them to a draft GitHub release.
 #
-# mpv is intentionally NOT bundled — Vela detects it at runtime and prompts the
-# user to install it (copyable command + "Get mpv" link), so these packages stay
-# small and the player stays user-updatable.
+# The mpv PROGRAM is intentionally NOT bundled — Vela detects it at runtime and
+# prompts the user to install it (copyable command + "Get mpv" link), so the
+# default player stays user-updatable.
 #
-# Code signing is secrets-gated per platform: macOS via a Developer ID
-# certificate plus App Store Connect notarization, Windows via Azure Trusted
-# Signing. Each platform falls back to an unsigned build when its secrets are
-# absent, so a run from a fork or a clone without secrets still goes green.
+# The Linux packages (AppImage, deb, rpm, Arch) do carry Vela's own build of
+# mpv's LIBRARY, the set the experimental embedded player loads and the only
+# one it will load (docs/development.md, "The shipped libmpv set"). The
+# `libmpv` job builds it once from the pins; the two jobs that make Linux
+# packages put it in, and each then proves it is whole in every package it
+# made. macOS and Windows packages carry none of it: there is no embedded
+# player there yet.
+#
+# Code signing: the macOS app is signed with a Developer ID certificate and
+# notarized through App Store Connect when the secrets for it are set, and
+# built unsigned when they are absent, so a run from a fork or a clone without
+# secrets still goes green. The Windows installers are NOT signed: they were,
+# for 1.0.60, with Azure Trusted Signing, which the owner dropped on
+# 2026-11-16 (.agents/decisions.md); no other way of signing them is set up.
 # Linux and Arch artifacts are never signed.
 
 on:
@@ -34,10 +44,60 @@ jobs:
           npm install --global npm@12.0.2
           node scripts/check-js-toolchain.mjs
       - run: npm ci
-      - run: npm audit
+      - run: npm audit --audit-level=moderate
+
+  # The same gate as ci.yml's job of this name: a known vulnerability in a
+  # Rust dependency fails the release as it fails CI. An advisory can be
+  # published between the last push to main and the tag.
+  cargo-audit:
+    name: cargo audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo install cargo-audit --locked
+      - run: cargo audit --file src-tauri/Cargo.lock
+
+  libmpv:
+    name: Shipped libmpv set (Linux x86_64)
+    # The same build, cache key and checks as ci.yml's job of this name, so a
+    # release of a commit CI has built restores the set CI proved. Built on the
+    # distribution the Linux bundles are built on (the glibc floor).
+    needs: [npm-audit, cargo-audit]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Restore the built set
+        id: cache
+        uses: actions/cache@v6
+        with:
+          path: .libmpv/out
+          key: libmpv-linux-x86_64-${{ hashFiles('scripts/build-libmpv.sh', 'packaging/libmpv/versions.txt', 'packaging/libmpv/Containerfile', 'packaging/libmpv/patches/**') }}
+
+      - name: Build the set
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: scripts/build-libmpv.sh --container
+
+      # Cached or freshly built, the set is proved before it goes into any
+      # package: it must match its manifest, load, and decode on the build
+      # baseline and on two newer distributions.
+      - name: Load and decode on clean distributions
+        run: |
+          packaging/libmpv/check-in-container.sh docker.io/library/ubuntu:22.04
+          packaging/libmpv/check-in-container.sh docker.io/library/debian:12
+          packaging/libmpv/check-in-container.sh registry.fedoraproject.org/fedora:latest
+
+      # Not a release artifact: the inventory job takes only `vela-*`.
+      - name: Hand the set to the Linux package jobs
+        uses: actions/upload-artifact@v7
+        with:
+          name: libmpv-linux-x86_64
+          if-no-files-found: error
+          path: .libmpv/out/libmpv
 
   bundle:
-    needs: npm-audit
+    needs: [npm-audit, cargo-audit, libmpv]
     permissions:
       contents: write
     strategy:
@@ -59,6 +119,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # The last two lines are for the libmpv set: the tools the package check
+      # unpacks with, and the system libraries the set itself loads from the
+      # machine (the check loads the library out of each finished package).
       - name: Install Tauri system dependencies (Linux)
         if: matrix.os == 'ubuntu-22.04'
         run: |
@@ -69,7 +132,18 @@ jobs:
             libgtk-3-dev \
             librsvg2-dev \
             libayatana-appindicator3-dev \
-            patchelf
+            patchelf \
+            libarchive-tools squashfs-tools python3 \
+            libegl1 libva2 libva-drm2 libdrm2 libpulse0 libasound2 libfontconfig1 libgnutls30 zlib1g
+
+      # Where src-tauri/tauri.libmpv.conf.json, the overlay the Linux build is
+      # given below, takes the set from.
+      - name: Fetch the libmpv set (Linux)
+        if: matrix.os == 'ubuntu-22.04'
+        uses: actions/download-artifact@v8
+        with:
+          name: libmpv-linux-x86_64
+          path: .libmpv/out/libmpv
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -164,99 +238,35 @@ jobs:
 
           echo 'signing=true' >> "$GITHUB_OUTPUT"
 
-      # Windows has to be signed DURING bundling, because the tauri-action step
-      # below both builds and uploads to the draft release — signing afterwards
-      # would leave unsigned assets published. Tauri's
-      # `bundle > windows > signCommand` hook runs once per binary, installer and
-      # WiX extension, so it covers everything the release carries. The override
-      # goes into src-tauri/tauri.windows.conf.json, which tauri merges
-      # automatically for Windows targets; it is written only here, so the
-      # committed tauri.conf.json keeps building unsigned locally. Without the
-      # full non-empty secret set no hook is injected at all.
-      - name: Prepare Windows code signing
-        id: windows_signing
-        if: runner.os == 'Windows'
-        shell: pwsh
-        env:
-          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-          AZURE_SIGNING_ENDPOINT: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
-          AZURE_SIGNING_ACCOUNT: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
-          AZURE_CERT_PROFILE: ${{ secrets.AZURE_CERT_PROFILE }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-
-          $names = @(
-            'AZURE_TENANT_ID', 'AZURE_CLIENT_ID', 'AZURE_CLIENT_SECRET',
-            'AZURE_SIGNING_ENDPOINT', 'AZURE_SIGNING_ACCOUNT', 'AZURE_CERT_PROFILE'
-          )
-          $missing = @($names | Where-Object {
-            [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($_))
-          })
-
-          if ($missing.Count -eq $names.Count) {
-            'signing=false' | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-            Write-Output '::notice title=Unsigned Windows build::No Azure Trusted Signing secrets are set; the installers stay unsigned.'
-            exit 0
-          }
-          if ($missing.Count -gt 0) {
-            throw "Incomplete Azure Trusted Signing secrets; set all of them or none. Missing: $($missing -join ', ')"
-          }
-
-          # Runners normally ship NuGet already, so a failure here is only fatal
-          # if Install-Module then cannot reach the gallery.
-          try {
-            Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope CurrentUser | Out-Null
-          } catch {
-            Write-Output "::debug::Install-PackageProvider NuGet failed: $($_.Exception.Message)"
-          }
-          Install-Module -Name TrustedSigning -MinimumVersion 0.5.0 -Force -Repository PSGallery -Scope CurrentUser
-
-          # Absolute, because the bundler's working directory is its own business.
-          # Forward slashes and plain concatenation on purpose: NSIS embeds this
-          # command verbatim to sign the uninstaller and a backslash path survives
-          # that round trip escaped, and Join-Path would resolve the drive through
-          # the PowerShell provider.
-          $sign = ($env:GITHUB_WORKSPACE -replace '\\', '/').TrimEnd('/') + '/.github/scripts/azure-sign.ps1'
-          if (-not (Test-Path -LiteralPath $sign -PathType Leaf)) {
-            throw "The signing script is missing at $sign."
-          }
-
-          @{
-            bundle = @{
-              windows = @{
-                signCommand = @{
-                  cmd  = 'pwsh'
-                  args = @('-NoProfile', '-NonInteractive', '-File', $sign, '%1')
-                }
-              }
-            }
-          } | ConvertTo-Json -Depth 8 |
-            Set-Content -Path 'src-tauri/tauri.windows.conf.json' -Encoding utf8
-
-          'signing=true' | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-
       # Builds the frontend (beforeBuildCommand) + the Rust release binary and
-      # produces the native installers, signed on macOS and Windows whenever the
-      # steps above found their secrets. The Apple variables arrive through
-      # GITHUB_ENV so they are absent rather than empty on a secretless run; the
-      # Azure ones are safe to declare unconditionally because they are only read
-      # by azure-sign.ps1, which no signCommand invokes unless it was injected.
+      # produces the native installers, signed on macOS whenever the step above
+      # found its secrets. The Apple variables arrive through GITHUB_ENV so they
+      # are absent rather than empty on a secretless run. Nothing signs the
+      # Windows installers.
+      #
+      # The Linux leg builds and does NOT attach: its bundles go to the draft
+      # release from the inventory job, after the libmpv check below has
+      # passed every one of them. (tauri-action uploads in the step that
+      # builds, which would put a bundle on the draft before it was checked.)
+      # macOS and Windows attach here as before, and so create the draft.
+      #
+      # NO_STRIP and APPIMAGE_EXTRACT_AND_RUN are for the AppImage tooling and
+      # mean nothing elsewhere: linuxdeploy's own `strip` must not rewrite the
+      # libraries of the libmpv set, which ship exactly as their MANIFEST
+      # records them (scripts/build.sh sets the same two for its AppImage).
       - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-          AZURE_SIGNING_ENDPOINT: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
-          AZURE_SIGNING_ACCOUNT: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
-          AZURE_CERT_PROFILE: ${{ secrets.AZURE_CERT_PROFILE }}
+          NO_STRIP: '1'
+          APPIMAGE_EXTRACT_AND_RUN: '1'
         with:
-          args: ${{ matrix.target && format('--target {0}', matrix.target) || '' }}
-          # Only create/attach a release when triggered by a v* tag.
-          tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
-          releaseName: ${{ startsWith(github.ref, 'refs/tags/') && format('Vela {0}', github.ref_name) || '' }}
+          # Linux: the overlay that adds the libmpv set to the bundles'
+          # resources (what `scripts/build.sh --with-libmpv` passes).
+          args: ${{ matrix.target && format('--target {0}', matrix.target) || (matrix.os == 'ubuntu-22.04' && '--config src-tauri/tauri.libmpv.conf.json' || '') }}
+          # Only create/attach a release when triggered by a v* tag, and never
+          # from the Linux leg (see above).
+          tagName: ${{ startsWith(github.ref, 'refs/tags/') && matrix.os != 'ubuntu-22.04' && github.ref_name || '' }}
+          releaseName: ${{ startsWith(github.ref, 'refs/tags/') && matrix.os != 'ubuntu-22.04' && format('Vela {0}', github.ref_name) || '' }}
           releaseDraft: true
 
       - name: Require the universal macOS DMG
@@ -307,6 +317,19 @@ jobs:
             }
           done
 
+      # The embedded player has no other library to fall back on: a package
+      # that lacks one file of the set installs cleanly and then never plays
+      # embedded. Each bundle is unpacked (nothing is installed) and must hold
+      # the whole set, unmodified, loadable from where it will be installed.
+      - name: Require the libmpv set in every Linux bundle
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          packaging/libmpv/check-package.sh --set .libmpv/out/libmpv \
+            '${{ matrix.bundle_dir }}'/appimage/*.AppImage \
+            '${{ matrix.bundle_dir }}'/deb/*.deb \
+            '${{ matrix.bundle_dir }}'/rpm/*.rpm
+
       - name: Require both Windows installers
         if: runner.os == 'Windows'
         shell: pwsh
@@ -315,27 +338,6 @@ jobs:
             $pattern = Join-Path '${{ matrix.bundle_dir }}' $_
             if (-not (Get-ChildItem -Path $pattern -ErrorAction SilentlyContinue)) {
               throw "Required Windows artifact is missing: $pattern"
-            }
-          }
-
-      # azure-sign.ps1 already asserts per file, but that only proves the hook ran
-      # on the files it was handed; this proves the two installers the release
-      # actually ships came out signed. Get-AuthenticodeSignature is built in, so
-      # no signtool is needed.
-      - name: Require signed Windows installers
-        if: runner.os == 'Windows' && steps.windows_signing.outputs.signing == 'true'
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-
-          @('msi/*.msi', 'nsis/*-setup.exe') | ForEach-Object {
-            $pattern = Join-Path '${{ matrix.bundle_dir }}' $_
-            Get-ChildItem -Path $pattern | ForEach-Object {
-              $signature = Get-AuthenticodeSignature -LiteralPath $_.FullName
-              if ($signature.Status -ne 'Valid') {
-                throw "Authenticode status for $($_.Name) is '$($signature.Status)', expected 'Valid'."
-              }
-              Write-Output "$($_.Name): $($signature.Status) — $($signature.SignerCertificate.Subject)"
             }
           }
 
@@ -370,11 +372,14 @@ jobs:
 
   arch:
     name: Arch package
-    needs: npm-audit
+    needs: [npm-audit, cargo-audit, libmpv]
     runs-on: ubuntu-latest
     container:
       image: archlinux:base-devel
     steps:
+      # The second group is for the libmpv set: Python for the package check,
+      # and the system libraries the set itself loads from the machine (the
+      # check loads the library out of the finished package).
       - name: Install Arch build dependencies
         run: |
           pacman -Syu --noconfirm \
@@ -386,9 +391,18 @@ jobs:
             mpv \
             patchelf \
             rustup \
-            webkit2gtk-4.1
+            webkit2gtk-4.1 \
+            python \
+            libglvnd libva libdrm libpulse alsa-lib fontconfig gnutls zlib
 
       - uses: actions/checkout@v7
+
+      # Before the workspace is handed to the builder, so that it owns the set.
+      - name: Fetch the libmpv set
+        uses: actions/download-artifact@v8
+        with:
+          name: libmpv-linux-x86_64
+          path: .libmpv/out/libmpv
 
       - uses: actions/setup-node@v7
         with:
@@ -406,9 +420,12 @@ jobs:
       - name: Build Arch package
         shell: bash
         run: |
+          # VELA_PACKAGE_LIBMPV is how the PKGBUILD is told to install the set
+          # (makepkg cannot pass it an argument); it is set for this one build.
           runuser -u vela-builder -- env \
             HOME=/home/vela-builder \
             GITHUB_WORKSPACE="$GITHUB_WORKSPACE" \
+            VELA_PACKAGE_LIBMPV="$GITHUB_WORKSPACE/.libmpv/out/libmpv" \
             PATH="$PATH" \
             bash -c '
               set -euo pipefail
@@ -428,6 +445,14 @@ jobs:
             exit 1
           }
 
+      # As for the other Linux packages: the whole set, unmodified, loadable,
+      # and its licence texts where Arch keeps licences.
+      - name: Require the libmpv set in the Arch package
+        shell: bash
+        run: |
+          packaging/libmpv/check-package.sh --set .libmpv/out/libmpv \
+            packaging/arch/*.pkg.tar.zst
+
       - name: Upload the Arch package
         uses: actions/upload-artifact@v7
         with:
@@ -442,8 +467,11 @@ jobs:
     permissions:
       contents: write
     steps:
+      # Only what is released. The libmpv set travels between jobs as an
+      # artifact too, and is inside the Linux packages, not beside them.
       - uses: actions/download-artifact@v8
         with:
+          pattern: vela-*
           path: artifacts
 
       - name: Require every promised artifact
@@ -482,13 +510,26 @@ jobs:
           if-no-files-found: error
           path: artifacts/SHA256SUMS
 
-      - name: Attach Arch package and checksums to tagged draft
+      # The draft exists by now: the macOS and Windows legs of `bundle` made
+      # it. The Linux bundles are attached here and not by their own job, so
+      # that none reaches the draft before its libmpv check has passed.
+      - name: Attach the Linux bundles, the Arch package and checksums to tagged draft
         if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
+          set -euo pipefail
+          mapfile -d '' linux < <(
+            find artifacts/vela-linux -type f \
+              \( -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \) -print0 | sort -z
+          )
+          [ "${#linux[@]}" -eq 3 ] || {
+            echo "Expected the AppImage, the deb and the rpm; found ${#linux[@]} Linux bundles." >&2
+            exit 1
+          }
           gh release upload "$GITHUB_REF_NAME" \
+            "${linux[@]}" \
             artifacts/vela-arch/*.pkg.tar.zst \
             artifacts/SHA256SUMS \
             --repo "$GITHUB_REPOSITORY" \

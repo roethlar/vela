@@ -677,3 +677,14 @@ button.primary:disabled {
   background: var(--accent);
   color: var(--on-accent);
 }
+
+/* A play running inside Vela's own window. Its picture is on a surface UNDER
+   the window and shows wherever the page paints nothing, so while the player
+   view is open (it sets this class) the page paints nothing but that view. */
+html.player-open,
+html.player-open body {
+  background: transparent !important;
+}
+html.player-open .app {
+  visibility: hidden;
+}

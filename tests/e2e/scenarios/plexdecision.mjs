@@ -24,6 +24,8 @@ async function openContextMenu(driver) {
 
 export default {
   name: 'plexdecision',
+  rows: [],
+  noRows: 'the diagnostic of a failed Plex capability request; plays nothing',
 
   async seed({ configRoot }) {
     tls = createMockPlexTls(configRoot);

@@ -4,24 +4,37 @@
 // WebDriver session against the debug binary → screenshots into
 // tests/e2e/artifacts/ → pass/fail summary.
 //
-// Usage: npm run e2e [-- --skip-build] [scenario-name ...]
+// Usage: npm run e2e [-- --skip-build] [--embedded] [scenario-name ...]
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { Driver } from './driver.mjs';
+import { fileURLToPath } from 'node:url';
+import { appCommands, locateAppBinary } from './app-binary.mjs';
+import { Driver, setRunApp } from './driver.mjs';
+import { setScenarioConfigRoot } from './mpv.mjs';
+import { beginProof, endProof } from './proof.mjs';
+import { loadScenarios, proofProblems, recordedTree, resultsFileProblems, runsIn } from './scenario-loader.mjs';
 
 const e2eDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(e2eDir, '../..');
 const artifactsDir = path.join(e2eDir, 'artifacts');
-const appBinary = path.join(repoRoot, 'src-tauri/target/debug/vela');
+const resultsDir = path.join(e2eDir, 'results');
 const driverPort = Number(process.env.VELA_E2E_PORT ?? 4444);
 const driverUrl = `http://127.0.0.1:${driverPort}`;
 
 const argv = process.argv.slice(2);
 const skipBuild = argv.includes('--skip-build');
 const nameFilter = argv.filter((a) => !a.startsWith('--'));
+// `--embedded` runs the suite in the embedded player instead of the external
+// one: every seeded config asks for it (helpers.mjs reads this variable), and
+// the venue below is a Wayland compositor, which that player needs.
+if (argv.includes('--embedded')) process.env.VELA_E2E_PLAYER = 'embedded';
+const runPlayer = process.env.VELA_E2E_PLAYER || 'external';
+if (!['external', 'embedded'].includes(runPlayer)) {
+  console.error(`e2e: unknown player "${runPlayer}" (VELA_E2E_PLAYER is external or embedded)`);
+  process.exit(1);
+}
 
 // Node skips 'exit' handlers when dying to a default signal disposition,
 // and the detached driver group never sees the terminal's SIGINT — so an
@@ -42,8 +55,8 @@ for (const [sig, code] of Object.entries({ SIGHUP: 129, SIGINT: 130, SIGTERM: 14
   });
 }
 
-function runStep(cmd, args) {
-  const res = spawnSync(cmd, args, { stdio: 'inherit', cwd: repoRoot });
+function runStep(cmd, args, env = {}) {
+  const res = spawnSync(cmd, args, { stdio: 'inherit', cwd: repoRoot, env: { ...process.env, ...env } });
   if (res.status !== 0) {
     console.error(`e2e: \`${cmd} ${args.join(' ')}\` failed`);
     process.exit(1);
@@ -76,8 +89,13 @@ async function waitUntil(fn, what, timeoutMs = 10000) {
   }
 }
 
+// Returns { err, proof }: the error it failed with (null when it passed) and
+// what it reached (proof.mjs), which the results file records.
 async function runScenario(scenario, tauriDriverBin) {
+  let proof = { shown: [], routes: [] };
   const configRoot = fs.mkdtempSync(path.join(os.tmpdir(), `vela-e2e-${scenario.name}-`));
+  // A play's socket is the scenario's only when its app made it (mpv.mjs).
+  setScenarioConfigRoot(configRoot);
   // The app reads XDG_CONFIG_HOME=<configRoot>/config, so a seeded config
   // file belongs at <configRoot>/config/vela/config.json.
   if (scenario.seed) await scenario.seed({ configRoot, repoRoot });
@@ -130,7 +148,8 @@ async function runScenario(scenario, tauriDriverBin) {
   const driver = new Driver(driverUrl);
   try {
     await waitUntil(driverListening, `tauri-driver on :${driverPort}`);
-    await driver.newSession(appBinary);
+    await driver.newSession();
+    beginProof();
     await scenario.run({
       driver,
       repoRoot,
@@ -146,13 +165,20 @@ async function runScenario(scenario, tauriDriverBin) {
         // webview, so the old WebDriver session may already be gone.
         await driver.deleteSession().catch(() => {});
         if (between) await between();
-        await driver.newSession(appBinary);
+        await driver.newSession();
       },
     });
-    return null;
+    // What it reached must be what it declares (proof.mjs).
+    proof = endProof();
+    const problems = proofProblems(scenario, runPlayer, proof);
+    if (problems.length > 0) {
+      throw new Error(`e2e: ${scenario.name} does not do what it declares:\n  ${problems.join('\n  ')}`);
+    }
+    return { err: null, proof };
   } catch (err) {
-    return err;
+    return { err, proof };
   } finally {
+    endProof();
     if (runCleanup) await runCleanup().catch(() => {});
     if (runCleanup) activeCleanups.delete(runCleanup);
     await driver.deleteSession().catch(() => {});
@@ -165,25 +191,6 @@ async function runScenario(scenario, tauriDriverBin) {
   }
 }
 
-if (await driverListening()) {
-  console.error(`e2e: something is already listening on :${driverPort} — stop it or set VELA_E2E_PORT`);
-  process.exit(1);
-}
-
-runStep(path.join(e2eDir, 'fetch-driver.sh'), []);
-if (!skipBuild) {
-  // --debug keeps compile times sane; tauri build (unlike plain cargo build)
-  // embeds the built frontend, so no dev server is involved.
-  runStep('npm', ['run', 'tauri', '--', 'build', '--debug', '--no-bundle']);
-}
-if (!fs.existsSync(appBinary)) {
-  console.error(`e2e: app binary missing: ${appBinary} (run without --skip-build)`);
-  process.exit(1);
-}
-
-fs.rmSync(artifactsDir, { recursive: true, force: true });
-fs.mkdirSync(artifactsDir, { recursive: true });
-
 // LIVE runs load from tests/e2e/live/ instead: those drive REAL servers, so they are not
 // hermetic, they are not deterministic in the way the mocks are, and they must never gate
 // an ordinary change. They are opt-in (`npm run e2e:live`) and never part of the default
@@ -191,10 +198,16 @@ fs.mkdirSync(artifactsDir, { recursive: true });
 // red.
 const live = argv.includes('--live');
 const scenarioDir = path.join(e2eDir, live ? 'live' : 'scenarios');
-const allScenarios = [];
-for (const file of fs.readdirSync(scenarioDir).filter((f) => f.endsWith('.mjs')).sort()) {
-  const { default: scenario } = await import(pathToFileURL(path.join(scenarioDir, file)).href);
-  allScenarios.push(scenario);
+// The same loader as the parity test's (scenario-loader.mjs): a scenario it
+// does not understand (an unknown key or player, a missing or unknown row, a
+// name that is not its file's) stops the run before anything starts, instead
+// of being skipped or run on a guess.
+let allScenarios;
+try {
+  allScenarios = await loadScenarios(scenarioDir, { prefix: live ? 'live-' : '' });
+} catch (err) {
+  console.error(err.message);
+  process.exit(1);
 }
 // A typo'd name must fail loudly, not silently shrink the run (eh-2).
 const unknown = nameFilter.filter((n) => !allScenarios.some((s) => s.name === n));
@@ -211,13 +224,129 @@ if (scenarios.length === 0) {
   process.exit(1);
 }
 
+// The commit this run is of, and whether the worktree was clean, read BEFORE
+// the build and the first scenario, for the results file below: read at the
+// end, a tree changed during the run (an injection restored before the end,
+// a commit landing mid-run) would be recorded as a clean run of a commit
+// whose code it did not run (review finding conf-1). Read again after every
+// scenario; any difference from the start marks the run dirty. (A change made
+// and undone within one scenario is not seen; the scenario modules themselves
+// were imported above, before this read.)
+const git = (args) => spawnSync('git', args, { cwd: repoRoot, encoding: 'utf8' }).stdout?.trim() ?? '';
+const readTree = () => ({ head: git(['rev-parse', 'HEAD']), status: git(['status', '--porcelain']) });
+const treeAtStart = readTree();
+const treeSamples = [];
+
+if (await driverListening()) {
+  console.error(`e2e: something is already listening on :${driverPort} — stop it or set VELA_E2E_PORT`);
+  process.exit(1);
+}
+
+runStep(path.join(e2eDir, 'fetch-driver.sh'), []);
+
+// The app binary (review finding pa-6; see the app-binary module). A run that builds
+// makes the debug build (`tauri build --debug --no-bundle`, which embeds the
+// built front end, so no dev server is involved) and starts the executable
+// Cargo reported for that build. A run with --skip-build builds nothing and
+// starts where `cargo metadata` says the debug binary is, a prediction; it is
+// recorded as not built. Every session below starts this one path: the
+// driver module is set once with it and starts nothing else, and refuses to start it
+// once the file is no longer the one found here (see the driver module).
+let located;
+try {
+  located = await locateAppBinary({ skipBuild, env: process.env, commands: appCommands(repoRoot) });
+} catch (err) {
+  console.error(`e2e: cannot tell which app binary to run: ${err.message}`);
+  process.exit(1);
+}
+const { appBinary, built, appBinaryFrom } = located;
+if (!fs.existsSync(appBinary)) {
+  console.error(
+    `e2e: app binary missing: ${appBinary}, from ${appBinaryFrom} (${skipBuild ? 'run without --skip-build' : 'the build did not leave it there'})`,
+  );
+  process.exit(1);
+}
+setRunApp(located);
+console.log(`e2e: running ${appBinary} (from ${appBinaryFrom})`);
+
+fs.rmSync(artifactsDir, { recursive: true, force: true });
+fs.mkdirSync(artifactsDir, { recursive: true });
+
 // Default to a private Xvfb display: on the live Wayland session a test
 // window that opens unfocused/occluded stops getting frame callbacks and
 // WebKit's snapshot then hangs — screenshots only render reliably when
 // nothing contends for visibility. VELA_E2E_HEADED=1 runs on the real
 // desktop instead (watchable, but screenshot timing depends on focus).
 let displayEnv = {};
-if (!process.env.VELA_E2E_HEADED) {
+if (runPlayer === 'embedded') {
+  // The embedded player loads the mpv library Vela ships. A debug build takes
+  // it from wherever this variable points; by default, where
+  // scripts/build-libmpv.sh leaves it. A relative path is taken from the
+  // repository root, where it is checked here, and handed on whole: the
+  // app and the library tests (which cargo runs from src-tauri/) would each
+  // read it from somewhere else.
+  const set = path.resolve(repoRoot, process.env.VELA_LIBMPV_DIR ?? '.libmpv/out/libmpv');
+  if (!fs.existsSync(path.join(set, 'libmpv.so.2'))) {
+    console.error(
+      `e2e: no libmpv set at ${set} — build one with scripts/build-libmpv.sh --container, or point VELA_LIBMPV_DIR at one`,
+    );
+    process.exit(1);
+  }
+  displayEnv = { VELA_LIBMPV_DIR: set };
+  // The tests against that library itself (`npm run test:libmpv`, ignored
+  // in an ordinary `cargo test` because CI has no library): what the player
+  // expects of mpv's answers, which no fake and no scenario here can show
+  // (weston has no colour management, so no play here ever changes mpv's
+  // target). Every full run of this player runs them first; a failure, or a
+  // set they cannot load, fails the run.
+  if (nameFilter.length === 0) {
+    runStep('npm', ['run', 'test:libmpv'], { VELA_LIBMPV_DIR: set });
+  } else {
+    console.log('e2e: the libmpv tests run in a full embedded run (npm run test:libmpv runs them alone)');
+  }
+}
+if (!process.env.VELA_E2E_HEADED && runPlayer === 'embedded') {
+  // A private, headless Wayland compositor: Xvfb is X11, where the embedded
+  // player cannot run. It draws with the GPU (the web view and the video
+  // both need that) and shows nothing on any screen.
+  const socket = `vela-e2e-${process.pid}`;
+  const runtimeDir = process.env.XDG_RUNTIME_DIR;
+  if (!runtimeDir) {
+    console.error('e2e: XDG_RUNTIME_DIR is not set; a Wayland compositor needs it');
+    process.exit(1);
+  }
+  const weston = spawn(
+    'weston',
+    // weston goes idle after 300 seconds without input, and input sent
+    // through WebDriver does not count. Once idle it never draws a window
+    // that opens afterwards, so every later scenario of a long run hung at
+    // its first screenshot. Hence no idle time at all.
+    // --fake-seat: without a seat the compositor never activates the app's
+    // window, so the page never has focus (document.hasFocus() is false,
+    // :focus and :focus-visible never match), a state no user's desktop is
+    // ever in; GDK also logs three gdk_seat_get_keyboard criticals per start.
+    // WebDriver still types without one, because WebKitWebDriver injects its
+    // events inside the page, which is why only the focus styles showed it.
+    [
+      '--backend=headless',
+      '--fake-seat',
+      '--renderer=gl',
+      `--socket=${socket}`,
+      '--width=1280',
+      '--height=800',
+      '--idle-time=0',
+    ],
+    { stdio: 'ignore' },
+  );
+  weston.on('error', () => {
+    console.error('e2e: weston not found — install it, or set VELA_E2E_HEADED=1 to use the desktop');
+    process.exit(1);
+  });
+  process.on('exit', () => weston.kill());
+  activeKills.add(() => weston.kill());
+  await waitUntil(() => fs.existsSync(path.join(runtimeDir, socket)), `weston on ${socket}`);
+  displayEnv = { ...displayEnv, GDK_BACKEND: 'wayland', WAYLAND_DISPLAY: socket, DISPLAY: '' };
+} else if (!process.env.VELA_E2E_HEADED) {
   const display = process.env.VELA_E2E_DISPLAY ?? ':97';
   if (fs.existsSync(`/tmp/.X${display.slice(1)}-lock`)) {
     console.error(`e2e: display ${display} is taken — set VELA_E2E_DISPLAY or remove the stale lock`);
@@ -231,14 +360,40 @@ if (!process.env.VELA_E2E_HEADED) {
   process.on('exit', () => xvfb.kill());
   activeKills.add(() => xvfb.kill());
   await waitUntil(() => fs.existsSync(`/tmp/.X11-unix/X${display.slice(1)}`), `Xvfb on ${display}`);
-  displayEnv = { GDK_BACKEND: 'x11', DISPLAY: display, WAYLAND_DISPLAY: '' };
+  displayEnv = { ...displayEnv, GDK_BACKEND: 'x11', DISPLAY: display, WAYLAND_DISPLAY: '' };
 }
 
 const tauriDriverBin = resolveTauriDriver();
 let failures = 0;
+let skipped = 0;
+// What each scenario did, for the results file below.
+const outcomes = {};
 for (const scenario of scenarios) {
   process.stdout.write(`e2e: ${scenario.name} … `);
-  const err = await runScenario(scenario, tauriDriverBin);
+  // A scenario may be about one player (`onlyPlayer`). The whole run is in
+  // one player: the external one unless it was started with `--embedded`
+  // (see README.md). In a run of the other player the scenario is skipped by
+  // name, never silently; asked for by name, it fails. (The loader has
+  // already refused an `onlyPlayer` that names no player.)
+  if (!runsIn(scenario, runPlayer)) {
+    const needs =
+      scenario.onlyPlayer === 'external'
+        ? 'needs a run of the external player (without --embedded)'
+        : 'needs a run of the embedded player (--embedded)';
+    if (nameFilter.includes(scenario.name)) {
+      failures += 1;
+      console.log('FAIL');
+      console.error(`e2e: ${scenario.name} ${needs}`);
+    } else {
+      skipped += 1;
+      console.log(`SKIP (${needs})`);
+    }
+    outcomes[scenario.name] = { status: 'skip' };
+    continue;
+  }
+  const { err, proof } = await runScenario(scenario, tauriDriverBin);
+  treeSamples.push(readTree());
+  outcomes[scenario.name] = { status: err ? 'fail' : 'pass', error: err ? String(err?.message ?? err) : null, ...proof };
   if (err) {
     failures += 1;
     console.log('FAIL');
@@ -248,5 +403,53 @@ for (const scenario of scenarios) {
   }
 }
 
-console.log(`e2e: ${scenarios.length - failures}/${scenarios.length} passed; artifacts in ${path.relative(repoRoot, artifactsDir)}/`);
-process.exit(failures === 0 ? 0 : 1);
+// The results of this run, for the parity verdict of two full runs, one of
+// each player (`npm run e2e:verdict`; parity-verdict.mjs). A live run counts
+// for neither player and writes none.
+if (!live) {
+  const tree = recordedTree(treeAtStart, [...treeSamples, readTree()]);
+  if (tree.changedDuringRun) console.error('e2e: the worktree changed during the run; its results are recorded as dirty');
+  fs.mkdirSync(resultsDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(resultsDir, `${runPlayer}.json`),
+    JSON.stringify(
+      {
+        player: runPlayer,
+        full: nameFilter.length === 0,
+        // Whether this run built the app it ran: it ran the build, and
+        // started the executable Cargo reported for that build (above).
+        // With --skip-build the binary is whatever was built last, of any
+        // code; the verdict refuses it. What `built` does not prove: see
+        // README.md, "Parity".
+        built,
+        appBinary,
+        appBinaryFrom,
+        ...tree,
+        finishedAt: new Date().toISOString(),
+        scenarios: outcomes,
+      },
+      null,
+      2,
+    ),
+  );
+}
+
+// The file just written must be one the verdict will read: the verdict's own
+// rules for a results file are applied to it here, so that what this runner
+// writes and what the verdict takes cannot drift apart unseen (review
+// finding pa-5). A run whose file fails them fails.
+let unreadableResults = false;
+if (!live) {
+  const resultsFile = path.join(resultsDir, `${runPlayer}.json`);
+  const unreadable = resultsFileProblems(JSON.parse(fs.readFileSync(resultsFile, 'utf8')), runPlayer);
+  if (unreadable.length > 0) {
+    unreadableResults = true;
+    console.error(`e2e: ${resultsFile} is not a results file the verdict will read: ${unreadable.join('; ')}`);
+  }
+}
+
+const ran = scenarios.length - skipped;
+console.log(
+  `e2e: ${ran - failures}/${ran} passed${skipped ? `, ${skipped} skipped` : ''}; artifacts in ${path.relative(repoRoot, artifactsDir)}/`,
+);
+process.exit(failures === 0 && !unreadableResults ? 0 : 1);

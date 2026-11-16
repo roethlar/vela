@@ -63,6 +63,8 @@ const hasCard = (driver, prefix) =>
 
 export default {
   name: "mergedrefresh",
+  rows: [],
+  noRows: "refreshing a merged library; plays nothing",
 
   async seed({ configRoot }) {
     // A: TV shows only — contributes the "show" type and NO movies.

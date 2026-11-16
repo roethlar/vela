@@ -12,6 +12,8 @@ let mock;
 
 export default {
   name: 'sortpersist',
+  rows: [],
+  noRows: 'sort order persistence; plays nothing',
 
   async seed({ configRoot }) {
     mock = await startMockJellyfin(); // default single movie, no stream needed

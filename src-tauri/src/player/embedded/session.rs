@@ -1,0 +1,1632 @@
+//! One embedded play.
+//!
+//! A play is one thread that owns everything it draws with: the video
+//! surface, the OpenGL window on it, the mpv player and mpv's renderer. The
+//! rest of Vela reaches the player the way it reaches the external one,
+//! through mpv's IPC socket; it reaches this thread only to stop it and to
+//! tell it where the video rectangle is.
+//!
+//! Order matters twice here and is written into the types rather than
+//! remembered: [`Live`]'s fields are declared in the order they must be torn
+//! down (the renderer needs the OpenGL context and the player; the context
+//! needs the surface), and Rust drops fields in declaration order.
+
+use std::ffi::c_void;
+use std::os::fd::{AsFd, AsRawFd, FromRawFd, OwnedFd};
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+use wayland_client::protocol::wl_subsurface::WlSubsurface;
+
+use super::egl;
+use super::hdr::{self, Capabilities, Frame, Tagging};
+use super::libmpv::{Event, LibMpv, Player, Renderer};
+use super::options::Step;
+use super::surface::{Guest, VideoSurface};
+use crate::player::control::Channel;
+use crate::player::launch::HeaderInclude;
+
+/// Where the video is, in the window's own units, relative to the window.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Rect {
+    pub(crate) x: i32,
+    pub(crate) y: i32,
+    pub(crate) width: i32,
+    pub(crate) height: i32,
+}
+
+/// What a play tells the rest of Vela about its own life.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Lifecycle {
+    /// The video surface exists and the file has been handed to mpv.
+    Opened,
+    /// The player has shut down and its surface is gone.
+    Closed,
+}
+
+/// The file of marker ranges a launch wrote for mpv's script to read once
+/// and delete. The script deletes it when it has read it; this deletes it
+/// when the play's start request goes, which is when the play has failed to
+/// start or has ended. So no play leaves one behind, whether or not the
+/// script ever ran (review finding ec-8: a start that failed before mpv
+/// existed left it).
+pub(crate) struct MarkerPayload(PathBuf);
+
+impl MarkerPayload {
+    pub(crate) fn new(path: PathBuf) -> Self {
+        MarkerPayload(path)
+    }
+}
+
+impl Drop for MarkerPayload {
+    fn drop(&mut self) {
+        // Usually gone already. A path of marker times, never a secret.
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+/// Everything a play needs to start.
+pub(crate) struct Start {
+    pub(crate) lib: Arc<LibMpv>,
+    /// Vela's place on the window's connection to the compositor.
+    pub(crate) guest: Arc<Guest>,
+    /// The playback session this play belongs to.
+    pub(crate) session_id: String,
+    /// The user's own mpv configuration files, when they asked for them.
+    /// Applied before `steps`, so Vela's protected options still win.
+    pub(crate) own_config: Vec<PathBuf>,
+    /// The launch's options, in order (`super::options::steps`).
+    pub(crate) steps: Vec<Step>,
+    /// The IPC socket the options name. Read back after start-up as proof
+    /// that mpv really took the options: it reports no error for a file it
+    /// could not read.
+    pub(crate) ipc_path: String,
+    pub(crate) url: String,
+    /// How long to wait between starting mpv and giving it its file. Zero
+    /// outside tests. A player that is created first and handed its file
+    /// later has to survive that gap whatever its length (plan review ep-1),
+    /// and a test can only show that with a gap worth the name.
+    pub(crate) load_delay: Duration,
+    /// How long the caller waits for this play to start: [`START_LIMIT`],
+    /// except where a test has asked for less.
+    pub(crate) start_limit: Duration,
+    pub(crate) header_include: Option<HeaderInclude>,
+    /// Held, not read: see [`MarkerPayload`].
+    pub(crate) _marker_payload: Option<MarkerPayload>,
+    pub(crate) on_lifecycle: Arc<dyn Fn(Lifecycle) + Send + Sync>,
+}
+
+/// How long the caller waits for a play to start before reporting that it
+/// did not.
+pub(crate) const START_LIMIT: Duration = Duration::from_secs(20);
+
+/// How long a play that is being let go of is waited for, having been asked
+/// to stop, before it is handed to [`Leftovers`] instead.
+const STOP_PATIENCE: Duration = Duration::from_secs(5);
+
+/// A ceiling, not a delay: mpv's wake-up ends a healthy stop as soon as
+/// Shutdown arrives. A quarter second leaves most of STOP_PATIENCE for the
+/// existing teardown, and is also below the exit path's two-second wait
+/// for leftovers. Close and replacement still only set the stop flag.
+const QUIT_GRACE: Duration = Duration::from_millis(250);
+
+#[derive(Debug, PartialEq, Eq)]
+enum StopAction {
+    Continue,
+    RequestQuit,
+    TearDown,
+}
+
+/// The stop decision, independent of mpv, frames, and the display. Once
+/// asked, keep serving mpv until Shutdown or this original deadline; a
+/// repeated stop must neither send another quit nor extend the wait.
+#[derive(Default)]
+struct Stopping {
+    deadline: Option<Instant>,
+}
+
+impl Stopping {
+    fn expired(&self, now: Instant) -> bool {
+        self.deadline.is_some_and(|deadline| now >= deadline)
+    }
+
+    fn next(&mut self, requested: bool, now: Instant) -> StopAction {
+        if self.expired(now) {
+            StopAction::TearDown
+        } else if self.deadline.is_some() {
+            StopAction::Continue
+        } else if requested {
+            self.deadline = Some(now + QUIT_GRACE);
+            StopAction::RequestQuit
+        } else {
+            StopAction::Continue
+        }
+    }
+
+    fn wait_ms(&self, now: Instant) -> i32 {
+        self.deadline.map_or(100, |deadline| {
+            // Round up to avoid spinning in the last partial millisecond,
+            // and never add a whole surface poll past the deadline.
+            deadline
+                .saturating_duration_since(now)
+                .as_nanos()
+                .div_ceil(1_000_000)
+                .min(100) as i32
+        })
+    }
+}
+
+/// The loop's graphics work is separate so the stop/wake/quit wiring can
+/// also run headlessly. `turn` returns false on mpv's Shutdown or expiry;
+/// the wait returns false when the compositor connection is gone.
+trait PlayLoop {
+    fn wait(&mut self, shared: &Shared, timeout_ms: i32) -> bool;
+    fn request_quit(&self);
+    fn turn(&mut self, shared: &Shared, stopping: &Stopping) -> bool;
+
+    fn run(&mut self, shared: &Shared) {
+        let mut stopping = Stopping::default();
+        loop {
+            if !self.wait(shared, stopping.wait_ms(Instant::now())) {
+                return;
+            }
+            shared.drain_wake();
+            match stopping.next(shared.stop.load(Ordering::SeqCst), Instant::now()) {
+                StopAction::Continue => {}
+                StopAction::RequestQuit => self.request_quit(),
+                StopAction::TearDown => return,
+            }
+            // Keep drawing and reading events even while stopped: mpv's
+            // video thread may need us to draw before it can shut down.
+            if !self.turn(shared, &stopping) {
+                return;
+            }
+        }
+    }
+}
+
+/// Who decides whether a starting play has started: the play's own thread,
+/// once mpv has its file, or the caller that is waiting for it, when it
+/// stops waiting. Exactly one of them wins, and the other finds out.
+///
+/// Without this a play that outlasted its caller's patience could come back
+/// later, hand mpv its file and announce itself, for a play that had already
+/// been reported as failed (review finding ec-2).
+struct StartRace(AtomicU8);
+
+impl StartRace {
+    const STARTING: u8 = 0;
+    const STARTED: u8 = 1;
+    const GIVEN_UP: u8 = 2;
+
+    fn new() -> Self {
+        StartRace(AtomicU8::new(Self::STARTING))
+    }
+
+    fn settle(&self, as_what: u8) -> bool {
+        self.0
+            .compare_exchange(Self::STARTING, as_what, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+    }
+
+    /// The play's thread: "I have started." `false` when the caller had
+    /// already stopped waiting; the play must then go without a trace.
+    fn claim_started(&self) -> bool {
+        self.settle(Self::STARTED)
+    }
+
+    /// The caller: "I am not waiting any longer." `false` when the play had
+    /// started in the meantime; it is then a started play like any other.
+    fn give_up(&self) -> bool {
+        self.settle(Self::GIVEN_UP)
+    }
+
+    /// Whether the caller has stopped waiting.
+    fn given_up(&self) -> bool {
+        self.0.load(Ordering::SeqCst) == Self::GIVEN_UP
+    }
+}
+
+/// How the last step of a start ended, on the play's thread.
+#[derive(Debug, PartialEq, Eq)]
+enum Started {
+    Yes,
+    /// The caller had stopped waiting. The play was reported as failed: it
+    /// must not announce itself or draw, and goes away at once.
+    TooLate,
+}
+
+/// The last step of a start, with everything built: hand mpv its file
+/// (`load`) and claim the start. A play its caller has given up on is not
+/// loaded when that is already known, and does not count as started when it
+/// becomes known a moment later.
+fn finish_start(
+    race: &StartRace,
+    load: impl FnOnce() -> Result<(), String>,
+) -> Result<Started, String> {
+    if race.given_up() {
+        return Ok(Started::TooLate);
+    }
+    load()?;
+    Ok(if race.claim_started() {
+        Started::Yes
+    } else {
+        Started::TooLate
+    })
+}
+
+/// The caller's wait for a play to start has run out. `Err` when that
+/// settles it: the play is given up on. `Ok` when the play had already won
+/// the start: then it IS a started play, whether or not its word that it
+/// started has reached the caller yet, and must be treated as one. (Waiting
+/// a second time for that word, and reporting failure when it was slow,
+/// reported a failed start for a play that then announced itself: the first
+/// repair of ec-2 did that, and was reopened for it.)
+fn waited_out(race: &StartRace) -> Result<(), String> {
+    if race.give_up() {
+        Err("the embedded player did not start in time".to_string())
+    } else {
+        Ok(())
+    }
+}
+
+/// Plays whose thread was still running when Vela stopped waiting for it.
+///
+/// A thread cannot be made to stop from outside. One that is stuck (in mpv,
+/// in the graphics driver) still holds its surface and its player, and may
+/// still come back. Letting go of its handle would leave it with nothing
+/// that knows it exists (review finding ec-2). So it is kept here until it
+/// has finished: while any is kept no new embedded play starts, and Vela
+/// gives them one more moment as it exits.
+///
+/// "Finished" is asked of the thread itself. A flag the thread sets as its
+/// last statement is set before the thread has let go of what it holds
+/// (dropping a play's start request removes files), so joining on the
+/// strength of it can wait, in checks that must not.
+struct Leftovers(Mutex<Vec<std::thread::JoinHandle<()>>>);
+
+/// The leftovers of this run of Vela.
+static LEFTOVERS: Leftovers = Leftovers::new();
+
+impl Leftovers {
+    const fn new() -> Self {
+        Leftovers(Mutex::new(Vec::new()))
+    }
+
+    fn keep(&self, thread: std::thread::JoinHandle<()>) {
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(thread);
+    }
+
+    /// How many are still running. Those that have finished since the last
+    /// call are let go of. Never waits for a thread.
+    fn still_running(&self) -> usize {
+        let mut kept = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        let (finished, running): (Vec<_>, Vec<_>) = std::mem::take(&mut *kept)
+            .into_iter()
+            .partition(|thread| thread.is_finished());
+        *kept = running;
+        for thread in finished {
+            // Returns at once: the thread has finished.
+            let _ = thread.join();
+        }
+        kept.len()
+    }
+
+    /// Wait until none is running, for at most `limit`.
+    fn wait(&self, limit: Duration) -> bool {
+        let deadline = Instant::now() + limit;
+        while self.still_running() > 0 {
+            if Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        true
+    }
+}
+
+/// How many embedded plays Vela has stopped waiting for are still running.
+pub(crate) fn unfinished_plays() -> usize {
+    LEFTOVERS.still_running()
+}
+
+/// As Vela exits: give plays it had stopped waiting for one more moment to
+/// end, since they draw on the window's connection.
+pub(crate) fn wait_for_unfinished_plays(limit: Duration) -> bool {
+    LEFTOVERS.wait(limit)
+}
+
+struct Shared {
+    /// Written to wake the thread: by mpv (a frame or an event is waiting)
+    /// and by Vela (stop, or the rectangle changed).
+    wake: OwnedFd,
+    stop: AtomicBool,
+    /// Whether the play started, or its caller stopped waiting first.
+    race: StartRace,
+    /// The size the page last reported, when the thread has not applied it.
+    resize_to: Mutex<Option<(i32, i32)>>,
+    /// Set once the surface exists. Used from the window's thread only.
+    subsurface: Mutex<Option<WlSubsurface>>,
+}
+
+impl Shared {
+    fn new() -> Result<Arc<Self>, String> {
+        // SAFETY: plain flags; a negative result is an error.
+        let wake = unsafe { libc::eventfd(0, libc::EFD_NONBLOCK | libc::EFD_CLOEXEC) };
+        if wake < 0 {
+            return Err("couldn't create the player's wake-up channel".to_string());
+        }
+        Ok(Arc::new(Shared {
+            // SAFETY: a descriptor just created and owned by nothing else.
+            wake: unsafe { OwnedFd::from_raw_fd(wake) },
+            stop: AtomicBool::new(false),
+            race: StartRace::new(),
+            resize_to: Mutex::new(None),
+            subsurface: Mutex::new(None),
+        }))
+    }
+
+    fn wake(&self) {
+        let one: u64 = 1;
+        // SAFETY: a valid eventfd and eight readable bytes. A full counter
+        // (EAGAIN) already means "wake up".
+        unsafe { libc::write(self.wake.as_raw_fd(), (&one as *const u64).cast(), 8) };
+    }
+
+    fn drain_wake(&self) {
+        let mut count: u64 = 0;
+        // SAFETY: a valid non-blocking eventfd and eight writable bytes.
+        unsafe { libc::read(self.wake.as_raw_fd(), (&mut count as *mut u64).cast(), 8) };
+    }
+}
+
+/// mpv calls this from its own threads. It may do nothing but wake the owner.
+unsafe extern "C" fn wake_from_mpv(context: *mut c_void) {
+    // SAFETY: `context` is the `Shared` of a play whose player and renderer,
+    // the only callers, are destroyed before the play releases it.
+    unsafe { (*(context as *const Shared)).wake() };
+}
+
+/// What exists while a play is running. Field order is teardown order.
+struct Live {
+    renderer: Renderer,
+    player: Player,
+    window: egl::Window,
+    surface: VideoSurface,
+    /// Kept open for as long as mpv decodes with it.
+    _render_node: Option<OwnedFd>,
+    /// What can be done about HDR here, and what is in effect.
+    capabilities: Capabilities,
+    tagging: Tagging,
+}
+
+/// How many exchanges with the compositor to wait, when a play starts, for
+/// its description of the output and its answer to Vela's. Normally three:
+/// the description is announced, its contents arrive, the answer arrives.
+/// If they take longer the play starts in standard range and switches when
+/// they arrive.
+const COLOUR_EXCHANGES_AT_START: usize = 6;
+
+/// How long, at most, a play's start waits for the compositor and for mpv's
+/// answers about colour. A change still in flight then carries on in the
+/// running play, which holds presentation until mpv has answered.
+const COLOUR_LIMIT_AT_START: Duration = Duration::from_secs(1);
+
+/// Act on whatever the compositor has said about colour since the last call:
+/// the one way, at the start of a play and during it, by which mpv and the
+/// surface are told what the display can do (see `hdr`).
+fn follow_colour(
+    player: &Player,
+    surface: &mut VideoSurface,
+    capabilities: Capabilities,
+    tagging: &mut Tagging,
+    now: Instant,
+) {
+    // The display can change under a running play: another monitor, HDR
+    // switched off, the brightness slider (which moves the reference white
+    // and so the peak).
+    if surface.output_changed() && capabilities.hdr_possible() {
+        surface.ask_about_output();
+    }
+    if let Some(output) = surface.output_described() {
+        let step = tagging.output_described(hdr::presentation(Some(output), capabilities));
+        hdr::carry_out(step, tagging, player, surface, now);
+    }
+    if let Some(made) = surface.description_answer() {
+        let step = if made {
+            tagging.description_ready()
+        } else {
+            tagging.description_failed()
+        };
+        hdr::carry_out(step, tagging, player, surface, now);
+    }
+}
+
+/// One line on standard error for a change of the picture that has finished.
+fn say(change: hdr::Change) {
+    match change {
+        hdr::Change::Nothing => {}
+        hdr::Change::Hdr(peak) => eprintln!("vela: embedded player: HDR output, peak {peak} nits"),
+        hdr::Change::Sdr => eprintln!("vela: embedded player: standard-range output"),
+        hdr::Change::HdrRefused => {
+            eprintln!("vela: embedded player: HDR could not be set up; standard range")
+        }
+    }
+}
+
+fn private_options_file(text: &str) -> Result<PathBuf, String> {
+    use std::io::Write;
+    let name = format!(
+        "mpv-options-{}-{}.conf",
+        std::process::id(),
+        uuid::Uuid::new_v4().simple()
+    );
+    let path = crate::player::launch::private_runtime_dir()?.join(name);
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let written = options
+        .open(&path)
+        .and_then(|mut file| file.write_all(text.as_bytes()));
+    if written.is_err() {
+        let _ = std::fs::remove_file(&path);
+        return Err("couldn't write the player's options".to_string());
+    }
+    Ok(path)
+}
+
+/// Hand the launch's options to a player that has not been started yet.
+fn configure(player: &Player, start: &Start) -> Result<(), String> {
+    for file in &start.own_config {
+        if file.is_file() {
+            // mpv reports no error for a line it cannot use, here as on its
+            // own; the user's file is theirs to get right.
+            let _ = player.set_option("include", &file.to_string_lossy());
+        }
+    }
+    for step in &start.steps {
+        match step {
+            Step::Options(text) => {
+                let file = private_options_file(text)?;
+                let applied = player.set_option("include", &file.to_string_lossy());
+                let _ = std::fs::remove_file(&file);
+                applied.map_err(|_| "mpv did not accept the player's options".to_string())?;
+            }
+            Step::Include(path) => {
+                // The stream-auth include is one of these. Its path and
+                // mpv's answer stay out of every message.
+                player
+                    .set_option("include", path)
+                    .map_err(|_| "mpv did not accept an included options file".to_string())?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Build a play around `surface`, which the window's thread made for it
+/// (`VideoSurface::create`). Nothing here touches Vela's window.
+fn set_up(start: &Start, mut surface: VideoSurface, shared: &Arc<Shared>) -> Result<Live, String> {
+    // The waiting the window's thread was spared: learn the surface's scale.
+    surface.settle()?;
+    let (width, height) = surface.buffer_size();
+    // SAFETY: the connection the surface is on, which lives as long as the
+    // process, and a surface that `Live` drops after the window that draws
+    // into it.
+    let window = unsafe {
+        egl::Window::create(start.guest.display().0, surface.wl_surface(), width, height)
+    }?;
+    // Something to show from the first moment: black, not whatever the
+    // compositor has behind the window.
+    window.show_black();
+    surface.flush();
+
+    let capabilities = Capabilities {
+        can_describe: surface.colour_support(),
+        ten_bit_window: window.depth == 10,
+    };
+    let mut tagging = Tagging::new();
+
+    let player = Player::create(start.lib.clone())?;
+    configure(&player, start)?;
+    player
+        .initialize()
+        .map_err(|reason| format!("mpv could not start ({reason})"))?;
+    // From here on mpv reports every change of its targets, whoever makes
+    // it, and `hdr` decides what to do about it (review finding hd-2).
+    if !hdr::observe_targets(&player) {
+        return Err("mpv would not report what it draws for".to_string());
+    }
+    // mpv says "success" for an options file it could not read or parse.
+    // These two are near the end of Vela's list and nothing works without
+    // them, so reading them back shows the list arrived.
+    if player.property("input-ipc-server").as_deref() != Some(start.ipc_path.as_str())
+        || player.property("vo").as_deref() != Some("libmpv")
+    {
+        return Err("mpv did not take the player's options".to_string());
+    }
+    // What the display can do, settled before the first picture so that the
+    // first picture is already right, and after the user's options and
+    // Vela's own, so that in HDR this is what mpv draws for whatever either
+    // of them said.
+    if capabilities.hdr_possible() {
+        surface.ask_about_output();
+        let deadline = Instant::now() + COLOUR_LIMIT_AT_START;
+        let mut exchanges = 0;
+        while !tagging.settled() && Instant::now() < deadline {
+            if tagging.changing() {
+                // mpv's answers. No renderer exists yet, so this is the one
+                // place this thread may wait for mpv. A change waiting for
+                // room in mpv's queue has no answer to wait for: the queue
+                // is read without waiting until it is empty.
+                let left = if tagging.waiting_for_room() {
+                    Duration::ZERO
+                } else {
+                    deadline.saturating_duration_since(Instant::now())
+                };
+                match player.wait_for_event(left) {
+                    Event::Answer { request, taken } => say(hdr::answered(
+                        request,
+                        taken,
+                        &mut tagging,
+                        &player,
+                        &mut surface,
+                        Instant::now(),
+                    )),
+                    Event::Shutdown => return Err("mpv shut down as the play started".to_string()),
+                    Event::None => {
+                        hdr::drained(&mut tagging, &player, &mut surface, Instant::now())
+                    }
+                    Event::TargetChanged {
+                        registration,
+                        option,
+                        value,
+                    } => say(hdr::target_changed(
+                        registration,
+                        &option,
+                        value.as_deref(),
+                        &mut tagging,
+                        &player,
+                        &mut surface,
+                        Instant::now(),
+                    )),
+                    Event::Other => {}
+                }
+            } else if exchanges < COLOUR_EXCHANGES_AT_START {
+                surface.roundtrip()?;
+                exchanges += 1;
+            } else {
+                break;
+            }
+            follow_colour(&player, &mut surface, capabilities, &mut tagging, Instant::now());
+        }
+    }
+
+    let context = Arc::as_ptr(shared) as *mut c_void;
+    // Before the renderer exists: once it does, this thread may call only
+    // the functions render.h lists as safe for it, and this is not one.
+    // SAFETY: `shared` is held by this thread until after `Live`, and with
+    // it the player, has been dropped.
+    unsafe { player.set_wakeup(wake_from_mpv, context) };
+    let render_node = window.render_node();
+    let render_fd = render_node.as_ref().map_or(-1, |fd| fd.as_raw_fd());
+    // SAFETY: this thread's OpenGL context is current (the window above),
+    // `egl::proc_address` resolves its functions, and the render node stays
+    // open in `Live` for as long as the renderer exists.
+    let renderer = unsafe { Renderer::create(&player, egl::proc_address, render_fd) }
+        .map_err(|reason| format!("mpv could not draw into the window ({reason})"))?;
+    // SAFETY: as for the player's, above; the renderer is dropped first.
+    unsafe { renderer.set_update(wake_from_mpv, context) };
+
+    *shared.subsurface.lock().unwrap_or_else(|e| e.into_inner()) = Some(surface.subsurface());
+    Ok(Live {
+        renderer,
+        player,
+        window,
+        surface,
+        _render_node: render_node,
+        capabilities,
+        tagging,
+    })
+}
+
+impl Live {
+    /// Hand mpv its file.
+    ///
+    /// The one call on this thread that waits for mpv once the renderer
+    /// exists (render.h does not list `mpv_command` as safe here). mpv's
+    /// core waits for the thread that draws only through its video output,
+    /// and mpv opens one without a file only for `force-window`
+    /// (player/playloop.c, `handle_force_window`). Vela's launch sets that
+    /// option off after every option the user gives (`embedded_required_args`
+    /// in launch.rs), so as far as options go no video output exists here.
+    /// That does not cover what changes an option once mpv runs: a
+    /// conditional profile in the user's own mpv.conf (`profile-cond`,
+    /// applied after start-up; with the shipped library it turned
+    /// `force-window` back on and opened a video output with no file), or a
+    /// command on mpv's IPC socket. Then a video output can exist here, and
+    /// whether this call then waits for this thread to draw, and for how
+    /// long, has not been measured (review finding hd-3).
+    fn load(&self, url: &str) -> Result<(), String> {
+        self.player
+            .command(&["loadfile", url])
+            .map_err(|reason| format!("mpv would not load the stream ({reason})"))
+    }
+}
+
+impl PlayLoop for Live {
+    fn wait(&mut self, shared: &Shared, timeout_ms: i32) -> bool {
+        self.surface.wait(shared.wake.as_fd(), timeout_ms).is_ok()
+    }
+
+    fn request_quit(&self) {
+        self.player.request_quit();
+    }
+
+    fn turn(&mut self, shared: &Shared, stopping: &Stopping) -> bool {
+        let mut redraw = false;
+        let resize_to = shared
+            .resize_to
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
+        if let Some((width, height)) = resize_to {
+            if let Some((width, height)) = self.surface.resize(width, height) {
+                self.window.resize(width, height);
+                redraw = true;
+            }
+        }
+        if let Some((width, height)) = self.surface.rescale() {
+            self.window.resize(width, height);
+            redraw = true;
+        }
+        let now = Instant::now();
+        follow_colour(
+            &self.player,
+            &mut self.surface,
+            self.capabilities,
+            &mut self.tagging,
+            now,
+        );
+        // Nothing on this thread waits for mpv from here on: mpv's
+        // video thread may itself be waiting for this one to draw.
+        loop {
+            if stopping.expired(Instant::now()) {
+                return false;
+            }
+            match self.player.next_event() {
+                Event::None => {
+                    hdr::drained(&mut self.tagging, &self.player, &mut self.surface, now);
+                    break;
+                }
+                // The file ended, or quit was requested here or over IPC.
+                Event::Shutdown => return false,
+                Event::Answer { request, taken } => say(hdr::answered(
+                    request,
+                    taken,
+                    &mut self.tagging,
+                    &self.player,
+                    &mut self.surface,
+                    now,
+                )),
+                Event::TargetChanged {
+                    registration,
+                    option,
+                    value,
+                } => say(hdr::target_changed(
+                    registration,
+                    &option,
+                    value.as_deref(),
+                    &mut self.tagging,
+                    &self.player,
+                    &mut self.surface,
+                    now,
+                )),
+                Event::Other => {}
+            }
+        }
+        // Decided after every answer waiting has been read, and before
+        // anything is drawn.
+        let (width, height) = self.surface.buffer_size();
+        match self.tagging.frame(self.renderer.has_new_frame(), redraw, now) {
+            Frame::Nothing => {}
+            Frame::Hold => {
+                self.renderer.draw(width, height, self.window.depth);
+                self.renderer.frame_shown();
+            }
+            Frame::Show => {
+                self.renderer.draw(width, height, self.window.depth);
+                self.window.swap();
+                self.renderer.frame_shown();
+            }
+            Frame::Black => self.window.show_black(),
+            Frame::HoldAndBlack => {
+                self.renderer.draw(width, height, self.window.depth);
+                self.renderer.frame_shown();
+                self.window.show_black();
+            }
+        }
+        true
+    }
+}
+
+/// A started embedded play, as the rest of the app holds it.
+pub(crate) struct Session {
+    /// The playback session this play belongs to. A player is told apart
+    /// from the one that replaced it by this and nothing else.
+    session_id: String,
+    /// The play's IPC socket, for the player view's commands
+    /// (`crate::player::control`), with the gate those commands pass.
+    channel: Arc<Channel>,
+    shared: Arc<Shared>,
+    thread: Option<std::thread::JoinHandle<()>>,
+    header_include: Option<HeaderInclude>,
+    /// How long to wait for the thread when this is dropped, and where the
+    /// thread goes if it has not ended by then.
+    patience: Duration,
+    leftovers: &'static Leftovers,
+    /// Which player this is (`crate::player::PlayerHandle::serial`).
+    serial: u64,
+}
+
+impl Session {
+    /// Start a play on `surface` and wait until mpv has been given its file,
+    /// or until something on the way there failed.
+    pub(crate) fn start(mut start: Start, surface: VideoSurface) -> Result<Self, String> {
+        let shared = Shared::new()?;
+        let header_include = start.header_include.take();
+        let session_id = std::mem::take(&mut start.session_id);
+        let channel = Arc::new(Channel::new(start.ipc_path.clone()));
+        let start_limit = start.start_limit;
+        let (ready, started) = std::sync::mpsc::sync_channel::<Result<(), String>>(1);
+        let thread_shared = shared.clone();
+        let thread = std::thread::Builder::new()
+            .name("vela-embedded-player".into())
+            .spawn(move || {
+                let shared = thread_shared;
+                // The window's thread must not keep a handle to a surface
+                // that is about to go; this takes it away first.
+                let forget_surface = || {
+                    shared
+                        .subsurface
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .take();
+                };
+                match set_up(&start, surface, &shared) {
+                    Err(reason) => {
+                        forget_surface();
+                        let _ = ready.send(Err(reason));
+                    }
+                    Ok(mut live) => {
+                        if !start.load_delay.is_zero() {
+                            std::thread::sleep(start.load_delay);
+                        }
+                        match finish_start(&shared.race, || live.load(&start.url)) {
+                            Ok(Started::Yes) => {
+                                let _ = ready.send(Ok(()));
+                                (start.on_lifecycle)(Lifecycle::Opened);
+                                live.run(&shared);
+                                forget_surface();
+                                drop(live);
+                                (start.on_lifecycle)(Lifecycle::Closed);
+                            }
+                            // Nobody is waiting for this play any more, and
+                            // nobody was told it opened: it goes unannounced.
+                            Ok(Started::TooLate) => {
+                                forget_surface();
+                                drop(live);
+                            }
+                            Err(reason) => {
+                                forget_surface();
+                                drop(live);
+                                let _ = ready.send(Err(reason));
+                            }
+                        }
+                    }
+                }
+            })
+            .map_err(|e| format!("couldn't start the embedded player's thread: {e}"))?;
+        let session = Session {
+            session_id,
+            channel,
+            shared,
+            thread: Some(thread),
+            header_include,
+            patience: STOP_PATIENCE,
+            leftovers: &LEFTOVERS,
+            serial: crate::player::new_serial(),
+        };
+        // On every failure below the session is dropped, which stops the
+        // play, waits for it, and keeps it if it will not end (`Drop`).
+        match started.recv_timeout(start_limit) {
+            Ok(Ok(())) => Ok(session),
+            Ok(Err(reason)) => Err(reason),
+            // The wait is over, and whoever settled the start first decides
+            // what the play is. Nothing more is waited for.
+            Err(_) => waited_out(&session.shared.race).map(|()| session),
+        }
+    }
+
+    /// A play that was never started, for tests of what holds one.
+    #[cfg(test)]
+    pub(crate) fn for_test(session_id: &str) -> Self {
+        Self::for_test_holding(session_id, None)
+    }
+
+    /// The same, whose player view's commands go to the socket at `path`.
+    #[cfg(test)]
+    pub(crate) fn for_test_on(session_id: &str, path: &str) -> Self {
+        Self::for_test_with_channel(session_id, Channel::new(path.to_string()))
+    }
+
+    /// The same, with a channel a test has made.
+    #[cfg(test)]
+    pub(crate) fn for_test_with_channel(session_id: &str, channel: Channel) -> Self {
+        let mut session = Self::for_test(session_id);
+        session.channel = Arc::new(channel);
+        session
+    }
+
+    /// The same, owning a stream-auth include.
+    #[cfg(test)]
+    pub(crate) fn for_test_holding(session_id: &str, header_include: Option<HeaderInclude>) -> Self {
+        Session {
+            session_id: session_id.to_string(),
+            channel: Arc::new(Channel::new(String::new())),
+            shared: Shared::new().expect("an eventfd"),
+            thread: None,
+            header_include,
+            patience: STOP_PATIENCE,
+            leftovers: &LEFTOVERS,
+            serial: crate::player::new_serial(),
+        }
+    }
+
+    /// A play that runs, as far as anything holding it can tell, until it is
+    /// told to stop, for tests of what holds one.
+    #[cfg(test)]
+    pub(crate) fn for_test_live(session_id: &str) -> Self {
+        let mut play = Self::for_test_running(STOP_PATIENCE, &LEFTOVERS, |stopped| {
+            while !stopped() {
+                std::thread::sleep(Duration::from_micros(50));
+            }
+        });
+        play.session_id = session_id.to_string();
+        play
+    }
+
+    /// The same, that takes a moment to end once told to stop, as a real
+    /// play does.
+    #[cfg(test)]
+    pub(crate) fn for_test_slow_to_stop(session_id: &str) -> Self {
+        let mut play = Self::for_test_running(STOP_PATIENCE, &LEFTOVERS, |stopped| {
+            while !stopped() {
+                std::thread::sleep(Duration::from_micros(50));
+            }
+            std::thread::sleep(Duration::from_millis(200));
+        });
+        play.session_id = session_id.to_string();
+        play
+    }
+
+    /// A play whose thread runs `body`, for tests of what happens to a
+    /// thread that does or does not end. `body` is given a way to ask
+    /// whether the play has been told to stop.
+    #[cfg(test)]
+    fn for_test_running(
+        patience: Duration,
+        leftovers: &'static Leftovers,
+        body: impl FnOnce(&dyn Fn() -> bool) + Send + 'static,
+    ) -> Self {
+        let shared = Shared::new().expect("an eventfd");
+        let thread_shared = shared.clone();
+        let thread = std::thread::spawn(move || {
+            body(&|| thread_shared.stop.load(Ordering::SeqCst));
+        });
+        Session {
+            session_id: "test".to_string(),
+            channel: Arc::new(Channel::new(String::new())),
+            shared,
+            thread: Some(thread),
+            header_include: None,
+            patience,
+            leftovers,
+            serial: crate::player::new_serial(),
+        }
+    }
+
+    /// Whether this is the play of that playback session.
+    pub(crate) fn is_play(&self, session_id: &str) -> bool {
+        self.session_id == session_id
+    }
+
+    /// The way to this play's player for the player view's commands.
+    pub(crate) fn channel(&self) -> Arc<Channel> {
+        self.channel.clone()
+    }
+
+    /// Ask the play to stop. Does not wait.
+    pub(crate) fn stop(&self) {
+        self.shared.stop.store(true, Ordering::SeqCst);
+        self.shared.wake();
+    }
+
+    /// Whether the play has been told to stop.
+    pub(crate) fn stop_requested(&self) -> bool {
+        self.shared.stop.load(Ordering::SeqCst)
+    }
+
+    pub(crate) fn serial(&self) -> u64 {
+        self.serial
+    }
+
+    /// Whether the play has ended and released everything it held: whether
+    /// its thread has finished. Never waits for the thread.
+    pub(crate) fn has_ended(&mut self) -> bool {
+        if self.thread.as_ref().is_some_and(|thread| !thread.is_finished()) {
+            return false;
+        }
+        if let Some(thread) = self.thread.take() {
+            // Returns at once: the thread has finished.
+            let _ = thread.join();
+        }
+        true
+    }
+
+    /// Stop the play and wait for it to release the window's surface, for at
+    /// most `limit`. Used where the window itself is about to go away: the
+    /// play draws into a child of that window and must be gone first.
+    pub(crate) fn stop_and_wait(&mut self, limit: Duration) -> bool {
+        self.stop();
+        let deadline = std::time::Instant::now() + limit;
+        while !self.has_ended() {
+            if std::time::Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        true
+    }
+
+    /// Move and size the video. Call on the window's own thread, and have
+    /// the window redraw afterwards: the position takes effect with the
+    /// window's next redraw, the size with the next video frame.
+    pub(crate) fn place(&self, rect: Rect) {
+        if let Some(subsurface) = self
+            .shared
+            .subsurface
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+        {
+            subsurface.set_position(rect.x, rect.y);
+        }
+        *self.shared.resize_to.lock().unwrap_or_else(|e| e.into_inner()) =
+            Some((rect.width, rect.height));
+        self.shared.wake();
+    }
+
+    /// mpv read the stream-auth include when it was configured. Remove it
+    /// now rather than when the play is reaped. A failed removal leaves the
+    /// include with this play, to be tried again when the play is reaped.
+    pub(crate) fn remove_consumed_header_include(&mut self) -> Result<(), String> {
+        HeaderInclude::remove_consumed(&mut self.header_include)
+    }
+}
+
+impl Drop for Session {
+    fn drop(&mut self) {
+        // A play is normally reaped after it has ended. If it is dropped
+        // while running, it must still let go of the window: it is told to
+        // stop and waited for. One that has not ended by then is not let go
+        // of either; its thread is kept (`Leftovers`).
+        if self.thread.is_some() && !self.stop_and_wait(self.patience) {
+            if let Some(thread) = self.thread.take() {
+                eprintln!("vela: an embedded play did not stop in time and is kept until it does");
+                self.leftovers.keep(thread);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::player::launch::write_header_include_at;
+
+    #[test]
+    fn a_running_play_has_no_quit_request_or_deadline() {
+        let mut stopping = Stopping::default();
+        let now = Instant::now();
+        for now in [now, now + STOP_PATIENCE] {
+            assert_eq!(stopping.next(false, now), StopAction::Continue);
+            assert_eq!(stopping.wait_ms(now), 100);
+        }
+    }
+
+    #[test]
+    fn a_stop_asks_for_quit_once_even_when_repeated() {
+        let mut stopping = Stopping::default();
+        let now = Instant::now();
+        assert_eq!(stopping.next(true, now), StopAction::RequestQuit);
+        for requested in [true, true, false, true] {
+            assert_eq!(stopping.next(requested, now), StopAction::Continue);
+        }
+    }
+
+    #[test]
+    fn a_stop_keeps_serving_mpv_until_its_original_deadline() {
+        let mut stopping = Stopping::default();
+        let now = Instant::now();
+        assert_eq!(stopping.next(true, now), StopAction::RequestQuit);
+        assert_eq!(
+            stopping.next(true, now + QUIT_GRACE - Duration::from_nanos(1)),
+            StopAction::Continue
+        );
+        // A second stop just before the deadline did not buy another wait.
+        assert_eq!(stopping.next(true, now + QUIT_GRACE), StopAction::TearDown);
+        assert_eq!(
+            stopping.next(false, now + STOP_PATIENCE),
+            StopAction::TearDown
+        );
+    }
+
+    #[test]
+    fn a_stop_caps_the_surface_wait_at_its_deadline() {
+        let mut stopping = Stopping::default();
+        let now = Instant::now();
+        stopping.next(true, now);
+        let deadline = now + QUIT_GRACE;
+        assert_eq!(stopping.wait_ms(now), 100);
+        assert_eq!(stopping.wait_ms(deadline - Duration::from_millis(17)), 17);
+        assert_eq!(stopping.wait_ms(deadline - Duration::from_nanos(1)), 1);
+        assert_eq!(stopping.wait_ms(deadline), 0);
+        assert_eq!(stopping.wait_ms(deadline + Duration::from_secs(1)), 0);
+    }
+
+    /// Like VideoSurface::wait, but with no compositor. The real mpv test
+    /// below is woken through the very callback used by Live.
+    fn wait_headlessly(shared: &Shared, timeout_ms: i32) -> bool {
+        let mut fd = libc::pollfd {
+            fd: shared.wake.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        // SAFETY: one valid descriptor in one writable pollfd.
+        unsafe { libc::poll(&mut fd, 1, timeout_ms) >= 0 }
+    }
+
+    struct LoopProbe {
+        quits: std::cell::Cell<usize>,
+        turns: usize,
+        waits: usize,
+        shutdown_after: Option<usize>,
+        disconnect_after: Option<usize>,
+        began: Instant,
+    }
+
+    impl LoopProbe {
+        fn new(shutdown_after: Option<usize>, disconnect_after: Option<usize>) -> Self {
+            Self {
+                quits: std::cell::Cell::new(0),
+                turns: 0,
+                waits: 0,
+                shutdown_after,
+                disconnect_after,
+                began: Instant::now(),
+            }
+        }
+    }
+
+    impl PlayLoop for LoopProbe {
+        fn wait(&mut self, shared: &Shared, timeout_ms: i32) -> bool {
+            // A missing deadline must fail the test, not hang the suite.
+            assert!(
+                self.began.elapsed() < Duration::from_secs(2),
+                "the loop never gave up"
+            );
+            let disconnected = self.disconnect_after == Some(self.waits);
+            self.waits += 1;
+            if disconnected {
+                return false;
+            }
+            if self.shutdown_after.is_none() && self.disconnect_after.is_none() {
+                return wait_headlessly(shared, timeout_ms);
+            }
+            true
+        }
+
+        fn request_quit(&self) {
+            self.quits.set(self.quits.get() + 1);
+        }
+
+        fn turn(&mut self, _: &Shared, _: &Stopping) -> bool {
+            self.turns += 1;
+            self.shutdown_after != Some(self.turns)
+        }
+    }
+
+    #[test]
+    fn a_stopped_play_keeps_pumping_until_shutdown() {
+        let session = Session::for_test("stopped");
+        session.stop();
+        session.stop();
+        let mut play = LoopProbe::new(Some(2), None);
+        play.run(&session.shared);
+        assert_eq!(play.quits.get(), 1);
+        assert_eq!(play.turns, 2, "the turn after asking to quit still runs");
+        assert_eq!(play.waits, 2, "Shutdown ends the loop immediately");
+    }
+
+    #[test]
+    fn a_play_that_shuts_down_itself_leaves_without_asking_to_quit() {
+        let session = Session::for_test("ended");
+        let mut play = LoopProbe::new(Some(1), None);
+        play.run(&session.shared);
+        assert_eq!(play.quits.get(), 0);
+        assert_eq!(play.turns, 1);
+        assert_eq!(play.waits, 1);
+        // A late Stop (including Drop) only wakes the now-finished loop.
+        session.stop();
+        assert_eq!(play.quits.get(), 0);
+    }
+
+    #[test]
+    fn a_gone_compositor_ends_the_loop_even_while_stopping() {
+        for disconnect_after in [0, 1] {
+            let session = Session::for_test("disconnected");
+            session.stop();
+            let mut play = LoopProbe::new(None, Some(disconnect_after));
+            play.run(&session.shared);
+            assert_eq!(play.quits.get(), disconnect_after);
+            assert_eq!(play.turns, disconnect_after);
+            assert_eq!(play.waits, disconnect_after + 1);
+        }
+    }
+
+    #[test]
+    fn a_stop_without_shutdown_falls_back_at_the_bound() {
+        let session = Session::for_test("unanswered");
+        session.stop();
+        let mut play = LoopProbe::new(None, None);
+        play.run(&session.shared);
+        assert_eq!(play.quits.get(), 1);
+        assert!(play.turns > 0, "mpv was served while waiting");
+        assert!(play.began.elapsed() >= QUIT_GRACE);
+        assert!(
+            play.began.elapsed() < Duration::from_secs(1),
+            "only the grace is waited"
+        );
+    }
+
+    /// The same loop as Live, with an actual player and its actual wake-up
+    /// callback, but no renderer or compositor. Like hdr's real-library
+    /// tests this requires Vela's built set and never uses a system mpv.
+    #[test]
+    #[ignore = "needs the shipped libmpv set: npm run test:libmpv"]
+    fn real_library_stop_reaches_shutdown_in_every_playback_state() {
+        use super::super::libmpv::LIBRARY_FILE;
+
+        struct Headless {
+            player: Player,
+            shutdown: bool,
+            answers: Vec<(u64, bool)>,
+        }
+
+        impl PlayLoop for Headless {
+            fn wait(&mut self, shared: &Shared, timeout_ms: i32) -> bool {
+                wait_headlessly(shared, timeout_ms)
+            }
+
+            fn request_quit(&self) {
+                self.player.request_quit();
+            }
+
+            fn turn(&mut self, _: &Shared, stopping: &Stopping) -> bool {
+                while !stopping.expired(Instant::now()) {
+                    match self.player.next_event() {
+                        Event::None => return true,
+                        Event::Shutdown => {
+                            self.shutdown = true;
+                            return false;
+                        }
+                        Event::Answer { request, taken } => self.answers.push((request, taken)),
+                        Event::Other | Event::TargetChanged { .. } => {}
+                    }
+                }
+                false
+            }
+        }
+
+        let directory = std::env::var_os("VELA_LIBMPV_DIR")
+            .filter(|dir| !dir.is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.libmpv/out/libmpv")
+            });
+        let directory = std::fs::canonicalize(directory).expect("a built libmpv set");
+        let lib =
+            Arc::new(LibMpv::load(&directory.join(LIBRARY_FILE)).expect("the shipped library"));
+        for mode in ["idle", "loading", "paused", "failed", "shutdown"] {
+            // Declared first and dropped last: mpv's callback holds its
+            // address until the player is destroyed.
+            let session = Session::for_test(mode);
+            let player = Player::create(lib.clone()).expect("a player");
+            for (name, value) in [
+                ("config", "no"),
+                ("terminal", "no"),
+                ("vo", "null"),
+                ("ao", "null"),
+                ("idle", "yes"),
+                ("pause", "yes"),
+            ] {
+                player.set_option(name, value).expect(name);
+            }
+            player.initialize().expect("mpv starts");
+            // SAFETY: session holds Shared until after Headless/player goes.
+            unsafe {
+                player.set_wakeup(wake_from_mpv, Arc::as_ptr(&session.shared) as *mut c_void)
+            };
+            if matches!(mode, "loading" | "paused" | "failed") {
+                let file = if mode == "failed" {
+                    "/nonexistent-vela-stop-test.mp4".to_string()
+                } else {
+                    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                        .join("../packaging/libmpv/fixtures/h264-aac.mp4")
+                        .to_string_lossy()
+                        .into_owned()
+                };
+                player
+                    .command(&["loadfile", &file])
+                    .expect("loadfile is accepted");
+                if mode == "paused" {
+                    let deadline = Instant::now() + Duration::from_secs(5);
+                    while player.property("time-pos").is_none() {
+                        assert!(Instant::now() < deadline, "the fixture loaded");
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                    assert_eq!(player.property("pause").as_deref(), Some("yes"));
+                }
+            }
+            // An ask as hdr makes them (of a property that is not one of its
+            // targets: only hdr.rs names those), with the quit command's
+            // userdata: a command reply must not appear as a second answer
+            // to this ask.
+            assert!(hdr::Targetable::ask(&player, 0, "volume", "50"));
+            if mode == "shutdown" {
+                player
+                    .command(&["quit"])
+                    .expect("mpv quits before the stop is seen");
+            }
+            let mut play = Headless {
+                player,
+                shutdown: false,
+                answers: Vec::new(),
+            };
+            session.stop();
+            session.stop();
+            let began = Instant::now();
+            play.run(&session.shared);
+            assert!(
+                play.shutdown,
+                "{mode}: mpv shut down before teardown, not the deadline"
+            );
+            assert_eq!(play.answers, [(0, true)], "{mode}: only the HDR answer");
+            eprintln!(
+                "headless {mode} stop reached Shutdown in {:?}",
+                began.elapsed()
+            );
+        }
+    }
+
+    // The embedded play must hold on to a stream-auth file it could not
+    // remove, as the external player's handle does, so that reaping the play
+    // removes it (review finding ec-7: it used to let go of the file on the
+    // first failure, and nothing then knew the file existed).
+    #[test]
+    fn a_play_keeps_a_stream_auth_file_it_could_not_remove_and_removes_it_when_reaped() {
+        use std::os::unix::fs::PermissionsExt;
+        // SAFETY: takes nothing and cannot fail.
+        if unsafe { libc::geteuid() } == 0 {
+            // Root removes from a read-only directory; nothing to show.
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!(
+            "vela-test-{}-embedded-include-kept",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let lock = |mode: u32| {
+            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(mode)).unwrap()
+        };
+        let path = dir.join("headers.conf");
+        let headers = vec![("X-Emby-Token".to_string(), "synthetic".to_string())];
+        let include = write_header_include_at(&path, &headers).unwrap();
+        let mut play = Session::for_test_holding("play", Some(include));
+
+        // The removal before a replacement launch fails...
+        lock(0o500);
+        assert!(play.remove_consumed_header_include().is_err());
+        lock(0o700);
+        assert!(path.exists());
+        // ...and the play is reaped later, when it can be done.
+        drop(play);
+        assert!(
+            !path.exists(),
+            "the play still owned the file and removed it when it was reaped"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ---- a start that outlasts its caller (review finding ec-2)
+
+    #[test]
+    fn a_start_is_settled_once_by_whoever_gets_there_first() {
+        // The play starts; the caller's wait runs out a moment later.
+        let race = StartRace::new();
+        assert!(!race.given_up());
+        assert!(race.claim_started());
+        assert!(!race.give_up(), "a started play is not given up on");
+        assert!(!race.given_up());
+        // The caller stops waiting; the play comes back later.
+        let race = StartRace::new();
+        assert!(race.give_up());
+        assert!(race.given_up());
+        assert!(
+            !race.claim_started(),
+            "a play given up on never counts as started"
+        );
+        assert!(race.given_up());
+    }
+
+    #[test]
+    fn of_a_play_and_its_caller_racing_exactly_one_wins() {
+        for _ in 0..300 {
+            let race = Arc::new(StartRace::new());
+            let together = Arc::new(std::sync::Barrier::new(2));
+            let play = std::thread::spawn({
+                let (race, together) = (race.clone(), together.clone());
+                move || {
+                    together.wait();
+                    race.claim_started()
+                }
+            });
+            let caller = std::thread::spawn({
+                let (race, together) = (race.clone(), together.clone());
+                move || {
+                    together.wait();
+                    race.give_up()
+                }
+            });
+            let (started, gave_up) = (play.join().unwrap(), caller.join().unwrap());
+            assert_ne!(started, gave_up, "one of them, never both and never neither");
+            assert_eq!(race.given_up(), gave_up);
+        }
+    }
+
+    #[test]
+    fn a_play_that_is_built_in_time_is_loaded_and_started() {
+        let race = StartRace::new();
+        let mut loaded = false;
+        let finished = finish_start(&race, || {
+            loaded = true;
+            Ok(())
+        });
+        assert_eq!(finished, Ok(Started::Yes));
+        assert!(loaded);
+        assert!(!race.give_up(), "the caller's wait running out now changes nothing");
+    }
+
+    #[test]
+    fn a_play_its_caller_gave_up_on_is_not_loaded() {
+        let race = StartRace::new();
+        assert!(race.give_up());
+        let mut loaded = false;
+        let finished = finish_start(&race, || {
+            loaded = true;
+            Ok(())
+        });
+        assert_eq!(finished, Ok(Started::TooLate));
+        assert!(
+            !loaded,
+            "mpv is not handed the file of a play already reported as failed"
+        );
+    }
+
+    #[test]
+    fn a_play_given_up_on_while_it_loads_does_not_count_as_started() {
+        let race = StartRace::new();
+        let finished = finish_start(&race, || {
+            // The caller's wait runs out in the middle of the load.
+            assert!(race.give_up());
+            Ok(())
+        });
+        assert_eq!(finished, Ok(Started::TooLate));
+    }
+
+    #[test]
+    fn a_play_whose_file_mpv_refuses_says_so_and_claims_nothing() {
+        let race = StartRace::new();
+        assert_eq!(
+            finish_start(&race, || Err("refused".to_string())),
+            Err("refused".to_string())
+        );
+        assert!(race.give_up(), "the start is still the caller's to end");
+    }
+
+    /// A list of leftovers of a test's own, so tests cannot see each other's.
+    fn leftovers() -> &'static Leftovers {
+        Box::leak(Box::new(Leftovers::new()))
+    }
+
+    #[test]
+    fn a_play_that_will_not_stop_is_kept_not_let_go_of() {
+        let kept = leftovers();
+        let release = Arc::new(AtomicBool::new(false));
+        let stuck = release.clone();
+        // A play stuck somewhere that does not look at the request to stop.
+        // (It frees itself after ten seconds whatever happens, so that a
+        // mistake here that waits for it fails this test instead of hanging
+        // the whole run.)
+        let play = Session::for_test_running(Duration::from_millis(50), kept, move |_stop| {
+            let began = Instant::now();
+            while !stuck.load(Ordering::SeqCst) && began.elapsed() < Duration::from_secs(10) {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        });
+        let began = Instant::now();
+        drop(play);
+        assert!(
+            began.elapsed() < Duration::from_secs(2),
+            "dropping it waits its patience, not for ever"
+        );
+        assert_eq!(kept.still_running(), 1, "its thread is still known");
+        assert!(!kept.wait(Duration::from_millis(50)), "and still running");
+        assert!(
+            began.elapsed() < Duration::from_secs(2),
+            "asking about it does not wait for it"
+        );
+        // It comes unstuck.
+        release.store(true, Ordering::SeqCst);
+        assert!(kept.wait(Duration::from_secs(5)));
+        assert_eq!(kept.still_running(), 0, "and is let go of once it has ended");
+    }
+
+    /// Something a thread holds that takes a while to let go of, as a play's
+    /// start request does (it removes files as it is dropped).
+    struct SlowToLetGo(Duration);
+
+    impl Drop for SlowToLetGo {
+        fn drop(&mut self) {
+            std::thread::sleep(self.0);
+        }
+    }
+
+    // A play's thread has done its last piece of work and is still letting
+    // go of what it held. It has not finished, and asking whether it has
+    // must say so at once rather than wait for it.
+    #[test]
+    fn asking_whether_a_play_has_finished_never_waits_for_it() {
+        let kept = leftovers();
+        let (worked, has_worked) = std::sync::mpsc::channel();
+        let held = SlowToLetGo(Duration::from_millis(600));
+        let play = Session::for_test_running(Duration::ZERO, kept, move |_stop| {
+            let _held = held;
+            let _ = worked.send(());
+            // `_held` is let go of here, slowly, with the work already done.
+        });
+        has_worked.recv().unwrap();
+        // Dropped with no patience at all: the thread goes to the list.
+        drop(play);
+        let began = Instant::now();
+        assert_eq!(kept.still_running(), 1, "still letting go is still running");
+        assert!(!kept.wait(Duration::from_millis(5)));
+        assert!(
+            began.elapsed() < Duration::from_millis(300),
+            "neither question waited for the thread ({:?})",
+            began.elapsed()
+        );
+        assert!(kept.wait(Duration::from_secs(5)), "it does finish");
+        assert_eq!(kept.still_running(), 0);
+    }
+
+    #[test]
+    fn a_play_has_ended_only_once_its_thread_has_finished_and_asking_does_not_wait() {
+        let (worked, has_worked) = std::sync::mpsc::channel();
+        let held = SlowToLetGo(Duration::from_millis(600));
+        let mut play =
+            Session::for_test_running(Duration::from_secs(5), leftovers(), move |_stop| {
+                let _held = held;
+                let _ = worked.send(());
+            });
+        has_worked.recv().unwrap();
+        let began = Instant::now();
+        assert!(!play.has_ended(), "its thread is still letting go");
+        assert!(
+            began.elapsed() < Duration::from_millis(300),
+            "asking did not wait ({:?})",
+            began.elapsed()
+        );
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !play.has_ended() {
+            assert!(Instant::now() < deadline, "it does end");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(play.has_ended(), "and stays ended");
+    }
+
+    // The caller's wait runs out. Whoever settled the start first decides.
+    #[test]
+    fn a_start_that_was_won_before_the_wait_ran_out_is_a_started_play() {
+        // The play claimed the start; its word has not reached the caller.
+        let race = StartRace::new();
+        assert!(race.claim_started());
+        assert_eq!(waited_out(&race), Ok(()), "a started play, not a failed start");
+        assert!(!race.given_up());
+        // Nobody had claimed anything: the caller gives up, and the play
+        // can no longer start.
+        let race = StartRace::new();
+        assert_eq!(
+            waited_out(&race),
+            Err("the embedded player did not start in time".to_string())
+        );
+        assert!(race.given_up());
+        assert!(!race.claim_started());
+    }
+
+    #[test]
+    fn a_play_that_stops_when_asked_is_not_kept() {
+        let kept = leftovers();
+        let play = Session::for_test_running(Duration::from_secs(5), kept, |stop| {
+            while !stop() {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        });
+        let began = Instant::now();
+        drop(play);
+        assert!(began.elapsed() < Duration::from_secs(2));
+        assert_eq!(kept.still_running(), 0);
+    }
+
+    #[test]
+    fn a_marker_payload_goes_when_what_holds_it_goes() {
+        let path = std::env::temp_dir().join(format!(
+            "vela-test-{}-embedded-marker-payload.json",
+            std::process::id()
+        ));
+        std::fs::write(&path, b"[]").unwrap();
+        let held = Some(MarkerPayload::new(path.clone()));
+        assert!(path.exists(), "holding it does not touch it");
+        drop(held);
+        assert!(!path.exists());
+        // The script got there first: nothing to remove, and no complaint.
+        drop(MarkerPayload::new(path.clone()));
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn a_play_removes_a_consumed_stream_auth_file_at_once_when_it_can() {
+        let path = std::env::temp_dir().join(format!(
+            "vela-test-{}-embedded-include-removed.conf",
+            std::process::id()
+        ));
+        let headers = vec![("X-Emby-Token".to_string(), "synthetic".to_string())];
+        let include = write_header_include_at(&path, &headers).unwrap();
+        let mut play = Session::for_test_holding("play", Some(include));
+        assert!(path.exists());
+        assert!(play.remove_consumed_header_include().is_ok());
+        assert!(!path.exists(), "gone before the replacement launch writes its own");
+        // A play with none has nothing to remove.
+        assert!(Session::for_test("other").remove_consumed_header_include().is_ok());
+    }
+}

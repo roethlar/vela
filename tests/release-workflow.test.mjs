@@ -10,6 +10,54 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 const workflow = (
   await readFile(path.join(repoRoot, ".github", "workflows", "release.yml"), "utf8")
 ).replace(/\r\n/g, "\n");
+const ci = (
+  await readFile(path.join(repoRoot, ".github", "workflows", "ci.yml"), "utf8")
+).replace(/\r\n/g, "\n");
+
+function otherPlatformsJob() {
+  const job = ci.match(/^  other-platforms:\n[\s\S]*?(?=^  [a-z][a-z0-9_-]*:\n|(?![\s\S]))/m)?.[0];
+  assert.ok(job, "CI must keep its other-platforms job");
+  return job.split("\n").filter((line) => !/^\s*#/.test(line)).join("\n");
+}
+
+test("CI installs both targets of the universal macOS release", () => {
+  const job = otherPlatformsJob();
+  assert.match(job, /^        os: \[macos-latest, windows-latest\]$/m);
+  assert.match(job, /^    runs-on: \$\{\{ matrix\.os \}\}$/m);
+  assert.match(job, /    defaults:\n      run:\n        working-directory: src-tauri\n/);
+  assert.match(job, /^      fail-fast: false$/m);
+  assert.doesNotMatch(job, /continue-on-error:/);
+  assert.ok(
+    job.includes(
+      "      - uses: dtolnay/rust-toolchain@stable\n" +
+      "        with:\n" +
+      "          targets: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}\n",
+    ),
+    "the macOS toolchain must install both Darwin targets; Windows keeps its host target",
+  );
+});
+
+for (const target of ["aarch64-apple-darwin", "x86_64-apple-darwin"]) {
+  test(`CI explicitly checks ${target} on macOS`, () => {
+    assert.match(
+      otherPlatformsJob(),
+      new RegExp(
+        "^      - name: [^\\n]+\\n" +
+        "        if: runner\\.os == 'macOS'\\n" +
+        `        run: cargo \\+stable check --locked --target ${target}\\n`,
+        "m",
+      ),
+      `CI must check ${target} explicitly, regardless of the macOS runner's host architecture`,
+    );
+  });
+}
+
+test("CI scopes the host-only compile check to Windows", () => {
+  assert.match(
+    otherPlatformsJob(),
+    /      - name: [^\n]+\n        if: runner\.os == 'Windows'\n        run: cargo \+stable check --locked\n/,
+  );
+});
 
 test("release artifacts fail closed through a final inventory", () => {
   assert.doesNotMatch(workflow, /if-no-files-found:\s*ignore/);
@@ -17,10 +65,20 @@ test("release artifacts fail closed through a final inventory", () => {
   assert.match(workflow, /find "\$root" -type f -name "\$pattern"/);
   assert.match(workflow, /inventory:\n[\s\S]*needs: \[bundle, arch\]/);
   assert.match(workflow, /uses: actions\/download-artifact@v8/);
+  // Both package jobs wait for the audit and for the libmpv set that the
+  // Linux packages carry (tests/libmpv-packaging.test.mjs holds that part).
   assert.match(
     workflow,
-    /  bundle:\n    needs: npm-audit\n    permissions:\n      contents: write/,
+    /  bundle:\n    needs: \[npm-audit, cargo-audit, libmpv\]\n    permissions:\n      contents: write/,
   );
+  assert.match(workflow, /  arch:\n    name: Arch package\n    needs: \[npm-audit, cargo-audit, libmpv\]\n/);
+  // A known vulnerability fails the release as it fails CI, in either ecosystem.
+  assert.match(workflow, /  npm-audit:\n[\s\S]*?- run: npm audit --audit-level=moderate\n/);
+  assert.match(workflow, /  cargo-audit:\n[\s\S]*?- run: cargo audit --file src-tauri\/Cargo\.lock\n/);
+  assert.match(workflow, /  libmpv:\n[\s\S]*?    needs: \[npm-audit, cargo-audit\]\n/);
+  // The inventory takes what is released and nothing that merely travelled
+  // between jobs, or SHA256SUMS would list the set's files.
+  assert.match(workflow, /uses: actions\/download-artifact@v8\n\s+with:\n\s+pattern: vela-\*\n\s+path: artifacts\n/);
   assert.match(
     workflow,
     /find artifacts -type f ! -name SHA256SUMS -print0 \| sort -z/,

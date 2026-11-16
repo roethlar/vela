@@ -42,6 +42,11 @@ pub struct AppConfig {
     /// `~/.config/mpv/mpv.conf`. It also leaves macOS audio-output selection to
     /// that config. Off by default for a reproducible launch.
     pub mpv_use_own_config: Option<bool>,
+    /// Check the media server's TLS certificate in the player. Missing (or
+    /// null) means true; only an explicit false disables checking. Applied
+    /// after the user's options and includes, without choosing a CA store.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mpv_tls_verify: Option<bool>,
     /// Black-bar cropping via mpv's bundled `autocrop.lua`, three-state:
     /// `"off"` (default; nothing injected), `"manual"` (script loaded with
     /// `autocrop-auto=no` — crops only on an explicit in-player `Shift+C`), or
@@ -50,10 +55,36 @@ pub struct AppConfig {
     /// `"auto"` auto-fires mpv's live `video-crop`, which can hang mpv on some
     /// HDR/Wayland stacks — the Settings UI carries that warning.
     pub mpv_autocrop: Option<String>,
+    /// Which player plays video: `"external"` (mpv in its own window) or
+    /// `"embedded"` (mpv's library drawing inside Vela's window; experimental,
+    /// Linux on Wayland only). Missing means external on every desktop OS
+    /// (decision 2026-11-12); unknown values invalidate the document.
+    ///
+    /// Written only when set, so a config that never chose a player stays
+    /// readable by releases that predate this field. A config that DOES carry
+    /// it is rejected by those releases, like any setting they do not know.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub player: Option<String>,
     /// What to do after a clean EOF once a single item or named playlist has
     /// genuinely ended: `"off"`, `"on"`, or `"only-tv"`. Missing means the
     /// product default (`"only-tv"`); unknown values invalidate the document.
     pub continue_playing: Option<String>,
+    /// How the first mpv window of a run of Vela opens: `"remember"` (as the
+    /// last play of the previous run left it), `"fullscreen"`, or `"default"`
+    /// (nothing from Vela). Later plays in a run always open as the play
+    /// before them left the window. Missing means remember (owner ruling D2(a),
+    /// `.agents/plans/mpv-window-geometry.md`); unknown values invalidate the
+    /// document.
+    ///
+    /// Written only when set, like `player`: a release that predates the field
+    /// rejects any key it does not know.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mpv_window_mode: Option<String>,
+    /// How the last external play left its mpv window, kept for the first play
+    /// of the next run in remember mode. Written when a play ends, and only
+    /// then; removed when the mode leaves remember. Never a position.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mpv_window: Option<MpvWindow>,
     /// How duplicate copies are selected at the shared play boundary. Missing
     /// means `best`; unknown values invalidate the document.
     pub playback_source_policy: Option<String>,
@@ -204,6 +235,178 @@ impl SkipPolicy {
     pub fn is_off(self) -> bool {
         matches!(self, SkipPolicy::Off)
     }
+}
+
+/// The `mpv_window_mode` setting, resolved.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MpvWindowMode {
+    Remember,
+    Fullscreen,
+    Default,
+}
+
+impl MpvWindowMode {
+    /// Resolve a stored value. A missing value is remember (D2(a)); any other
+    /// unknown value is an error, never a guess. The only place the default
+    /// is applied.
+    pub fn from_config(stored: Option<&str>) -> Result<Self, String> {
+        match stored {
+            None | Some("remember") => Ok(Self::Remember),
+            Some("fullscreen") => Ok(Self::Fullscreen),
+            Some("default") => Ok(Self::Default),
+            Some(_) => Err("invalid saved player window setting".to_string()),
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Remember => "remember",
+            Self::Fullscreen => "fullscreen",
+            Self::Default => "default",
+        }
+    }
+}
+
+/// The longest screen name kept. mpv's names are short ("DP-3", or a model
+/// and serial on macOS); anything longer is not one.
+const MAX_SCREEN_NAME_LEN: usize = 256;
+
+/// Whether a screen name may be stored and passed to mpv as `--screen-name`.
+pub(crate) fn usable_screen_name(name: &str) -> bool {
+    !name.trim().is_empty()
+        && name.len() <= MAX_SCREEN_NAME_LEN
+        && !name.chars().any(char::is_control)
+}
+
+/// How an mpv window was left: each part as last observed, `None` where it
+/// never was. Width and height are the windowed size and come together.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct MpvWindow {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fullscreen: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub maximized: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub screen: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height: Option<u32>,
+}
+
+impl MpvWindow {
+    fn validate(&self) -> Result<(), String> {
+        let size_ok = match (self.width, self.height) {
+            (None, None) => true,
+            (Some(width), Some(height)) => crate::playback::usable_windowed_size(width, height),
+            _ => false,
+        };
+        if !size_ok
+            || self
+                .screen
+                .as_deref()
+                .is_some_and(|name| !usable_screen_name(name))
+        {
+            return Err("invalid saved player window".to_string());
+        }
+        Ok(())
+    }
+
+    /// The window state and screen the first play of a run opens with.
+    pub(crate) fn opening(&self) -> (crate::playback::PlaybackWindowState, Option<String>) {
+        (
+            crate::playback::PlaybackWindowState {
+                fullscreen: self.fullscreen,
+                maximized: self.maximized,
+                windowed_size: self.width.zip(self.height),
+            },
+            self.screen.clone(),
+        )
+    }
+
+    /// This record updated with how a play left its window, or how Vela
+    /// opened it when mpv never reported otherwise. An unknown part keeps its
+    /// stored value; a play that reported nothing can still hand on its
+    /// opening flags and size. An unusable screen name is not taken.
+    pub(crate) fn updated_with(
+        &self,
+        ended: crate::playback::PlaybackWindowState,
+        screen: Option<&str>,
+    ) -> Self {
+        let size = ended.windowed_size.or(self.width.zip(self.height));
+        Self {
+            fullscreen: ended.fullscreen.or(self.fullscreen),
+            maximized: ended.maximized.or(self.maximized),
+            screen: screen
+                .filter(|name| usable_screen_name(name))
+                .map(str::to_string)
+                .or_else(|| self.screen.clone()),
+            width: size.map(|(width, _)| width),
+            height: size.map(|(_, height)| height),
+        }
+    }
+}
+
+/// A window state and the screen to open it on.
+pub(crate) type OpeningWindow = (crate::playback::PlaybackWindowState, Option<String>);
+
+/// How the first mpv window of a run of Vela opens, by the setting: as the
+/// previous run left it, fullscreen and nothing else, or with nothing from
+/// Vela (mpv's own default, or what the user's options say).
+pub(crate) fn first_window_of_run(cfg: &AppConfig) -> Result<OpeningWindow, String> {
+    Ok(
+        match MpvWindowMode::from_config(cfg.mpv_window_mode.as_deref())? {
+            MpvWindowMode::Remember => cfg
+                .mpv_window
+                .as_ref()
+                .map(MpvWindow::opening)
+                .unwrap_or_default(),
+            MpvWindowMode::Fullscreen => (
+                crate::playback::PlaybackWindowState {
+                    fullscreen: Some(true),
+                    ..Default::default()
+                },
+                None,
+            ),
+            MpvWindowMode::Default => OpeningWindow::default(),
+        },
+    )
+}
+
+/// What a play that ended in the external player leaves in the settings: its
+/// window, in remember mode, and only when that changes what is stored. Any
+/// other mode, and an embedded play (it has no mpv window), leave everything
+/// as it is. Returns whether the record changed.
+pub(crate) fn remember_mpv_window(
+    cfg: &mut AppConfig,
+    player: crate::player::PlayerKind,
+    ended: crate::playback::PlaybackWindowState,
+    screen: Option<&str>,
+) -> bool {
+    if player != crate::player::PlayerKind::External
+        || MpvWindowMode::from_config(cfg.mpv_window_mode.as_deref()) != Ok(MpvWindowMode::Remember)
+    {
+        return false;
+    }
+    let updated = cfg
+        .mpv_window
+        .clone()
+        .unwrap_or_default()
+        .updated_with(ended, screen);
+    // A play that observed nothing, with nothing stored, stores nothing. A
+    // record the settings would reject is not stored either: it is written
+    // with the play's recents stamp, which must not fail over it.
+    let updated = (updated != MpvWindow::default()).then_some(updated);
+    if updated == cfg.mpv_window
+        || updated
+            .as_ref()
+            .is_some_and(|window| window.validate().is_err())
+    {
+        return false;
+    }
+    cfg.mpv_window = updated;
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -411,11 +614,20 @@ impl AppConfig {
             self.mpv_autocrop.as_deref(),
             &["off", "manual", "auto"],
         )?;
+        validate_optional_closed("player", self.player.as_deref(), &["external", "embedded"])?;
         validate_optional_closed(
             "Continue Playing",
             self.continue_playing.as_deref(),
             &["off", "on", "only-tv"],
         )?;
+        validate_optional_closed(
+            "player window setting",
+            self.mpv_window_mode.as_deref(),
+            &["remember", "fullscreen", "default"],
+        )?;
+        if let Some(window) = &self.mpv_window {
+            window.validate()?;
+        }
         validate_optional_closed(
             "playback source policy",
             self.playback_source_policy.as_deref(),
@@ -1343,6 +1555,383 @@ mod tests {
     }
 
     #[test]
+    fn the_player_setting_loads_only_its_two_values_and_is_written_only_when_set() {
+        let root =
+            std::env::temp_dir().join(format!("vela-config-player-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("config.json");
+
+        // A config from before the field existed: loads, and the player is unset.
+        fs::write(&path, br#"{"continue_playing":"on"}"#).unwrap();
+        assert_eq!(load_unmigrated_at(&path).unwrap().player, None);
+
+        for value in ["external", "embedded"] {
+            fs::write(&path, format!(r#"{{"player":"{value}"}}"#)).unwrap();
+            assert_eq!(
+                load_unmigrated_at(&path).unwrap().player.as_deref(),
+                Some(value)
+            );
+        }
+
+        // Unset: the key is not written at all, so a release that predates the
+        // field (which rejects keys it does not know) still reads the file.
+        let unset = serde_json::to_string(&AppConfig::default()).unwrap();
+        assert!(
+            !unset.contains("\"player\""),
+            "an unset player must not be serialized: {unset}"
+        );
+        // Set: it round-trips.
+        let chosen = AppConfig {
+            player: Some("embedded".to_string()),
+            ..Default::default()
+        };
+        let written = serde_json::to_string(&chosen).unwrap();
+        assert!(written.contains(r#""player":"embedded""#), "{written}");
+        assert_eq!(
+            serde_json::from_str::<AppConfig>(&written)
+                .unwrap()
+                .player
+                .as_deref(),
+            Some("embedded")
+        );
+        chosen.validate().expect("a known player value is valid");
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    // Exercise the ordinary durable settings path with an old document.
+    #[test]
+    fn tls_verification_round_trips_defaults_on_and_rejects_bad_values() {
+        let (path, lock, _, _, root) = temp_paths("tls-verify");
+        let legacy = serde_json::json!({
+            "local_folders": [{"id":"old", "name":"Movies", "path":"/media", "kind":"movie"}],
+            "smb_mounts": [{"id":"smb", "name":"NAS", "server":"nas", "share":"media",
+                "username":"user", "password":"fixture", "mountpoint":"/media", "local_folder_id":"old"}],
+            "ssh_mounts": [{"id":"ssh", "name":"NAS", "host":"nas", "username":"user",
+                "remote_path":"/media", "mountpoint":"/ssh", "local_folder_id":"old"}]
+        });
+        fs::write(&path, serde_json::to_vec(&legacy).unwrap()).unwrap();
+        let old = load_unmigrated_at(&path).unwrap();
+        assert_eq!(old.mpv_tls_verify, None);
+        assert!(old.mpv_tls_verify.unwrap_or(true));
+        let preserved = serde_json::to_value(&old).unwrap();
+        for verify in [false, true] {
+            update_at(&path, &lock, |cfg| {
+                cfg.mpv_tls_verify = Some(verify);
+                Ok(())
+            })
+            .unwrap();
+            // An unrelated later settings save must keep the choice too.
+            update_at(&path, &lock, |cfg| {
+                cfg.continue_playing = Some("off".into());
+                Ok(())
+            })
+            .unwrap();
+            let saved = load_unmigrated_at(&path).unwrap();
+            assert_eq!(saved.mpv_tls_verify, Some(verify));
+            let saved = serde_json::to_value(&saved).unwrap();
+            for field in ["local_folders", "smb_mounts", "ssh_mounts"] {
+                assert_eq!(saved[field], preserved[field]);
+            }
+        }
+        fs::write(&path, br#"{"mpv_tls_verify":null}"#).unwrap();
+        assert!(load_unmigrated_at(&path)
+            .unwrap()
+            .mpv_tls_verify
+            .unwrap_or(true));
+        let invalid = br#"{"mpv_tls_verify":"no"}"#;
+        fs::write(&path, invalid).unwrap();
+        assert_eq!(
+            load_unmigrated_at(&path).err().unwrap().kind(),
+            io::ErrorKind::InvalidData
+        );
+        assert!(update_at(&path, &lock, |_| Ok(())).is_err());
+        assert_eq!(fs::read(&path).unwrap(), invalid);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    // Slice 3 of `.agents/plans/mpv-window-geometry.md`. A config from before
+    // the two fields loads exactly as before, and a config that never set them
+    // does not gain them: the previous release (v1.0.60) rejects keys it does
+    // not know (`deny_unknown_fields`).
+    #[test]
+    fn the_player_window_fields_are_optional_and_written_only_when_set() {
+        let (path, _, _, _, root) = temp_paths("mpv-window");
+
+        fs::write(&path, br#"{"continue_playing":"on"}"#).unwrap();
+        let old = load_unmigrated_at(&path).unwrap();
+        assert_eq!(old.mpv_window_mode, None);
+        assert_eq!(old.mpv_window, None);
+        assert_eq!(
+            MpvWindowMode::from_config(old.mpv_window_mode.as_deref()),
+            Ok(MpvWindowMode::Remember),
+            "a missing mode is remember (D2(a))"
+        );
+        let unset = serde_json::to_string(&old).unwrap();
+        assert!(
+            !unset.contains("mpv_window"),
+            "unset window fields must not be serialized: {unset}"
+        );
+
+        let stored = MpvWindow {
+            fullscreen: Some(true),
+            maximized: Some(false),
+            screen: Some("DP-3".to_string()),
+            width: Some(1280),
+            height: Some(720),
+        };
+        for mode in ["remember", "fullscreen", "default"] {
+            let cfg = AppConfig {
+                mpv_window_mode: Some(mode.to_string()),
+                mpv_window: Some(stored.clone()),
+                ..Default::default()
+            };
+            crate::storage::save_json(&path, &cfg).unwrap();
+            let back = load_unmigrated_at(&path).unwrap();
+            assert_eq!(back.mpv_window_mode.as_deref(), Some(mode));
+            assert_eq!(back.mpv_window.as_ref(), Some(&stored));
+        }
+        // Parts never observed are not written either.
+        let partial = serde_json::to_string(&MpvWindow {
+            fullscreen: Some(false),
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(partial, r#"{"fullscreen":false}"#);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    fn ended(
+        fullscreen: Option<bool>,
+        maximized: Option<bool>,
+        size: Option<(u32, u32)>,
+    ) -> crate::playback::PlaybackWindowState {
+        crate::playback::PlaybackWindowState {
+            fullscreen,
+            maximized,
+            windowed_size: size,
+        }
+    }
+
+    #[test]
+    fn an_external_play_that_ends_in_remember_mode_stores_its_window() {
+        use crate::player::PlayerKind;
+        let mut cfg = AppConfig::default();
+        assert!(remember_mpv_window(
+            &mut cfg,
+            PlayerKind::External,
+            ended(Some(true), Some(false), Some((1280, 720))),
+            Some("DP-3"),
+        ));
+        assert_eq!(
+            cfg.mpv_window,
+            Some(MpvWindow {
+                fullscreen: Some(true),
+                maximized: Some(false),
+                screen: Some("DP-3".to_string()),
+                width: Some(1280),
+                height: Some(720),
+            })
+        );
+        cfg.validate().expect("what is stored is valid");
+
+        // The same window again changes nothing.
+        let before = cfg.mpv_window.clone();
+        assert!(!remember_mpv_window(
+            &mut cfg,
+            PlayerKind::External,
+            ended(Some(true), Some(false), Some((1280, 720))),
+            Some("DP-3"),
+        ));
+        assert_eq!(cfg.mpv_window, before);
+
+        // A play that observed only part keeps the rest; one that observed
+        // nothing keeps all of it.
+        assert!(remember_mpv_window(
+            &mut cfg,
+            PlayerKind::External,
+            ended(Some(false), None, None),
+            None,
+        ));
+        assert_eq!(cfg.mpv_window.as_ref().unwrap().fullscreen, Some(false));
+        assert_eq!(cfg.mpv_window.as_ref().unwrap().maximized, Some(false));
+        assert_eq!(cfg.mpv_window.as_ref().unwrap().width, Some(1280));
+        assert_eq!(
+            cfg.mpv_window.as_ref().unwrap().screen.as_deref(),
+            Some("DP-3")
+        );
+        assert!(!remember_mpv_window(
+            &mut cfg,
+            PlayerKind::External,
+            ended(None, None, None),
+            None,
+        ));
+
+        // A play that observed nothing, with nothing stored, stores nothing.
+        let mut empty = AppConfig::default();
+        assert!(!remember_mpv_window(
+            &mut empty,
+            PlayerKind::External,
+            ended(None, None, None),
+            None,
+        ));
+        assert_eq!(empty.mpv_window, None);
+
+        // A screen name the settings would reject is not taken.
+        let mut odd = AppConfig::default();
+        remember_mpv_window(
+            &mut odd,
+            PlayerKind::External,
+            ended(Some(false), None, None),
+            Some("bad\nname"),
+        );
+        assert_eq!(odd.mpv_window.as_ref().unwrap().screen, None);
+        odd.validate().expect("still valid");
+
+        // Nor is a window the settings would reject, so the recents stamp
+        // written with it cannot fail over it. (The window-size rule never
+        // reports such a size; this is the last line if it ever did.)
+        let mut cfg = AppConfig::default();
+        assert!(!remember_mpv_window(
+            &mut cfg,
+            PlayerKind::External,
+            ended(Some(false), None, Some((10, 10))),
+            None,
+        ));
+        assert_eq!(cfg.mpv_window, None);
+        cfg.validate().expect("still valid");
+    }
+
+    // A screen name is kept up to 256 bytes; a longer one is not a screen
+    // name, whether it is stored or observed.
+    #[test]
+    fn a_screen_name_longer_than_256_bytes_is_neither_stored_nor_loaded() {
+        let (path, _, _, _, root) = temp_paths("mpv-window-screen-length");
+        let longest = "S".repeat(256);
+        let too_long = "S".repeat(257);
+        fs::write(
+            &path,
+            format!(r#"{{"mpv_window":{{"screen":"{longest}"}}}}"#),
+        )
+        .unwrap();
+        assert_eq!(
+            load_unmigrated_at(&path)
+                .unwrap()
+                .mpv_window
+                .and_then(|window| window.screen),
+            Some(longest.clone())
+        );
+        fs::write(
+            &path,
+            format!(r#"{{"mpv_window":{{"screen":"{too_long}"}}}}"#),
+        )
+        .unwrap();
+        assert_eq!(
+            load_unmigrated_at(&path).err().unwrap().kind(),
+            io::ErrorKind::InvalidData
+        );
+        fs::remove_dir_all(root).unwrap();
+
+        let mut cfg = AppConfig::default();
+        remember_mpv_window(
+            &mut cfg,
+            crate::player::PlayerKind::External,
+            ended(Some(false), None, None),
+            Some(&too_long),
+        );
+        assert_eq!(cfg.mpv_window.as_ref().unwrap().screen, None);
+        remember_mpv_window(
+            &mut cfg,
+            crate::player::PlayerKind::External,
+            ended(Some(false), None, None),
+            Some(&longest),
+        );
+        assert_eq!(cfg.mpv_window.unwrap().screen, Some(longest));
+    }
+
+    #[test]
+    fn only_remember_mode_and_only_the_external_player_store_the_window() {
+        use crate::player::PlayerKind;
+        let window = ended(Some(true), Some(false), Some((1280, 720)));
+        for mode in ["fullscreen", "default"] {
+            let mut cfg = AppConfig {
+                mpv_window_mode: Some(mode.to_string()),
+                ..Default::default()
+            };
+            assert!(!remember_mpv_window(
+                &mut cfg,
+                PlayerKind::External,
+                window,
+                Some("DP-3")
+            ));
+            assert_eq!(cfg.mpv_window, None, "{mode} mode must not store a window");
+        }
+        // An embedded play has no mpv window: what libmpv reports about
+        // fullscreen says nothing about how the next run's window opens.
+        let mut cfg = AppConfig::default();
+        assert!(!remember_mpv_window(
+            &mut cfg,
+            PlayerKind::Embedded,
+            window,
+            Some("DP-3")
+        ));
+        assert_eq!(cfg.mpv_window, None);
+    }
+
+    // Missing is remember; anything that is not one of the three is an
+    // error, never a guess.
+    #[test]
+    fn the_player_window_mode_resolves_only_known_values() {
+        for (stored, mode) in [
+            (None, MpvWindowMode::Remember),
+            (Some("remember"), MpvWindowMode::Remember),
+            (Some("fullscreen"), MpvWindowMode::Fullscreen),
+            (Some("default"), MpvWindowMode::Default),
+        ] {
+            assert_eq!(MpvWindowMode::from_config(stored), Ok(mode));
+        }
+        for unknown in ["future", "Remember", ""] {
+            assert!(MpvWindowMode::from_config(Some(unknown)).is_err(), "{unknown:?}");
+        }
+    }
+
+    #[test]
+    fn the_first_window_of_a_run_follows_the_mode() {
+        let stored = MpvWindow {
+            fullscreen: Some(false),
+            maximized: Some(true),
+            screen: Some("HDMI-1".to_string()),
+            width: Some(800),
+            height: Some(450),
+        };
+        let with = |mode: Option<&str>, window: Option<MpvWindow>| AppConfig {
+            mpv_window_mode: mode.map(str::to_string),
+            mpv_window: window,
+            ..Default::default()
+        };
+        assert_eq!(
+            first_window_of_run(&with(None, Some(stored.clone()))).unwrap(),
+            (
+                ended(Some(false), Some(true), Some((800, 450))),
+                Some("HDMI-1".to_string())
+            )
+        );
+        assert_eq!(
+            first_window_of_run(&with(None, None)).unwrap(),
+            OpeningWindow::default()
+        );
+        // Full screen and nothing else, whatever is stored.
+        assert_eq!(
+            first_window_of_run(&with(Some("fullscreen"), Some(stored.clone()))).unwrap(),
+            (ended(Some(true), None, None), None)
+        );
+        assert_eq!(
+            first_window_of_run(&with(Some("default"), Some(stored))).unwrap(),
+            OpeningWindow::default()
+        );
+    }
+
+    #[test]
     fn strict_settings_reject_unknown_keys_values_and_incomplete_legacy_credentials() {
         let root =
             std::env::temp_dir().join(format!("vela-config-strict-{}", uuid::Uuid::new_v4()));
@@ -1357,6 +1946,10 @@ mod tests {
             r#"{"watched_threshold_percent":0}"#,
             r#"{"watched_threshold_percent":101}"#,
             r#"{"mpv_autocrop":"future"}"#,
+            r#"{"player":"future"}"#,
+            r#"{"player":"Embedded"}"#,
+            r#"{"player":true}"#,
+            r#"{"player":""}"#,
             r#"{"playback_source_policy":"future"}"#,
             r#"{"playback_display_resolution":"16k"}"#,
             r#"{"playback_display_hdr":"maybe"}"#,
@@ -1369,6 +1962,21 @@ mod tests {
             r#"{"connections_split_backup":{"file_name":"../outside.json","byte_length":1,"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}"#,
             r#"{"continue_playing":true}"#,
             r#"{"continue_playing":"on""#,
+            r#"{"mpv_window_mode":"future"}"#,
+            r#"{"mpv_window_mode":"Remember"}"#,
+            r#"{"mpv_window_mode":""}"#,
+            r#"{"mpv_window_mode":true}"#,
+            r#"{"mpv_window":true}"#,
+            r#"{"mpv_window":{"fullscreen":"yes"}}"#,
+            r#"{"mpv_window":{"x":10,"y":10}}"#,
+            r#"{"mpv_window":{"width":800}}"#,
+            r#"{"mpv_window":{"height":450}}"#,
+            r#"{"mpv_window":{"width":100,"height":450}}"#,
+            r#"{"mpv_window":{"width":800,"height":20000}}"#,
+            r#"{"mpv_window":{"width":-800,"height":450}}"#,
+            r#"{"mpv_window":{"screen":""}}"#,
+            r#"{"mpv_window":{"screen":"   "}}"#,
+            r#"{"mpv_window":{"screen":"DP-3\n"}}"#,
         ] {
             fs::write(&path, invalid).unwrap();
             assert_eq!(

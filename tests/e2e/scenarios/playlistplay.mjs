@@ -1,22 +1,28 @@
 // Playlist playback context: arbitrary start, same-key tracker replacement,
 // live edit re-read, mixed-source advancement, unavailable skip, silent
-// resume, exact-session window-state inheritance, dispatcher-owned recents,
+// resume, window-state inheritance by every play, dispatcher-owned recents,
 // and byte-identical read-only playback.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { MpvIpc, mpvSocketSnapshot, waitForNewMpvSocket } from '../mpv.mjs';
 import {
+  clickUnderPlay,
   holdsFor,
-  goHome,
+  homeButton,
   logicalPlaybackInfoIds,
   makeClips,
   mockSource,
   pollUntil,
+  runPlayer,
   seedConfig,
   seedPlaylists,
+  stopPlayAsUser,
+  waitForPageUncovered,
+  velaConnected,
 } from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
+import { shown } from '../proof.mjs';
 
 let mockA;
 let mockB;
@@ -68,6 +74,11 @@ const stoppedResponses = (mock) =>
     (response) => response.method === 'POST' && response.path === '/Sessions/Playing/Stopped',
   ).length;
 
+const stoppedRequests = (mock) =>
+  mock.state.requests.filter(
+    (request) => request.method === 'POST' && request.path === '/Sessions/Playing/Stopped',
+  ).length;
+
 const playbackInfoIds = (mock) =>
   logicalPlaybackInfoIds(mock);
 
@@ -85,7 +96,19 @@ async function waitForMpvProperty(mpv, property, expected, what) {
   );
 }
 
+// Window-state inheritance is the external player's alone: it is about mpv's
+// own window (`--fullscreen`, `--window-maximized` handed to the next play),
+// and the embedded player has none (the plan's "Behaviour inventory": not in
+// the list, external-only by nature). The embedded launch deliberately hands
+// its mpv no window state (`build_launch_for`, held by the Rust test
+// the_full_embedded_launch_is_exactly_the_recorded_one), and there these are
+// options of a library that draws in Vela's window, which change nothing on
+// screen. The embedded counterpart, Vela's own window staying fullscreen from
+// one play of a run to the next, is proven by the `continuetv` scenario.
+const windowStates = runPlayer === 'external';
+
 async function waitForWindowState(mpv, expected, what) {
+  if (!windowStates) return;
   await pollUntil(
     async () => {
       try {
@@ -105,6 +128,7 @@ async function waitForWindowState(mpv, expected, what) {
 }
 
 async function setWindowState(mpv, state, what) {
+  if (!windowStates) return;
   await mpv.setProp('fullscreen', state.fullscreen);
   await waitForMpvProperty(mpv, 'fullscreen', state.fullscreen, `${what} fullscreen readback`);
   await mpv.setProp('window-maximized', state.maximized);
@@ -119,6 +143,17 @@ async function setWindowState(mpv, state, what) {
 
 export default {
   name: 'playlistplay',
+  rows: ['5'],
+  testOnly: [
+    {
+      row: '5',
+      player: 'embedded',
+      via: 'clickUnderPlay',
+      route: 'clickUnderPlay: the three "Move Alpha Edited Next up" clicks and going Home while Beta Start plays',
+      proves: 'that the dispatcher re-reads a playlist edited during a play, and repaints Home, underneath the player view',
+      unproven: 'that a user can edit a playlist or watch Home during a play: the player view covers the page',
+    },
+  ],
 
   async seed({ configRoot }) {
     const mediaDir = makeClips(configRoot, ['b0.mp4', 'a1.mp4', 'a2.mp4', 'b1.mp4']);
@@ -246,6 +281,10 @@ export default {
         loaded.startsWith(`http://127.0.0.1:${expectedPort}/Videos/${expectedId}/stream`),
         `expected ${expectedId} from :${expectedPort}, got ${loaded}`,
       );
+      // playback::play: this client + position/window reader + EOF watcher;
+      // Original quality, no notice or health sampler.
+      // Embedded adds player::report::spawn_reporter for the view's state.
+      await velaConnected(socket, runPlayer === 'embedded' ? 4 : 3);
       return { mpv, socket };
     }
 
@@ -274,14 +313,29 @@ export default {
     // Replace the same key while its old Stopped response is parked. The old
     // tracker must not close or stamp the replacement session.
     const stoppedBefore = stoppedResponses(mockB);
+    const stoppedAskedBefore = stoppedRequests(mockB);
     mockB.state.delayNextStoppedMs = 5_000;
+    if (runPlayer === 'embedded') {
+      // The one branch on the player here, on how the user replaces the play.
+      // The external player's user presses Play on the row while mpv plays in
+      // its own window beside the page, and the new play stops the old one.
+      // The embedded player's view covers the playlist, so its user cannot
+      // reach the row during the play: they close the play (the view's Close)
+      // and press Play again. The old Stopped is parked either way, and the
+      // assertions below are the same for both. What the embedded route does
+      // NOT reach is a new play stopping a running one (row 12 of the parity
+      // list); that stays with the external player here.
+      await stopPlayAsUser(driver, firstBeta.mpv, firstBeta.socket, 'the first Beta play');
+    }
     await clickRowAction(driver, 'Beta Start', 'Play');
     const secondBeta = await nextMpv(mockB.port, 'b0');
     await secondBeta.mpv.setProp('pause', true);
+    // The configured options say yes/yes, so no/no here can only come from
+    // the first player's observed window: a manual play inherits it too.
     await waitForWindowState(
       secondBeta.mpv,
-      { fullscreen: true, maximized: true },
-      'the manual replacement to use configured window state instead of inheriting',
+      { fullscreen: false, maximized: false },
+      'the manual replacement to inherit the first player\'s window state over configured yes',
     );
     firstBeta.mpv.close();
     const replacement = await pollUntil(() => {
@@ -295,6 +349,18 @@ export default {
       }
     }, 'the replacement same-key session');
     assert.equal(replacement.ended_at_ms, 0);
+    // The hazard is live: the old play's Stopped was asked and is still
+    // parked while the replacement runs, in either player's route.
+    await pollUntil(
+      () => stoppedRequests(mockB) > stoppedAskedBefore,
+      'the old play to ask its Stopped',
+      { timeoutMs: 4_000 },
+    );
+    assert.equal(
+      stoppedResponses(mockB),
+      stoppedBefore,
+      'the old Stopped must still be parked while the replacement session runs',
+    );
     await pollUntil(
       () => stoppedResponses(mockB) > stoppedBefore,
       'the delayed old Stopped response to be delivered',
@@ -317,6 +383,11 @@ export default {
 
     // Edit while B0 is still playing. Moving A2 from the tail to immediately
     // after B0 makes it the next item only if dispatch re-reads the store.
+    // In the embedded player no user can edit the playlist during a play (the
+    // view covers it); the edit is made there through the test-only route
+    // clickUnderPlay, so that what the backend does with a store edited
+    // mid-play is still proven in that player. Unproven there: that a user
+    // could make the edit.
     for (const expectedIndex of [4, 3, 2]) {
       await driver.waitFor(
         `return !document.querySelector('button[aria-label="Move Alpha Edited Next up"]')?.disabled`,
@@ -326,7 +397,7 @@ export default {
         'css selector',
         'button[aria-label="Move Alpha Edited Next up"]',
       );
-      await driver.click(move);
+      await clickUnderPlay(driver, move, 'editing the playlist while Beta Start plays');
       await pollUntil(
         () =>
           readStore().playlists[0].items.findIndex(
@@ -351,8 +422,11 @@ export default {
 
     // Keep Home visible across the backend-owned boundary. Navigating there
     // after A2 starts would itself refetch and make a missing dispatcher repaint
-    // pass vacuously.
-    await goHome(driver);
+    // pass vacuously. In the embedded player Home is under the view during
+    // the run, out of the user's sight, and is reached by the test-only route
+    // (clickUnderPlay); what is proven there is the page's repaint underneath
+    // the view, not that a user watches Home during a play.
+    await clickUnderPlay(driver, await homeButton(driver), 'going Home while Beta Start plays');
     await driver.waitFor(
       `return document.querySelector('[aria-label="Continue watching"] .flowcard.center')?.getAttribute('title') === 'Beta Start'`,
       'the active Beta Start recent on Home before playlist advancement',
@@ -381,7 +455,30 @@ export default {
       { fullscreen: false, maximized: false },
       'the automatic successor to inherit explicit windowed state over configured yes',
     );
-    const resumedAt = await editedNext.mpv.getProp('time-pos');
+    // With --vo=null a player has no window and reports its size as 0x0. The
+    // predecessor started neither fullscreen nor maximized, so that report
+    // reached the size rule, and 0x0 is not a size: nothing is passed. A real
+    // windowed size cannot be produced in this venue, so only this side is
+    // checked here. The external player only: the embedded launch is handed
+    // no window state at all (as for the steps above).
+    if (windowStates) {
+      assert.equal(
+        await editedNext.mpv.getProp('geometry'),
+        '',
+        'a 0x0 size report from a player with no window must not become --geometry',
+      );
+    }
+    // mpv names its file before it has a position in it. In the external
+    // player the window-state wait above used to give it that moment; in the
+    // embedded one there is no such wait, so the position is waited for.
+    const resumedAt = await pollUntil(
+      () =>
+        editedNext.mpv
+          .getProp('time-pos')
+          .then((t) => (typeof t === 'number' ? { t } : null))
+          .catch(() => null),
+      'the auto-advanced item to have a position',
+    ).then(({ t }) => t);
     assert.ok(
       resumedAt >= 0.7 && resumedAt < 3,
       `auto-advanced in-progress item should silently resume near 1s, got ${resumedAt}s`,
@@ -454,6 +551,9 @@ export default {
     assert.deepEqual(fs.readFileSync(playlistFile), bytesAfterEdit, 'playback never writes playlists.json');
     assert.deepEqual(playbackInfoIds(mockA), ['a2', 'a1']);
     assert.deepEqual(playbackInfoIds(mockB), ['b0', 'b0', 'b1']);
+    // The end of the playlist ends the last play: the page is the user's
+    // again (the embedded player's view must not outlive it).
+    await waitForPageUncovered(driver, 'at the end of the playlist');
     // Return to the durable playlist after the visible-Home guard so the
     // original unavailable-entry assertion remains part of this run.
     await driver.click(
@@ -486,5 +586,7 @@ export default {
       'skipping never removes the unavailable curated entry',
     );
     await screenshot('01-edited-sequence-finished');
+    // The end of its proof of its rows in this player (proof.mjs).
+    shown('5');
   },
 };

@@ -214,6 +214,8 @@ async function assertSettingsIcons(driver) {
 
 export default {
   name: 'uifoundation',
+  rows: [],
+  noRows: 'theme and focus styles, and in a run of the embedded player its transparent window mode (A2); plays nothing',
 
   async seed({ configRoot }) {
     if (expectReducedMotion) {

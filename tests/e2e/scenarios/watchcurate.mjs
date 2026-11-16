@@ -48,6 +48,8 @@ async function heroMenuClick(driver, label) {
 
 export default {
   name: 'watchcurate',
+  rows: [],
+  noRows: 'watched-state edits curating Continue Watching; it plays only to make a recent',
 
   async seed({ configRoot }) {
     const mediaDir = makeClips(configRoot, ['stream.mp4']);

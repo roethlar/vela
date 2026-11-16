@@ -578,8 +578,7 @@ impl PlaybackOptions {
 
     /// True when the user has a real choice. A single-option item shows no
     /// quality menu at all.
-#[allow(dead_code)] // consumed by slice 4's per-title quality menu
-#[allow(dead_code)] // consumed by slice 4's per-title quality menu
+    #[allow(dead_code)] // consumed by slice 4's per-title quality menu
     pub fn has_choice(&self) -> bool {
         usize::from(self.can_direct_play) + self.tiers.len() > 1
     }

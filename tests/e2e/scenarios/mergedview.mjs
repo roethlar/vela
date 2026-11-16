@@ -7,14 +7,24 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { MpvIpc, mpvSocketSnapshot, waitForNewMpvSocket } from '../mpv.mjs';
-import { holdsFor, pollUntil, makeClips, mockSource, seedConfig } from '../helpers.mjs';
+import { holdsFor, pollUntil, makeClips, mockSource, seedConfig, stopPlayAsUser, velaConnected, runPlayer } from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
+import { shown } from '../proof.mjs';
 
 let mockA;
 let mockB;
 
 async function playFromMenu(driver, menuLabel, { finish = false } = {}) {
   const before = mpvSocketSnapshot();
+  // The card must be on the page before the menu is opened on it. Seen once
+  // (embedded player, 2026-11-14): right after the play before had been
+  // stopped the card was not there, and the script below failed on nothing
+  // ("null is not an object"). Why it was gone for that moment is not
+  // established; a card that stays gone still fails here, by this wait.
+  await driver.waitFor(
+    `return !!document.querySelector('button.poster[aria-label^="Mock Movie"]')`,
+    'the merged card on the page',
+  );
   await driver.exec(
     `const el = document.querySelector('button.poster[aria-label^="Mock Movie"]');
      const r = el.getBoundingClientRect();
@@ -37,16 +47,24 @@ async function playFromMenu(driver, menuLabel, { finish = false } = {}) {
         `normalize-space(.)='${menuLabel}' or normalize-space(.)='Resume on ${menuLabel}')]`,
   );
   await driver.click(item);
-  const mpv = await MpvIpc.connect(await waitForNewMpvSocket(before));
+  const socketPath = await waitForNewMpvSocket(before);
+  const mpv = await MpvIpc.connect(socketPath);
   let loaded;
   try {
     loaded = await pollUntil(() => mpv.getProp('path').catch(() => null), `mpv to load via "${menuLabel}"`);
     if (finish) {
+      // playback::play: this client + position/window reader + EOF watcher;
+      // Original quality, no notice or health sampler.
+      // Embedded adds player::report::spawn_reporter for the view's state.
+      await velaConnected(socketPath, runPlayer === 'embedded' ? 4 : 3);
       await mpv.setProp('pause', true);
       await mpv.setProp('time-pos', 9.2);
       await mpv.setProp('pause', false);
     } else {
-      mpv.quit();
+      // The next step uses the page again, so the play must be over first:
+      // a quit sent and not waited for left the embedded player's view still
+      // covering the page for the next click ("element click intercepted").
+      await stopPlayAsUser(driver, mpv, socketPath, `the play via "${menuLabel}"`);
     }
   } finally {
     mpv.close();
@@ -56,6 +74,7 @@ async function playFromMenu(driver, menuLabel, { finish = false } = {}) {
 
 export default {
   name: 'mergedview',
+  rows: ['4', '6'],
 
   async seed({ configRoot }) {
     // Same title+year on both servers (no provider ids in the mock), so the
@@ -254,5 +273,7 @@ export default {
     );
     assert.equal(mockA.state.userData.m1.played, true);
     assert.equal(mockB.state.userData.m1.played, true);
+    // The end of its proof of its rows in this player (proof.mjs).
+    shown('4', '6');
   },
 };

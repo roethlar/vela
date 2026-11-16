@@ -67,6 +67,64 @@ share an implementation, and it has been exercised against Jellyfin only. It
 may work on Emby; nothing here asserts that it does. Please open an issue with
 what you see if you run Emby — a report is more useful than a guess.
 
+## Playing in Vela's own window (experimental)
+
+Settings → Player → Video player (shown on Linux) chooses where videos play:
+
+- **mpv's own window** (the default): Vela starts the mpv installed on your
+  system, in a window of its own. The rest of this page describes that
+  player unless it says otherwise.
+- **Vela's window (experimental)**: the video plays inside Vela's window,
+  through a copy of mpv's library that comes with Vela. This is the embedded
+  player.
+
+The embedded player runs on Linux in a Wayland session, and not yet with the
+NVIDIA proprietary driver. Switching to mpv's own window applies to the next
+video. To use Vela's window, restart Vela if this run started without embedded
+playback. Whenever the embedded player cannot be used, the video plays in
+mpv's own window instead and one line on screen says why; Settings shows the
+reason under the choice.
+
+It has its own control bar over the picture (pause, seeking, volume, audio
+and subtitle tracks, cropping, full screen, close) and a skip button for
+intros, credits and commercials. Its keys are `Space` (pause, or skip while
+the skip button shows), the arrow keys (5 and 60 seconds), `m`, `f`, `Shift+C`
+for cropping, `q` to close, and `Escape`, which leaves full screen and
+otherwise closes the player. The Crop button and `Shift+C` are there when
+Black-bar cropping is set to Manual or Automatic. The Audio and Subtitles
+buttons open a list above the bar: the arrow keys, `Home` and `End` move in
+it, `Enter` or `Space` chooses, and `Escape` closes the list and nothing else.
+Full screen is Vela's own window going full screen, and it stays that way
+from one video to the next.
+
+With the mouse, on the picture: a click pauses and resumes (after a quarter of
+a second, so that a double-click does not also pause); a double-click toggles
+full screen; a right-click pauses and resumes without the quarter-second wait;
+the wheel changes the volume, two points a notch, and a sideways wheel or
+two-finger swipe seeks ten seconds. Over the seek bar the wheel seeks, and
+pointing at it shows the time at that spot; over the volume slider the wheel
+changes the volume. The middle, back and forward buttons do nothing.
+
+What is different from mpv's own window, and why it is marked experimental:
+
+- The picture is drawn by a different mpv renderer (`gpu`, where mpv's own
+  window uses `gpu-next`). HDR is passed through on a display and compositor
+  that offer it, but it can look different.
+- Black-bar cropping is done by a script of Vela's own, and it does not crop
+  HDR video.
+- With "Use my own mpv config" on, it applies your `mpv.conf` but not your
+  mpv scripts, per-script option files or key bindings.
+- The Player window setting below is about mpv's own window and does not
+  apply to it.
+- Its library comes in Vela's Linux packages (AppImage, deb, rpm and Arch,
+  x86_64). A package you build yourself carries it only when it is built with
+  `scripts/build.sh --with-libmpv`
+  ([docs/development.md](development.md#packaging-the-set)). Settings says so
+  when the library is missing.
+
+The embedded player's library is an LGPL build of mpv and of the libraries it
+needs, shipped as separate shared libraries with their licence texts.
+
 ## Player behavior notes
 
 By default Vela uses a predictable `--no-config` mpv profile. On macOS, that
@@ -76,6 +134,52 @@ AirPlay delay. Settings → Player can opt into your own `mpv.conf`, which also
 hands audio-output selection to that file. Custom mpv options are appended
 after Vela's defaults and can override the audio output, HDR defaults, or other
 playback behavior, so change them deliberately.
+
+Within one run of Vela, each play opens the mpv window the way the previous
+play left it: fullscreen or not, maximized or not, on the same screen, and
+at the same size when it is not fullscreen or maximized. This applies to
+plays you start yourself as well as
+to the next item of a playlist or Continue Playing. What Vela carries over
+takes precedence over custom mpv options and `mpv.conf`: a custom
+`--fullscreen` or `--window-maximized` is overridden, and a custom
+`--geometry` gives way to the carried size. With Player window set to
+Default, your options still decide how the first play of a run opens; with
+As you last left it, the saved window does once there is one.
+
+Settings → Player → Player window chooses how that first play opens:
+
+- **As you last left it** (the default): as the last play of the previous run
+  left its window — fullscreen, maximized, screen, and size. Quit from
+  fullscreen, and the next run opens fullscreen. Vela saves this in
+  `config.json` when each play ends, and when you quit Vela with a video
+  still playing.
+- **Full screen**: fullscreen, whatever the last run did.
+- **Default**: mpv's own default, or your custom mpv options or `mpv.conf`,
+  decide fullscreen, maximized and size. Vela still asks mpv to open on the
+  screen that holds Vela's window, as it always has.
+
+If the saved screen is no longer connected, mpv opens on its default screen.
+Switching away from As you last left it deletes the saved window.
+
+Vela 1.0.58 to 1.0.60 refuse a `config.json` with settings they do not know,
+and this version writes several: the player window, which in the default mode
+is saved after the first video you play even if you never open the setting; a
+Player window choice other than As you last left it; Vela's window as the
+video player; and Skip server certificate checks once it has been changed,
+even back to off. Going back to one of those releases after any of these
+therefore stops at Settings recovery, where starting fresh settings resets
+every setting except your server connections.
+
+The player checks the certificate of an HTTPS media server, as Vela itself
+does when it browses the server. A server whose certificate mpv does not
+accept (a self-signed one, or one signed by a private authority that mpv does
+not know) does not play, and the notice for a video that ended before it
+started points at the certificate. There are two ways on. For a private
+authority, name its certificate file to mpv with `tls-ca-file` in the
+Advanced options or in your own mpv config; the check stays on. Or turn the
+check off with Settings → Player → mpv player → Skip server certificate
+checks; your sign-in token is then sent without knowing who receives it.
+Either applies to the next video. Plain HTTP servers are not affected.
 
 Black-bar cropping is Off by default. Manual mode runs on `Shift+C`; Automatic
 mode attempts every video. Automatic crop detection can be unreliable with HDR
@@ -91,9 +195,15 @@ visible. `Space` keeps its normal pause behaviour at every other moment. Plex
 and Jellyfin publish these ranges; Emby currently has no equivalent API, so
 skipping is unavailable there.
 
-On NVIDIA + Wayland, Vela disables WebKitGTK's DMABUF renderer at startup to
-avoid a known webview crash. This affects the library UI renderer, not mpv's
-video output, and has no effect on macOS or Windows.
+On Linux, Vela turns off WebKitGTK's DMABUF renderer at startup, because it
+crashes the webview on NVIDIA with Wayland. This affects the library UI
+renderer, not mpv's video output, and has no effect on macOS or Windows. The
+one exception is a start with the embedded player chosen, which needs that
+renderer and is never entered with the NVIDIA proprietary driver. A
+`WEBKIT_DISABLE_DMABUF_RENDERER` you set yourself is left as it is. It rules
+the embedded player out only when its value is nonempty and not `0`. An empty
+value or `0` does not cause that refusal; the other requirements for embedded
+playback still apply.
 
 ## Configuration, recovery, and privacy
 

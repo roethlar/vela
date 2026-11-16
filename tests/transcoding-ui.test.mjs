@@ -26,15 +26,22 @@ test('the quality control ships only while playback reads the setting', () => {
     /config::playback_quality\(cfg\.playback_quality\.as_deref\(\)\)/,
     'the play path must resolve the stored quality setting',
   );
-  // Resolution has to receive it, or the value is read and then dropped.
+  // Resolution has to receive it, or the value is read and then dropped. The
+  // play path hands it to resolve_selected (second review of finding pw-2),
+  // which hands it to the source.
   assert.match(
     commands,
-    /resolve_stream\([\s\S]{0,200}&quality,/,
+    /let resolved = resolve_selected\(src\.as_ref\(\), &selection, include_markers, &quality\)/,
+    'the play path must hand resolution the resolved quality',
+  );
+  assert.match(
+    commands,
+    /src\.resolve_stream\([\s\S]{0,200}\bquality,/,
     'resolve_stream must be given the resolved quality',
   );
   assert.match(
     commands,
-    /resolve_stream_version\([\s\S]{0,200}&quality,/,
+    /src\.resolve_stream_version\([\s\S]{0,200}\bquality,/,
     'resolve_stream_version must be given the resolved quality',
   );
 });

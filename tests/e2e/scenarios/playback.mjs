@@ -7,13 +7,15 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { MpvIpc, mpvSocketSnapshot, waitForNewMpvSocket } from '../mpv.mjs';
-import { makeClips, mockSource, seedConfig, pollUntil } from '../helpers.mjs';
+import { makeClips, mockSource, seedConfig, pollUntil, stopPlayAsUser, velaConnected, runPlayer } from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
+import { shown } from '../proof.mjs';
 
 let mock;
 
 export default {
   name: 'playback',
+  rows: ['1', '3'],
 
   async seed({ configRoot }) {
     const mediaDir = makeClips(configRoot, ['stream.mp4']);
@@ -119,32 +121,25 @@ export default {
         () => mpv.getProp('time-pos').then((t) => t > 0.5).catch(() => false),
         'playback to progress past 0.5s',
       );
+      // playback::play: this client + position/window reader + EOF watcher;
+      // Original quality, no notice or health sampler.
+      // Embedded adds player::report::spawn_reporter for the view's state.
+      await velaConnected(socketPath, runPlayer === 'embedded' ? 4 : 3);
       await mpv.setProp('time-pos', 6);
       // Vela polls the same socket for progress; give it a beat to observe ≥6s.
       await new Promise((r) => setTimeout(r, 1500));
-      mpv.quit();
+      // The user stops the play: mpv's quit in the external player, the
+      // player view's Close control in the embedded one (stopPlayAsUser).
+      // It proves the stop acted (eh-7): the IPC socket must stop accepting
+      // within 4 s, well before the 10s clip could reach natural EOF (the
+      // socket FILE stays behind, so it probes connectability), and the page
+      // must be the user's again.
+      await stopPlayAsUser(driver, mpv, socketPath, 'the Mock Movie play');
     } finally {
       mpv.close();
     }
-    // Prove the quit acted (eh-7): the IPC socket must stop accepting well
-    // before the 10s clip could reach natural EOF. The socket FILE is only
-    // unlinked when Vela cleans its runtime dir, so probe connectability.
-    const { createConnection } = await import('node:net');
-    await pollUntil(
-      () =>
-        new Promise((resolve) => {
-          const probe = createConnection(socketPath);
-          probe.once('connect', () => {
-            probe.destroy();
-            resolve(false); // still accepting: mpv alive
-          });
-          probe.once('error', () => resolve(true)); // refused: mpv gone
-        }),
-      'mpv socket to stop accepting after quit',
-      { timeoutMs: 4000 },
-    );
 
-    // Vela side: mpv exit stamps the final position into recents…
+    // Vela side: the stop stamps the final position into recents…
     // play_by_key creates the entry at play START (offset null); finish()
     // stamps the position at mpv exit — wait for the stamp, not the entry.
     const recent = await pollUntil(() => {
@@ -178,5 +173,7 @@ export default {
       throw err;
     });
     await screenshot('03-hero');
+    // The end of its proof of its rows in this player (proof.mjs).
+    shown('1', '3');
   },
 };

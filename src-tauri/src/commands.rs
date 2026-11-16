@@ -27,7 +27,7 @@ const PRODUCT: &str = "Vela";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// UTC date the build was cut; updated alongside the version by scripts/bump.sh.
-const BUILD_DATE: &str = "2026-10-24";
+const BUILD_DATE: &str = "2026-11-16";
 
 /// Project home, shown (and opened) from the build-info footer.
 const REPO_URL: &str = "https://github.com/roethlar/vela";
@@ -636,7 +636,7 @@ impl CommandInstaller {
 #[tauri::command]
 pub fn check_mpv() -> Result<MpvInfo, String> {
     let install = mpv_install_info();
-    let resolved = playback::resolve_mpv()?;
+    let resolved = crate::player::external::resolve_mpv()?;
     let configured_path = config::load_config()
         .map_err(|_| "could not read Vela settings".to_string())?
         .mpv_path
@@ -873,7 +873,7 @@ pub fn set_mpv_path(path: Option<String>) -> Result<MpvInfo, String> {
                 "No file exists at that path: {p}\nPick the mpv executable (mpv.exe on Windows)."
             ));
         }
-        if !playback::mpv_usable(p) {
+        if !crate::player::external::mpv_usable(p) {
             // The Windows community builds ship as CPU-specific variants, so a
             // crash-on-launch there is usually a too-new build; elsewhere it's a
             // wrong file or a non-executable bit. Keep the hint platform-apt.
@@ -1000,7 +1000,7 @@ async fn selected_version_for(
     source_id: &str,
     raw_item_key: &str,
 ) -> Option<String> {
-    match select_playback_version(state, item, None, None, None, false).await {
+    match select_playback_version(state, item, None, None, None, false, None).await {
         Ok(PlaybackSelectionOutcome::Ready { selection, .. }) => {
             // Only when the policy picked the very copy being described. For a
             // multi-copy title the menu asks per copy, and the policy's winner
@@ -1155,6 +1155,127 @@ pub fn set_continue_playing(mode: String) -> Result<String, String> {
     Ok(mode)
 }
 
+#[tauri::command]
+pub fn get_mpv_window_mode() -> Result<String, String> {
+    let cfg = config::load_config().map_err(|_| "could not read Vela settings".to_string())?;
+    config::MpvWindowMode::from_config(cfg.mpv_window_mode.as_deref())
+        .map(|mode| mode.as_str().to_string())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlayerDto {
+    player: &'static str,
+    offered: bool,
+    note: Option<&'static str>,
+}
+
+#[tauri::command]
+pub async fn get_player(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<PlayerDto, String> {
+    use crate::player::PlayerKind;
+    let saved = tauri::async_runtime::spawn_blocking(|| {
+        let cfg = config::load_config().map_err(|_| "could not read Vela settings".to_string())?;
+        Ok::<_, String>(PlayerKind::from_setting(cfg.player.as_deref()))
+    })
+    .await
+    .map_err(|_| "could not read Vela settings".to_string())??;
+    #[cfg(target_os = "linux")]
+    let note = {
+        let probe_app = app.clone();
+        let known = tauri::async_runtime::spawn_blocking(move || {
+            crate::player::EmbeddedHost::known_availability(&probe_app)
+        })
+        .await
+        .map_err(|_| "could not check the video player".to_string())?;
+        // An external choice only checks what is known without loading the
+        // library. The real availability check may ask the window and load it.
+        let available = if saved == PlayerKind::Embedded {
+            crate::player::embedded_availability(&state.embedded, Some(&app)).await
+        } else {
+            Ok(())
+        };
+        crate::player::settings_note(
+            saved,
+            &crate::player::embedded::startup::decision(),
+            available,
+            known,
+        )
+    };
+    #[cfg(not(target_os = "linux"))]
+    let note = {
+        let _ = (app, state);
+        (saved == PlayerKind::Embedded)
+            .then(|| crate::player::EmbeddedUnavailable::NotOnThisSystem.settings_note())
+    };
+    Ok(PlayerDto { player: saved.as_str(), offered: cfg!(target_os = "linux"), note })
+}
+
+#[tauri::command]
+pub async fn set_player(
+    player: String,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<PlayerDto, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        config::update(move |cfg| apply_player(cfg, &player))
+    })
+    .await
+    .map_err(|_| "could not save the video player".to_string())??;
+    get_player(app, state).await
+}
+
+fn apply_player(cfg: &mut config::AppConfig, player: &str) -> Result<(), String> {
+    cfg.player = match player {
+        "external" => None,
+        "embedded" => Some(player.to_string()),
+        _ => return Err("unknown video player".to_string()),
+    };
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_mpv_tls_verify() -> Result<bool, String> {
+    let cfg = config::load_config().map_err(|_| "could not read Vela settings".to_string())?;
+    Ok(cfg.mpv_tls_verify != Some(false))
+}
+
+#[tauri::command]
+pub fn set_mpv_tls_verify(verify: bool) -> Result<bool, String> {
+    config::update(move |cfg| {
+        cfg.mpv_tls_verify = Some(verify);
+        Ok(())
+    })?;
+    Ok(verify)
+}
+
+/// Set how the first player window of a run opens. Remember is the default
+/// and is stored as no value. Leaving remember removes the stored window in
+/// the same write, so nothing of it is kept or read again.
+#[tauri::command]
+pub fn set_mpv_window_mode(mode: String) -> Result<String, String> {
+    let resolved = match mode.as_str() {
+        "remember" | "fullscreen" | "default" => config::MpvWindowMode::from_config(Some(&mode))?,
+        _ => return Err("unknown player window setting".to_string()),
+    };
+    config::update(move |cfg| {
+        apply_mpv_window_mode(cfg, resolved);
+        Ok(())
+    })?;
+    Ok(resolved.as_str().to_string())
+}
+
+fn apply_mpv_window_mode(cfg: &mut config::AppConfig, mode: config::MpvWindowMode) {
+    if mode == config::MpvWindowMode::Remember {
+        cfg.mpv_window_mode = None;
+    } else {
+        cfg.mpv_window_mode = Some(mode.as_str().to_string());
+        cfg.mpv_window = None;
+    }
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlaybackPreferencesDto {
@@ -1181,11 +1302,12 @@ pub async fn get_playback_preferences(
 ) -> Result<PlaybackPreferencesDto, String> {
     let cfg =
         config::load_config().map_err(|_| "could not read Vela settings".to_string())?;
+    // The display the latest play, of either player, observed.
     let observed = state
         .playback_window_session
         .lock()
         .unwrap_or_else(|error| error.into_inner())
-        .as_ref()
+        .latest()
         .map(|session| session.observation.display_snapshot());
     let detected_display = display::detect_profile(&app, observed).await;
     let overrides = playback_display_overrides(&cfg)?;
@@ -1336,7 +1458,7 @@ async fn install_mpv_windows() -> Result<(), String> {
         let _ = std::fs::remove_file(&archive); // best-effort temp cleanup
         res?;
         let exe = dest2.join("mpv.exe");
-        if !playback::mpv_usable(&exe.to_string_lossy()) {
+        if !crate::player::external::mpv_usable(&exe.to_string_lossy()) {
             return Err("mpv was installed but doesn't run on this PC.".to_string());
         }
         Ok(exe.to_string_lossy().into_owned())
@@ -3654,6 +3776,9 @@ struct PendingPlaybackChoice {
     session_id: String,
     playlist: Option<PlaylistLocation>,
     replace_session: Option<String>,
+    /// The run awaits this choice: a successor's, or a manual choice the
+    /// completion dispatcher has met instead of starting a successor.
+    run_waiting: bool,
     run_kind: Option<PlaybackRunKind>,
 }
 
@@ -3712,21 +3837,77 @@ impl PlaybackChoiceRequests {
         });
     }
 
-    fn has_manual_pending(&mut self, now: Instant) -> bool {
+    /// Whether any choice is still waiting for the user.
+    fn has_pending(&mut self, now: Instant) -> bool {
         self.prune_at(now);
-        self.entries
-            .iter()
-            .any(|entry| entry.replace_session.is_none())
+        !self.entries.is_empty()
+    }
+
+    /// Mark every manual choice on whose account the dispatcher says a
+    /// successor is being chosen. Taking a choice uses this same lock.
+    fn mark_manual_pending(&mut self, now: Instant) -> bool {
+        self.prune_at(now);
+        let mut found = false;
+        for entry in self
+            .entries
+            .iter_mut()
+            .filter(|entry| entry.replace_session.is_none())
+        {
+            entry.run_waiting = true;
+            found = true;
+        }
+        found
     }
 }
 
-/// The observation handle currently authorized for automatic window-state
-/// inheritance. The session id keeps delayed or manual work from sampling an
-/// unrelated mpv process.
+/// The observation handle of one play that started, and the player it ran in.
 #[derive(Clone)]
 pub(crate) struct PlaybackWindowSession {
     session_id: String,
+    /// The player that ran the play. Only the external player has a window of
+    /// its own: an embedded play's observation says nothing about how an mpv
+    /// window should open.
+    player: crate::player::PlayerKind,
     observation: playback::WindowStateObservation,
+}
+
+/// What this run of Vela knows about its plays' windows. Both parts are
+/// written only when a play starts (`publish_started_play`), so they outlive
+/// the play's mpv and any failed launch after it.
+///
+/// They are two because they answer different questions (review finding
+/// pw-6). How the next mpv window opens, in this run and in the next one
+/// (what a play's end or Vela's exit saves), is the last EXTERNAL play's
+/// business, and an embedded play in between must not erase it. What the
+/// latest play of either player observed is what the display shown in the
+/// settings, and an embedded play's exact successor, go by.
+#[derive(Default)]
+pub(crate) struct PlaybackWindowRecord {
+    /// The latest play that started, in either player.
+    latest: Option<PlaybackWindowSession>,
+    /// The latest play that started in mpv's own window. Every later play in
+    /// this run, manual or automatic, opens its window the way this one left
+    /// it; while there is none, the player window setting decides.
+    last_external: Option<PlaybackWindowSession>,
+}
+
+impl PlaybackWindowRecord {
+    /// A play has started: it is the latest, and, when it runs in mpv's own
+    /// window, the window the next play opens from.
+    fn publish(&mut self, started: PlaybackWindowSession) {
+        if started.player == crate::player::PlayerKind::External {
+            self.last_external = Some(started.clone());
+        }
+        self.latest = Some(started);
+    }
+
+    fn latest(&self) -> Option<&PlaybackWindowSession> {
+        self.latest.as_ref()
+    }
+
+    fn last_external(&self) -> Option<&PlaybackWindowSession> {
+        self.last_external.as_ref()
+    }
 }
 
 /// A health sampler's verdict, waiting for something that can act on it.
@@ -3872,6 +4053,17 @@ pub(crate) async fn apply_step_down(
     // user, so `persist_explicit_choice` stays false below.
     let explicit_source = Some(item.source_id.clone()).filter(|id| !id.is_empty()).or(affinity);
 
+    // The replacement plays in the player it replaces, whatever the setting
+    // says by now: switching players in the middle of a title is not what a
+    // drop in quality means.
+    let replaced_player = state
+        .active_playback_player
+        .lock()
+        .await
+        .as_ref()
+        .filter(|(session, _)| session == &request.session_id)
+        .map(|(_, kind)| *kind);
+
     let session_id = uuid::Uuid::new_v4().to_string();
     let outcome = play_by_key(
         state,
@@ -3891,6 +4083,7 @@ pub(crate) async fn apply_step_down(
             osd_notice: Some(short_quality_notice(next)),
             steps_taken: request.steps_taken + 1,
             continues_automatic: true,
+            player: replaced_player,
         },
     )
     .await;
@@ -4032,6 +4225,10 @@ struct PlaylistLocation {
 struct PlayFailure {
     message: String,
     kind: PlayFailureKind,
+    /// The play's session had been installed and its launch failed:
+    /// `install_and_launch` has then already decided whether the run is over
+    /// and told the page (review finding pc-2), so nobody else does.
+    launched: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -4046,6 +4243,7 @@ impl PlayFailure {
         Self {
             message,
             kind: PlayFailureKind::Unavailable,
+            launched: false,
         }
     }
 
@@ -4053,6 +4251,7 @@ impl PlayFailure {
         Self {
             message: "playback request was superseded".to_string(),
             kind: PlayFailureKind::Superseded,
+            launched: false,
         }
     }
 
@@ -4060,6 +4259,16 @@ impl PlayFailure {
         Self {
             message,
             kind: PlayFailureKind::Fatal,
+            launched: false,
+        }
+    }
+
+    /// A launch that failed after its session was installed
+    /// (`install_and_launch`).
+    fn launch_failed(message: String) -> Self {
+        Self {
+            launched: true,
+            ..Self::fatal(message)
         }
     }
 }
@@ -4082,6 +4291,17 @@ impl PlaybackAdvance {
         Self::push_eof_bounded(&mut signals.eof, session_id);
         drop(signals);
         self.changed.notify_one();
+    }
+
+    /// Whether mpv has reported a clean end of file for `session_id` that has
+    /// not yet been joined with its tracker's end.
+    pub(crate) fn saw_eof(&self, session_id: &str) -> bool {
+        self.signals
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .eof
+            .iter()
+            .any(|held| held == session_id)
     }
 
     fn mark_ended(&self, completion: PlaybackCompletion) {
@@ -4133,6 +4353,27 @@ impl PlaybackAdvance {
     }
 }
 
+/// Whether a play's end, as its tracker reports it, is the end of its run:
+/// no further play of the run is coming. What follows a clean end of file
+/// is decided by the completion dispatcher, not here. A play that is no
+/// longer the active one has been replaced: its successor is installed
+/// before it is stopped (a step-down, a play the backend or the user
+/// started). Should that successor then fail to start, the launch tells the
+/// page itself when the run is over (`install_and_launch`). Any other end (an
+/// error, a quit that was not the page's, mpv dying) ends the run.
+fn end_is_run_over(clean_eof: bool, active_session: Option<&str>, ended_session: &str) -> bool {
+    !clean_eof && active_session.is_none_or(|active| active == ended_session)
+}
+
+/// A tracker's verdict on its play's end (`end_is_run_over`), on what the
+/// active session is when it reports. Taken on the tracker's own thread, a
+/// plain thread outside any runtime, so the lock is waited for with
+/// `blocking_lock`, and held only to read it.
+fn tracker_end_is_run_over(state: &AppState, clean_eof: bool, ended_session: &str) -> bool {
+    let active = state.active_playback_session.blocking_lock();
+    end_is_run_over(clean_eof, active.as_deref(), ended_session)
+}
+
 fn cursor_matches_session(cursor: Option<&PlaylistCursor>, session_id: &str) -> bool {
     cursor.is_some_and(|current| current.session_id == session_id)
 }
@@ -4141,27 +4382,243 @@ fn expected_session_matches(active: Option<&str>, expected: Option<&str>) -> boo
     expected.is_none_or(|expected| active == Some(expected))
 }
 
-fn inherited_window_state(
-    current: Option<&PlaybackWindowSession>,
-    replace_session: Option<&str>,
-) -> playback::PlaybackWindowState {
-    let Some(expected) = replace_session else {
-        return playback::PlaybackWindowState::default();
-    };
-    current
-        .filter(|current| current.session_id == expected)
-        .map(|current| current.observation.snapshot())
+/// How the last external play's mpv window was left, for the next play,
+/// manual or automatic. An embedded play in between changes nothing: it has
+/// no mpv window. No external play yet in this run inherits nothing.
+fn inherited_window_state(record: &PlaybackWindowRecord) -> playback::PlaybackWindowState {
+    record
+        .last_external()
+        .map(|last| last.observation.snapshot())
         .unwrap_or_default()
 }
 
-fn inherited_screen_name(
-    current: Option<&PlaybackWindowSession>,
-    replace_session: Option<&str>,
-) -> Option<String> {
-    let expected = replace_session?;
-    current
-        .filter(|current| current.session_id == expected)
-        .and_then(|current| current.observation.display_snapshot().names.into_iter().next())
+/// What a play that has ended hands to the settings to remember: the player
+/// that ran it, how it left its window, and the screen. Only while it is
+/// still the last play that started in mpv's own window, the one the next
+/// mpv window of this run opens from (`opening_window`), so that the next run
+/// opens as this one would have gone on. An end callback can run late (after
+/// a slow final check-in with the server): when a newer external play has
+/// started by then, its window is the one to remember, at its own end, and
+/// nothing is saved; when only embedded plays have started since, this is
+/// still the window to remember, and it is saved (review finding pw-6). An
+/// embedded play has no window of its own, so its end saves nothing.
+fn window_to_remember(
+    record: &PlaybackWindowRecord,
+    session_id: &str,
+) -> Option<(
+    crate::player::PlayerKind,
+    playback::PlaybackWindowState,
+    Option<String>,
+)> {
+    record
+        .last_external()
+        .filter(|last| last.session_id == session_id)
+        .map(|last| {
+            (
+                last.player,
+                last.observation.snapshot(),
+                last.observation.display_snapshot().screen_name().cloned(),
+            )
+        })
+}
+
+/// One change to the settings, run by `config::update` inside its serialized
+/// load, change and save; passed in this form so that a test can run it
+/// against settings of its own, and step in before it runs.
+type SettingsChange<'a> = Box<dyn FnOnce(&mut config::AppConfig) -> Result<(), String> + 'a>;
+
+/// Run INSIDE a settings change: hand to the settings the window of the play
+/// `session_id`, or of the last external play when `None`, while that play is
+/// still the last external one (`window_to_remember`). Returns whether the
+/// stored window changed.
+///
+/// Both questions, whether the play is still the last external one and how its window
+/// was left, are answered here, under the settings lock, and not before it
+/// was waited for (review finding pw-5): a write that waited for the lock
+/// writes what is true when it runs, so a play's end and Vela's exit, in
+/// either order, cannot replace a later look at a window with an earlier
+/// one, and an older play's end cannot write over a newer play's window.
+/// The record's lock (and the observation's, inside it) is held only to
+/// look, never across the settings file being written. Lock order: the
+/// settings lock, then the record, then the observation; nothing that holds
+/// the record or an observation takes the settings lock.
+fn remember_window_in(
+    cfg: &mut config::AppConfig,
+    record: &std::sync::Mutex<PlaybackWindowRecord>,
+    session_id: Option<&str>,
+) -> bool {
+    let ended = {
+        let record = record.lock().unwrap_or_else(|e| e.into_inner());
+        match session_id {
+            Some(session_id) => window_to_remember(&record, session_id),
+            None => record
+                .last_external()
+                .and_then(|last| window_to_remember(&record, &last.session_id)),
+        }
+    };
+    ended.is_some_and(|(player, window, screen)| {
+        config::remember_mpv_window(cfg, player, window, screen.as_deref())
+    })
+}
+
+/// What a play's end writes, in ONE settings change: `finish` (its recents
+/// stamp) and, while it is still the last external play, its window
+/// (`remember_window_in`, which decides that inside the change).
+fn write_play_end<'a>(
+    update: impl FnOnce(SettingsChange<'a>) -> Result<(), String>,
+    record: &'a std::sync::Mutex<PlaybackWindowRecord>,
+    session_id: &'a str,
+    finish: impl FnOnce(&mut config::AppConfig) + 'a,
+) -> Result<(), String> {
+    update(Box::new(move |cfg| {
+        finish(cfg);
+        remember_window_in(cfg, record, Some(session_id));
+        Ok(())
+    }))
+}
+
+/// When Vela quits, the last external play's window is kept for the next run,
+/// under the same rules as at the end of a play. A play still showing when Vela
+/// quits, or one whose end still waits on its final check-in with the server,
+/// would otherwise never hand it over: the process ends before that play's
+/// end callback runs. The settings are written only when the stored window
+/// changes, so quitting after a play's end has stored it writes nothing.
+///
+/// Quitting never waits for this without limit (review finding pw-4): it
+/// runs on a thread of its own, and the exit waits for it at most
+/// `EXIT_WINDOW_HANDOVER_LIMIT` before it lets the process go
+/// (`hand_over_within`).
+///
+/// Before it looks at the window, the hand-over waits, on that same thread,
+/// for the last external play's window-state reader to finish, at most
+/// `EXIT_READER_DRAIN_LIMIT` (review finding pw-8). The exit handler has
+/// just killed that play's mpv, so a connected reader reads what mpv had
+/// already sent and then the end of its connection; without the wait, a
+/// change mpv had sent and the reader had not yet applied was lost. There is
+/// no wait when there has been no play in mpv's own window this run, when
+/// its reader has finished already, or when an earlier pass of this exit has
+/// given up on it (the exit handler runs on both `ExitRequested` and `Exit`).
+///
+/// The wait is the whole `EXIT_READER_DRAIN_LIMIT`, on the first pass only,
+/// whenever that reader is still running when Vela quits: while it is still
+/// trying to connect (mpv started moments before, or mpv never made its
+/// socket; the stop flag set after the hand-over ends those tries), and
+/// when the kill did not end the mpv it reads from, as when `mpv_path` names
+/// a program that starts mpv under itself and the kill ends only that
+/// program (the reader then reads on from a live mpv).
+pub(crate) fn remember_window_on_exit(latest: &std::sync::Arc<std::sync::Mutex<PlaybackWindowRecord>>) {
+    hand_over_window_on_exit(
+        latest.clone(),
+        EXIT_WINDOW_HANDOVER_LIMIT,
+        EXIT_READER_DRAIN_LIMIT,
+        config::load_config,
+        |change| config::update(change),
+    );
+}
+
+/// How long quitting waits for the last external play's window to reach the
+/// settings: short, like the wait for embedded plays beside it in the exit
+/// handler. The write waits for the settings lock, which another Vela can
+/// hold, and for the disk. The wait for the reader is inside it.
+const EXIT_WINDOW_HANDOVER_LIMIT: Duration = Duration::from_secs(2);
+
+/// How long the exit's hand-over waits for the last external play's reader
+/// to finish. A connected reader of a killed mpv has only what is already in
+/// the socket left to read, which takes it well under a millisecond; this is
+/// for a machine under load, and leaves most of `EXIT_WINDOW_HANDOVER_LIMIT`
+/// to the settings write.
+const EXIT_READER_DRAIN_LIMIT: Duration = Duration::from_millis(500);
+const _: () = assert!(EXIT_READER_DRAIN_LIMIT.as_millis() < EXIT_WINDOW_HANDOVER_LIMIT.as_millis());
+
+/// `remember_window_on_exit` with its limits and the settings read and write
+/// passed in: the reader's wait, then the hand-over, both on the hand-over's
+/// own thread and both within `limit`. Returns whether it finished in time.
+fn hand_over_window_on_exit(
+    latest: std::sync::Arc<std::sync::Mutex<PlaybackWindowRecord>>,
+    limit: Duration,
+    reader_limit: Duration,
+    load: impl FnOnce() -> std::io::Result<config::AppConfig> + Send + 'static,
+    update: impl for<'a> FnOnce(SettingsChange<'a>) -> Result<(), String> + Send + 'static,
+) -> bool {
+    hand_over_within(limit, move || {
+        wait_for_last_external_reader(&latest, reader_limit);
+        remember_window_on_exit_with(&latest, load, update);
+    })
+}
+
+/// Wait at most `limit` for the reader of the last play in mpv's own window
+/// to finish. The record's lock is held only to find that play, never while
+/// waiting.
+fn wait_for_last_external_reader(
+    record: &std::sync::Mutex<PlaybackWindowRecord>,
+    limit: Duration,
+) -> playback::ReaderWait {
+    let observation = record
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .last_external()
+        .map(|last| last.observation.clone());
+    observation.map_or(playback::ReaderWait::NoReader, |observation| {
+        observation.wait_for_reader(limit)
+    })
+}
+
+/// Run `hand_over` on a thread of its own and wait for it at most `limit`.
+/// Returns whether it finished in time. When it has not, the caller goes on
+/// and the process can end while it still waits or writes: the settings file
+/// is replaced only by renaming a complete temporary file over it
+/// (`storage::save_json`, through `config::update`), so a write cut off by the
+/// process ending leaves the old file whole.
+fn hand_over_within(limit: Duration, hand_over: impl FnOnce() + Send + 'static) -> bool {
+    let (done, finished) = std::sync::mpsc::channel();
+    let started = std::thread::Builder::new()
+        .name("vela-exit-window".to_string())
+        .spawn(move || {
+            hand_over();
+            let _ = done.send(());
+        });
+    started.is_ok() && finished.recv_timeout(limit).is_ok()
+}
+
+/// `remember_window_on_exit` with the settings read and the settings write
+/// passed in, so a test can see when quitting writes and when it does not.
+/// The read only spares a write that would change nothing; what is written
+/// is decided again inside the write (`remember_window_in`).
+fn remember_window_on_exit_with<'a>(
+    latest: &'a std::sync::Mutex<PlaybackWindowRecord>,
+    load: impl FnOnce() -> std::io::Result<config::AppConfig>,
+    update: impl FnOnce(SettingsChange<'a>) -> Result<(), String>,
+) {
+    // Settings that cannot be read are left alone; the write below would
+    // refuse them too.
+    let changes = match load() {
+        Ok(mut cfg) => remember_window_in(&mut cfg, latest, None),
+        Err(_) => false,
+    };
+    if changes {
+        let _ = update(Box::new(move |cfg| {
+            remember_window_in(cfg, latest, None);
+            Ok(())
+        }));
+    }
+}
+
+/// How a play opens its mpv window: as the last external play of this run
+/// left it, or, when there has been none, as `first_of_run` says. What this
+/// run observed always wins over the setting, and embedded plays in between
+/// do not make the setting apply again (review finding pw-6). The screen it
+/// opens on is not decided here but by the same rule (`screen_for_play`):
+/// for a Compatible choice with the play's copy, for any other at the
+/// launch, after the stream is resolved (`screen_at_launch`).
+fn opening_window(
+    record: &PlaybackWindowRecord,
+    first_of_run: playback::PlaybackWindowState,
+) -> playback::PlaybackWindowState {
+    if record.last_external().is_some() {
+        inherited_window_state(record)
+    } else {
+        first_of_run
+    }
 }
 
 async fn validate_playback_session(state: &AppState, expected_session: Option<&str>) -> bool {
@@ -4185,6 +4642,324 @@ async fn install_playback_session(
     });
 }
 
+/// Whether a launch that failed, once undone, owes the page the report that
+/// the run is over (review finding pc-2): nothing is playing, no play is
+/// active, and the page holds the player's fullscreen. Decided from the state
+/// of the app alone, never from which plays have reported their ends.
+fn failed_launch_ends_run(nothing_playing: bool, play_active: bool, fullscreen_held: bool) -> bool {
+    nothing_playing && !play_active && fullscreen_held
+}
+
+/// Whether nothing is playing after a launch failed. `before` is the player
+/// that was in the slot before the launch was installed. Only that player,
+/// still in the slot and not ended, is still playing: the launch failed
+/// before stopping it. Anything else means nothing plays: the slot empty
+/// (the launch took the old player out and stopped it, or the reaper emptied
+/// it), the old player ended, or a player the launch started and stopped
+/// again when it could not start its tracking (`playback::play` leaves that
+/// one in the slot, told to stop). Asked with the slot's lock held.
+fn nothing_playing(slot: &mut Option<crate::player::PlayerHandle>, before: Option<u64>) -> bool {
+    match slot.as_mut() {
+        None => true,
+        Some(player) => {
+            Some(player.serial()) != before || matches!(player.has_ended(), Ok(true))
+        }
+    }
+}
+
+/// Undo a launch that failed after its session was installed. Runs on the
+/// async command task; each lock is taken alone.
+async fn undo_failed_launch(
+    state: &AppState,
+    session_id: &str,
+    transcode_session: Option<&str>,
+    previous_cursor: Option<PlaylistCursor>,
+) {
+    // mpv never started, so no tracker tail will ever run: this is the
+    // only chance to stop what the resolve already committed us to.
+    if let Some(session) = transcode_session {
+        if let Some(record) = take_active_transcode(&state.active_transcode, session) {
+            stop_transcode_record(record).await;
+        }
+    }
+    // The old player has already been terminated. Restore its cursor
+    // bookkeeping for the established failure contract, but never
+    // re-authorize its dead session for delayed continuation work.
+    clear_playback_session_if(state, session_id).await;
+    let mut cursor = state.playlist_cursor.lock().await;
+    if cursor
+        .as_ref()
+        .is_none_or(|current| current.session_id == session_id)
+    {
+        *cursor = previous_cursor;
+    }
+}
+
+/// After a launch failed and was undone: when the run is over by then
+/// (`failed_launch_ends_run`), give `report_end` the one report that says so,
+/// naming the session whose view the page is showing, or this launch's own
+/// when no view is showing. The page leaves its fullscreen on it. Whether
+/// anything plays and whether the page holds fullscreen are read under the
+/// slot's lock, which `player_fullscreen` also holds when it sets that claim.
+/// With the real launch that togetherness carries no weight: once nothing
+/// plays, nothing in the slot is a running embedded play, so no claim can be
+/// set between the two reads, and a claim given up between them only sends a
+/// report the page then ignores. The report is given with the view record's
+/// lock held (`ViewRecord::report`), the lock the view's own events are sent
+/// under, so no opening or closing comes between the name it reads and the
+/// report. No lock is held across an await. Ids and a flag only.
+async fn report_failed_launch_end(
+    state: &AppState,
+    session_id: &str,
+    before: Option<u64>,
+    report_end: &mut impl FnMut(serde_json::Value),
+) {
+    let (nothing_playing, fullscreen_held) = {
+        let mut slot = state.current_child.lock().unwrap_or_else(|e| e.into_inner());
+        (
+            nothing_playing(&mut slot, before),
+            state.player_fullscreen_held.load(Ordering::SeqCst),
+        )
+    };
+    let play_active = state.active_playback_session.lock().await.is_some();
+    if failed_launch_ends_run(nothing_playing, play_active, fullscreen_held) {
+        state.player_view.report(session_id, |session| {
+            report_end(serde_json::json!({
+                "sessionId": session,
+                "runOver": true,
+            }))
+        });
+    }
+}
+
+/// Whether a source choice the run awaited, once it has been dealt with
+/// without starting a play (cancelled, or chosen and then refused or failed
+/// before its play was installed), leaves the run over
+/// (review finding pc-2): nothing is playing, no choice is still waiting, and
+/// the page holds the player's fullscreen. While a choice waits, the page
+/// keeps fullscreen (the dispatcher said a successor is coming), so its end
+/// is a moment the run can end. The callers check that the run awaited it.
+fn choice_end_ends_run(nothing_playing: bool, choice_pending: bool, fullscreen_held: bool) -> bool {
+    nothing_playing && !choice_pending && fullscreen_held
+}
+
+/// Whether nothing is playing now: the slot is empty, or its player has
+/// ended. Asked with the slot's lock held and under the play lock, so no
+/// launch is under way. A player that has been told to stop and has not yet
+/// ended counts as playing (only a launch that failed leaves one, and that
+/// launch has made its own report).
+fn nothing_plays_now(slot: &mut Option<crate::player::PlayerHandle>) -> bool {
+    slot.as_mut()
+        .is_none_or(|player| matches!(player.has_ended(), Ok(true)))
+}
+
+/// After a source choice the run awaited was dealt with without starting a
+/// play: when the run is over by then (`choice_end_ends_run`), give `report_end`
+/// the one report that says so, naming the session whose view the page is showing,
+/// or `own` when no view is showing (the page then leaves whatever the name).
+/// Runs on the async command task under the play lock: the slot's lock is
+/// taken alone and let go of before the choices' lock is awaited, and the
+/// report is given under the view record's lock, as a failed launch's is.
+/// Ids and a flag only.
+async fn report_choice_end(
+    state: &AppState,
+    own: &str,
+    report_end: &mut impl FnMut(serde_json::Value),
+) {
+    let (nothing_playing, fullscreen_held) = {
+        let mut slot = state.current_child.lock().unwrap_or_else(|e| e.into_inner());
+        (
+            nothing_plays_now(&mut slot),
+            state.player_fullscreen_held.load(Ordering::SeqCst),
+        )
+    };
+    let choice_pending = state.playback_choices.lock().await.has_pending(Instant::now());
+    if choice_end_ends_run(nothing_playing, choice_pending, fullscreen_held) {
+        state.player_view.report(own, |session| {
+            report_end(serde_json::json!({
+                "sessionId": session,
+                "runOver": true,
+            }))
+        });
+    }
+}
+
+/// The session a choice's end names when no view shows: the play the choice
+/// was to follow, or the choice's own play.
+fn choice_own_session(pending: &PendingPlaybackChoice) -> String {
+    pending
+        .replace_session
+        .clone()
+        .unwrap_or_else(|| pending.session_id.clone())
+}
+
+/// Cancel a source choice, under the play lock, and then report the end of
+/// the run if the run awaited that choice and is now over (`report_choice_end`).
+/// A manual choice the dispatcher has not met, or a choice no longer held
+/// (expired or cleared), reports nothing. Answers whether it was still held.
+async fn cancel_choice(
+    state: &AppState,
+    request_id: &str,
+    mut report_end: impl FnMut(serde_json::Value),
+) -> bool {
+    let _play = state.play_lock.lock().await;
+    let taken = state
+        .playback_choices
+        .lock()
+        .await
+        .take_at(request_id, Instant::now());
+    let Some(pending) = taken else {
+        return false;
+    };
+    if let Some(expected) = pending.replace_session.as_deref() {
+        clear_playlist_cursor_if(state, expected).await;
+        let mut run = state.playback_run.lock().await;
+        if run.as_ref().is_some_and(|run| run.session_id == expected) {
+            *run = None;
+        }
+    }
+    if pending.run_waiting {
+        report_choice_end(state, &choice_own_session(&pending), &mut report_end).await;
+    }
+    true
+}
+
+/// Resolve a source choice with `source_id`, under the play lock: `play`
+/// starts the chosen play (the real command passes `play_by_key_locked`).
+/// When a held choice does not start a play (the source was not offered, the
+/// play was refused or failed before its session was installed), the end of
+/// the run is reported only if the run awaited it and is now over
+/// (`report_choice_end`). An expired choice reports nothing.
+/// A launch that failed after its session was
+/// installed has already made that report itself (`PlayFailure::launched`).
+async fn resolve_choice<P, F>(
+    state: &AppState,
+    request_id: &str,
+    source_id: &str,
+    play: P,
+    mut report_end: impl FnMut(serde_json::Value),
+) -> Result<PlayCommandResult, String>
+where
+    P: FnOnce(PendingPlaybackChoice, String) -> F,
+    F: std::future::Future<Output = Result<PlayCommandResult, PlayFailure>>,
+{
+    let _play = state.play_lock.lock().await;
+    let taken = state
+        .playback_choices
+        .lock()
+        .await
+        .take_at(request_id, Instant::now());
+    let Some(pending) = taken else {
+        return Err("this source choice expired or was superseded".to_string());
+    };
+    let run_waiting = pending.run_waiting;
+    let own = choice_own_session(&pending);
+    if !pending
+        .request
+        .choices
+        .iter()
+        .any(|choice| choice.source_id == source_id)
+    {
+        if run_waiting {
+            report_choice_end(state, &own, &mut report_end).await;
+        }
+        return Err("that source was not offered for this playback request".to_string());
+    }
+    let result = play(pending, source_id.to_string()).await;
+    let started_or_reported = match &result {
+        Ok(PlayCommandResult::Started { .. }) => true,
+        Err(failure) => failure.launched,
+        Ok(_) => false,
+    };
+    if run_waiting && !started_or_reported {
+        report_choice_end(state, &own, &mut report_end).await;
+    }
+    match result {
+        Ok(result) => Ok(result),
+        Err(failure) if failure.kind == PlayFailureKind::Superseded => {
+            Ok(PlayCommandResult::Superseded)
+        }
+        Err(failure) => Err(failure.message),
+    }
+}
+
+/// What a play installs in the app's state while it starts.
+struct PlayInstall<'a> {
+    session_id: &'a str,
+    item: &'a ItemDto,
+    run_kind: Option<PlaybackRunKind>,
+    affinity_source_id: Option<String>,
+    cursor: Option<PlaylistCursor>,
+    transcode_session: Option<&'a str>,
+}
+
+/// Install a play and start it, all under the play lock: note which player
+/// is in the slot, move the playlist position, install the session, then run
+/// `launch` (which stops the previous player and starts this one). When the
+/// launch fails, everything installed is undone here, the one place that does
+/// it (review finding sel-1), and then, when nothing is playing, no play is
+/// active and the page holds the player's fullscreen, `report_end` is given
+/// the report that the run is over (review finding pc-2). A play that
+/// started is followed by its own reports.
+async fn install_and_launch<L>(
+    state: &AppState,
+    install: PlayInstall<'_>,
+    launch: L,
+    mut report_end: impl FnMut(serde_json::Value),
+) -> Result<std::sync::Arc<std::sync::atomic::AtomicBool>, String>
+where
+    L: std::future::Future<Output = Result<std::sync::Arc<std::sync::atomic::AtomicBool>, String>>,
+{
+    // The player `launch` will stop, read before anything of this play is
+    // installed (under the play lock, no other launch runs).
+    let before = state
+        .current_child
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .map(crate::player::PlayerHandle::serial);
+    let previous_cursor = {
+        let mut cursor = state.playlist_cursor.lock().await;
+        std::mem::replace(&mut *cursor, install.cursor)
+    };
+    install_playback_session(
+        state,
+        install.session_id,
+        install.item,
+        install.run_kind,
+        install.affinity_source_id,
+    )
+    .await;
+    match launch.await {
+        Ok(stop) => Ok(stop),
+        Err(message) => {
+            undo_failed_launch(
+                state,
+                install.session_id,
+                install.transcode_session,
+                previous_cursor,
+            )
+            .await;
+            report_failed_launch_end(state, install.session_id, before, &mut report_end).await;
+            Err(message)
+        }
+    }
+}
+
+/// Send the page a `playback-ended` the backend owes it from the state of the
+/// app: a launch that failed (`install_and_launch`), or a source choice that
+/// ended without a play (`report_choice_end`). Runs on the async command's
+/// task, inside
+/// `ViewRecord::report` and so with the view record's lock held (a plain
+/// lock, never across an await): it must only send. The payload is ids and a
+/// flag only.
+fn report_playback_ended(state: &AppState, end: serde_json::Value) {
+    if let Some(app) = state.app_handle.get() {
+        use tauri::Emitter;
+        let _ = app.emit("playback-ended", end);
+    }
+}
+
 async fn clear_playback_session_if(state: &AppState, expected_session: &str) {
     let mut active = state.active_playback_session.lock().await;
     if active.as_deref() == Some(expected_session) {
@@ -4195,6 +4970,13 @@ async fn clear_playback_session_if(state: &AppState, expected_session: &str) {
             .is_some_and(|(session, _)| session == expected_session)
         {
             *item = None;
+        }
+        let mut player = state.active_playback_player.lock().await;
+        if player
+            .as_ref()
+            .is_some_and(|(session, _)| session == expected_session)
+        {
+            *player = None;
         }
         let mut run = state.playback_run.lock().await;
         if run
@@ -4274,6 +5056,149 @@ struct PlaybackSelection {
     raw_item_key: String,
     version_id: Option<String>,
     item: ItemDto,
+    /// The player the play will run in, and why not the one asked for when
+    /// it falls back (`select_playback_version`): decided with the settings
+    /// the copy was chosen with, before the copy was ranked for its screen.
+    player: crate::player::PlayerChoice,
+    /// Where the play is shown: the output a Compatible copy was ranked for,
+    /// or, for any other choice, to be decided at the launch
+    /// (`PlayDestination`).
+    screen: PlayDestination,
+}
+
+/// Where a play is shown, as its choice of copy hands it to the launch
+/// (review findings pw-1 and pw-2; third review of pw-1, comment 5). Only a
+/// Compatible choice ranks for a screen, so only it fixes the screen before
+/// the stream is resolved; every other play's screen is decided after
+/// resolution, as the plan's Slice 1 promises, so that a report from the
+/// player before arriving meanwhile still counts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PlayDestination {
+    /// A Compatible copy was ranked for this output, by name, decided once
+    /// before the copy was chosen (`screen_for_play`). The launch asks for
+    /// it and looks at no screen again, whichever player ends up running the
+    /// play. `None` only when not even the screen holding Vela's window has
+    /// a name.
+    RankedFor(Option<String>),
+    /// No copy was ranked for a screen (Best, Fastest, Ask, or nothing to
+    /// rank): the launch decides the screen once the stream is resolved
+    /// (`screen_at_launch`).
+    DecidedAtLaunch,
+}
+
+/// The screen a play is to be shown on, decided once (`screen_for_play`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct PlayScreen {
+    /// The output, by name.
+    name: Option<String>,
+    /// The play's observation the name was taken from, if it was: its size
+    /// counts as the output's size for the ranking (`display::profile_basis`).
+    observed: Option<display::ObservedDisplay>,
+}
+
+/// The screen a play is shown on (review findings pw-1 and pw-2). The one
+/// place it is decided; everything after uses what this returns.
+///
+/// For a play in mpv's own window: the screen the last external play's window
+/// was observed on; while this run has had none, the screen saved for the
+/// first window of a run, when the player window setting uses it
+/// (`saved_first_screen`). For a play in the embedded player, which is drawn
+/// in Vela's window: the screen holding Vela's window, except that the exact
+/// automatic successor of an embedded play keeps that play's observed screen.
+/// A name that is not connected now is passed over; what is left is the
+/// screen holding Vela's window, by name.
+fn screen_for_play(
+    record: &PlaybackWindowRecord,
+    replace_session: Option<&str>,
+    upcoming: crate::player::PlayerKind,
+    saved_first_screen: Option<&str>,
+    screens: &display::Screens,
+) -> PlayScreen {
+    let observed = |session: &PlaybackWindowSession| {
+        let display = session.observation.display_snapshot();
+        display.screen_name().cloned().map(|name| PlayScreen {
+            name: Some(name),
+            observed: Some(display),
+        })
+    };
+    let wanted = match upcoming {
+        crate::player::PlayerKind::External => match record.last_external() {
+            Some(last) => observed(last),
+            None => saved_first_screen.map(|name| PlayScreen {
+                name: Some(name.to_string()),
+                observed: None,
+            }),
+        },
+        crate::player::PlayerKind::Embedded => record
+            .latest()
+            .filter(|latest| {
+                latest.player == crate::player::PlayerKind::Embedded
+                    && replace_session == Some(latest.session_id.as_str())
+            })
+            .and_then(observed),
+    };
+    wanted
+        .filter(|wanted| {
+            wanted
+                .name
+                .as_deref()
+                .is_some_and(|name| screens.is_connected(name))
+        })
+        .unwrap_or_else(|| PlayScreen {
+            name: screens.velas.clone(),
+            observed: None,
+        })
+}
+
+/// How a choice of copy ranks: for a decided screen, or by a policy that
+/// looks at no screen.
+enum Ranking {
+    /// A Compatible ranking for `target`, the profile of the decided
+    /// `screen`.
+    ForScreen {
+        screen: PlayScreen,
+        target: crate::selection::CompatibilityTarget,
+    },
+    /// Any other ranking (Best, Fastest, or Compatible with no screen to
+    /// rank for, which ranks as Best).
+    ByPolicy(crate::selection::PlaybackSourcePolicy),
+}
+
+/// The copy a play gets, and where it is shown: the candidates ranked, and,
+/// for a ranking for a screen, that screen; otherwise the screen is left to
+/// the launch. What `select_playback_version` ranks with, kept apart so that
+/// a test can run it (review finding pw-2).
+fn rank_and_place(
+    candidates: &mut [crate::selection::PlaybackCandidate],
+    ranking: Ranking,
+) -> Option<(crate::selection::PlaybackCandidate, PlayDestination)> {
+    let (policy, target, destination) = match ranking {
+        Ranking::ForScreen { screen, target } => (
+            crate::selection::PlaybackSourcePolicy::Compatible,
+            Some(target),
+            PlayDestination::RankedFor(screen.name),
+        ),
+        Ranking::ByPolicy(policy) => (policy, None, PlayDestination::DecidedAtLaunch),
+    };
+    crate::selection::rank_candidates(candidates, policy, target);
+    candidates
+        .first()
+        .cloned()
+        .map(|winner| (winner, destination))
+}
+
+/// The screen the launch asks for (third review of finding pw-1, comment
+/// 5). A Compatible copy's screen was decided with it, before the stream was
+/// resolved, and nothing is looked at again; any other play's screen is
+/// decided now, after resolution, by `decide`, once.
+async fn screen_at_launch(
+    destination: PlayDestination,
+    decide: impl AsyncFnOnce() -> PlayScreen,
+) -> Option<String> {
+    match destination {
+        PlayDestination::RankedFor(name) => name,
+        PlayDestination::DecidedAtLaunch => decide().await.name,
+    }
 }
 
 enum PlaybackSelectionOutcome {
@@ -4361,32 +5286,73 @@ fn completion_watch_backings(completion: &PlaybackCompletion) -> Vec<BackingRef>
     backings
 }
 
-async fn playback_compatibility_target(
+/// Decide the screen a play is shown on (`screen_for_play`), from what is
+/// connected now and the record of the plays before it. `upcoming` is the
+/// player whose screen it is: for a Compatible choice the player that will
+/// run the play (the one asked for, or mpv's own window when the embedded
+/// player cannot run, review finding pw-2); at the launch, mpv's own window,
+/// the only player that uses it. `saved_first_screen` is the screen the
+/// player window setting saved for the first window of a run. Also returns
+/// what was seen of the screens, for the ranking. The screens are looked at
+/// before the record is locked, and the record's lock is held only to
+/// decide. Called once per play: by a Compatible choice of copy, or else by
+/// the launch (`screen_at_launch`).
+async fn decide_play_screen(
     state: &AppState,
     replace_session: Option<&str>,
-    cfg: &config::AppConfig,
-) -> Result<Option<crate::selection::CompatibilityTarget>, PlayFailure> {
-    let Some(app) = state.app_handle.get() else {
-        return Ok(None);
+    upcoming: crate::player::PlayerKind,
+    saved_first_screen: Option<&str>,
+) -> (PlayScreen, display::Screens) {
+    let screens = match state.app_handle.get() {
+        Some(app) => display::look_at_screens(app).await,
+        None => display::Screens::default(),
     };
-    let observed = {
+    let screen = {
         let current = state
             .playback_window_session
             .lock()
             .unwrap_or_else(|error| error.into_inner());
-        current
-            .as_ref()
-            .filter(|session| replace_session == Some(session.session_id.as_str()))
-            .map(|session| session.observation.display_snapshot())
+        screen_for_play(
+            &current,
+            replace_session,
+            upcoming,
+            saved_first_screen,
+            &screens,
+        )
     };
-    let detected = display::detect_profile(app, observed).await;
-    let overrides = playback_display_overrides(cfg).map_err(PlayFailure::fatal)?;
-    let effective = display::apply_overrides(&detected, overrides);
-    Ok(Some(crate::selection::CompatibilityTarget {
+    (screen, screens)
+}
+
+/// What a Compatible choice ranks for: the profile of the output the play
+/// was decided to be shown on (`screen_for_play`), with the user's display
+/// overrides on top. `hdr_of` answers the HDR state of the output whose
+/// basis it is given. The whole construction is here, so that a test runs
+/// it with made-up screens and HDR answers (third review of finding pw-1,
+/// comment 6); `compatibility_target` only hands it the system.
+async fn compatibility_target_from(
+    screen: &PlayScreen,
+    screens: &display::Screens,
+    overrides: display::DisplayOverrides,
+    hdr_of: impl AsyncFnOnce(&display::ProfileBasis) -> display::HdrState,
+) -> crate::selection::CompatibilityTarget {
+    let basis = display::profile_basis(screen.name.as_deref(), screen.observed.as_ref(), screens);
+    let hdr = hdr_of(&basis).await;
+    let effective = display::apply_overrides(&display::profile_with(basis, hdr), overrides);
+    crate::selection::CompatibilityTarget {
         width: effective.width_px,
         height: effective.height_px,
         hdr: effective.hdr,
-    }))
+    }
+}
+
+/// `compatibility_target_from`, with the HDR state asked of the system.
+async fn compatibility_target(
+    app: &tauri::AppHandle,
+    screen: &PlayScreen,
+    screens: &display::Screens,
+    overrides: display::DisplayOverrides,
+) -> crate::selection::CompatibilityTarget {
+    compatibility_target_from(screen, screens, overrides, async |basis| display::hdr_of(app, basis).await).await
 }
 
 fn playback_source_choices(
@@ -4489,12 +5455,40 @@ async fn select_playback_version(
     explicit_source_id: Option<&str>,
     affinity_source_id: Option<&str>,
     server_owned: bool,
+    player: Option<crate::player::PlayerKind>,
 ) -> Result<PlaybackSelectionOutcome, PlayFailure> {
     const PROBE_TIMEOUT: Duration = Duration::from_secs(20);
 
     let cfg = config::load_config().map_err(|_| {
         PlayFailure::fatal("couldn't read the saved playback preferences".to_string())
     })?;
+    // Which player the play asks for: `player` when it is an automatic
+    // relaunch, which stays in the player it replaces, otherwise the user's
+    // setting. Read here, from the settings this choice is made with,
+    // because a Compatible choice is made for the screen that player shows
+    // the play on (review finding pw-2). This is before anything is resolved
+    // or installed, so a settings file that cannot be read fails the play
+    // while there is still nothing to undo (review finding sel-1).
+    let wanted_player =
+        player.unwrap_or_else(|| crate::player::PlayerKind::from_setting(cfg.player.as_deref()));
+    // Which player the play will really run in (decisions D1 and D3 of
+    // `.agents/plans/embedded-player.md`): what is asked for, and mpv's own
+    // window whenever the embedded player cannot run. Decided here, once,
+    // and carried to the launch, because the screen a Compatible copy is
+    // ranked for is the screen of the player that runs the play, not of the
+    // one asked for (review finding pw-2). Whether the embedded player can
+    // run is asked only for a play that wants it (the answer comes from the
+    // window). A play that can run embedded now and then cannot start there
+    // after all still falls back at the start (`EmbeddedFallback`), and its
+    // mpv window then opens on the play's screen: for a Compatible choice the
+    // one decided below, which its copy was ranked for (review finding pw-2).
+    let embedded_available = match wanted_player {
+        crate::player::PlayerKind::External => Ok(()),
+        crate::player::PlayerKind::Embedded => {
+            crate::player::embedded_availability(&state.embedded, state.app_handle.get()).await
+        }
+    };
+    let upcoming_player = crate::player::choose(wanted_player, &embedded_available);
     let policy = crate::selection::PlaybackSourcePolicy::from_config(
         cfg.playback_source_policy.as_deref(),
     )
@@ -4602,6 +5596,8 @@ async fn select_playback_version(
             raw_item_key: raw,
             version_id: None,
             item: selected_item,
+            player: upcoming_player,
+            screen: PlayDestination::DecidedAtLaunch,
             }),
             ask_mode: policy == crate::selection::PlaybackSourcePolicy::Ask,
         });
@@ -4649,15 +5645,59 @@ async fn select_playback_version(
             AskSourceDecision::NoCandidate => {}
         }
     }
-    let target = if policy == crate::selection::PlaybackSourcePolicy::Compatible {
-        playback_compatibility_target(state, replace_session, &cfg).await?
-    } else {
-        None
+    // Only a Compatible choice ranks for the screen the play is shown on, so
+    // only it decides that screen here, once, before the copy is chosen; the
+    // launch asks for it and for no other (review findings pw-1 and pw-2).
+    // Decided after the probes, so that a player that has just ended has had
+    // that long to report where its window was. Every other policy looks at
+    // no screen here: its play's screen is decided at the launch, after the
+    // stream is resolved (third review of pw-1, comment 5).
+    let ranking = match state.app_handle.get() {
+        Some(app) if policy == crate::selection::PlaybackSourcePolicy::Compatible => {
+            let overrides = playback_display_overrides(&cfg).map_err(PlayFailure::fatal)?;
+            let (_, saved_first_screen) =
+                config::first_window_of_run(&cfg).map_err(PlayFailure::fatal)?;
+            let (screen, screens) = decide_play_screen(
+                state,
+                replace_session,
+                upcoming_player.kind,
+                saved_first_screen.as_deref(),
+            )
+            .await;
+            let target = compatibility_target(app, &screen, &screens, overrides).await;
+            Ranking::ForScreen { screen, target }
+        }
+        _ => Ranking::ByPolicy(policy),
     };
-    crate::selection::rank_candidates(&mut candidates, policy, target);
-    let winner = candidates
-        .first()
+    let (winner, destination) = rank_and_place(&mut candidates, ranking)
         .ok_or_else(|| PlayFailure::unavailable("no playable copy was found".to_string()))?;
+    let selection = selection_for_winner(
+        versions,
+        &mut probed_sources,
+        &winner,
+        item,
+        upcoming_player,
+        destination,
+    )?;
+    Ok(PlaybackSelectionOutcome::Ready {
+        selection: Box::new(selection),
+        ask_mode: policy == crate::selection::PlaybackSourcePolicy::Ask,
+    })
+}
+
+/// The selection a ranking's winner makes: the very version that won, by its
+/// source AND its version id (a source may offer several copies of one
+/// title), routed by the key its source was probed with. Kept apart so that
+/// a test runs it from the ranking to the stream the play is resolved to
+/// (`resolve_selected`; second review of finding pw-2).
+fn selection_for_winner(
+    versions: Vec<PlaybackVersion>,
+    probed_sources: &mut HashMap<String, String>,
+    winner: &crate::selection::PlaybackCandidate,
+    item: &ItemDto,
+    player: crate::player::PlayerChoice,
+    screen: PlayDestination,
+) -> Result<PlaybackSelection, PlayFailure> {
     let version = versions
         .into_iter()
         .find(|version| {
@@ -4670,15 +5710,45 @@ async fn select_playback_version(
     let mut selected_item = item.clone();
     selected_item.rating_key = version.item_key;
     selected_item.source_id = version.source_id.clone();
-    Ok(PlaybackSelectionOutcome::Ready {
-        selection: Box::new(PlaybackSelection {
-            source_id: version.source_id,
-            raw_item_key,
-            version_id: Some(version.version_id),
-            item: selected_item,
-        }),
-        ask_mode: policy == crate::selection::PlaybackSourcePolicy::Ask,
+    Ok(PlaybackSelection {
+        source_id: version.source_id,
+        raw_item_key,
+        version_id: Some(version.version_id),
+        item: selected_item,
+        player,
+        screen,
     })
+}
+
+/// The stream a selection plays: its version when it has one, otherwise the
+/// source's own default copy.
+async fn resolve_selected(
+    src: &dyn crate::source::MediaSource,
+    selection: &PlaybackSelection,
+    include_markers: bool,
+    quality: &str,
+) -> Result<crate::source::StreamResolution, String> {
+    match selection.version_id.as_deref() {
+        Some(version_id) => {
+            src.resolve_stream_version(
+                &selection.raw_item_key,
+                selection.item.duration_ms,
+                version_id,
+                include_markers,
+                quality,
+            )
+            .await
+        }
+        None => {
+            src.resolve_stream(
+                &selection.raw_item_key,
+                selection.item.duration_ms,
+                include_markers,
+                quality,
+            )
+            .await
+        }
+    }
 }
 
 struct PlayLaunchRequest<'a> {
@@ -4709,6 +5779,10 @@ struct PlayLaunchRequest<'a> {
     /// cap, the cooldown and the step count were all unreachable (finding
     /// `or-1`, codex openreview 2026-07-26).
     continues_automatic: bool,
+    /// The player this launch must use because it replaces a running play: a
+    /// replacement stays in the player it replaces. `None` chooses from the
+    /// user's setting, which is every play the user starts.
+    player: Option<crate::player::PlayerKind>,
 }
 
 /// Whether Automatic manages this launch, and therefore whether it is watched.
@@ -4726,6 +5800,10 @@ struct PlayLaunchRequest<'a> {
 /// `automatic` itself — which a user asking for Automatic should get.
 fn automatic_manages(continues_automatic: bool, resolved: &str) -> bool {
     continues_automatic || resolved == config::PLAYBACK_QUALITY_AUTOMATIC
+}
+
+fn playback_certificate_checked(certificate_check_on: bool, url: &str) -> bool {
+    certificate_check_on && url.starts_with("https://")
 }
 
 async fn play_by_key(
@@ -4756,6 +5834,7 @@ async fn play_by_key_locked(
         osd_notice,
         steps_taken,
         continues_automatic,
+        player,
     } = request;
     if !validate_playback_session(state, replace_session).await {
         return Err(PlayFailure::superseded());
@@ -4782,6 +5861,7 @@ async fn play_by_key_locked(
         explicit_source_id,
         prior_affinity.as_deref(),
         server_owned,
+        player,
     )
     .await?;
     let (selection, ask_mode) = match selection {
@@ -4804,6 +5884,7 @@ async fn play_by_key_locked(
                     session_id: session_id.to_string(),
                     playlist,
                     replace_session: replace_session.map(str::to_string),
+                    run_waiting: replace_session.is_some(),
                     run_kind,
                 },
                 Instant::now(),
@@ -4842,6 +5923,32 @@ async fn play_by_key_locked(
     // the server is never asked for markers at all.
     let skip_policies = SkipPolicies::load()?;
     let include_markers = skip_policies.any_enabled();
+    // Which player runs this play: what it asks for (the one it replaces when
+    // it is an automatic relaunch, otherwise the user's setting), and mpv's
+    // own window whenever the embedded player cannot run. Decided once, by
+    // the choice of copy above, before anything is resolved or installed: a
+    // settings file that cannot be read then fails the play while there is
+    // still nothing to undo. Past the point where the session is installed,
+    // the only way out is the launch-failure path at the end of this
+    // function, which undoes it (review finding sel-1). The copy was chosen
+    // for the screen this player shows the play on (review finding pw-2).
+    let player_choice = selection.player.clone();
+    // How this play's window opens if it is the first external play of this
+    // run, and on which screen: the player window setting. Read here for the
+    // same reason as the player above; used only when this run has no window
+    // of its own yet. The screen is used only when the launch decides it
+    // (`screen_at_launch`); a Compatible copy's was decided with the copy.
+    let (first_of_run, saved_first_screen) = config::load_config()
+        .map_err(|_| "could not read Vela settings".to_string())
+        .and_then(|cfg| config::first_window_of_run(&cfg))
+        .map_err(PlayFailure::fatal)?;
+    // Whether the player is told to check the server's certificate
+    // (`mpv_tls_verify`; plan tls-verify). Read like the settings above: a
+    // settings file that cannot be read fails the play, it is never guessed.
+    let certificate_check_on = config::load_config()
+        .map_err(|_| "could not read Vela settings".to_string())
+        .map(|cfg| cfg.mpv_tls_verify != Some(false))
+        .map_err(PlayFailure::fatal)?;
     // The quality for this play, resolved once here so the sources never read
     // config themselves. A one-off menu choice wins for this launch only; it is
     // validated against the same closed set the setting uses, so a value the
@@ -4852,200 +5959,52 @@ async fn play_by_key_locked(
             .map(|cfg| config::playback_quality(cfg.playback_quality.as_deref()))
             .unwrap_or_else(|_| config::PLAYBACK_QUALITY_ORIGINAL.to_string()),
     };
-    let resolved = match selection.version_id.as_deref() {
-        Some(version_id) => {
-            src.resolve_stream_version(
-                &selection.raw_item_key,
-                item.duration_ms,
-                version_id,
-                include_markers,
-                &quality,
-            )
-            .await
-        }
-        None => src
-            .resolve_stream(
-                &selection.raw_item_key,
-                item.duration_ms,
-                include_markers,
-                &quality,
-            )
-            .await,
-    }
-    .map_err(PlayFailure::unavailable)?;
+    let resolved = resolve_selected(src.as_ref(), &selection, include_markers, &quality)
+        .await
+        .map_err(PlayFailure::unavailable)?;
 
-    // Resolve first so the completed process can deliver its final IPC events
-    // while a slow server prepares the successor. Only an exact automatic
-    // replacement may sample the published observation; manual plays (`None`)
-    // deliberately start from configured defaults.
-    let (inherited_window_state, inherited_screen_name) = {
+    // Resolve first so a just-ended process can deliver its final IPC events
+    // while a slow server prepares this play. Every play, manual or automatic,
+    // opens its window the way the last external play that started left it;
+    // until there is one in this run, as the player window setting says.
+    let inherited_window_state = {
         let current = state
             .playback_window_session
             .lock()
             .unwrap_or_else(|e| e.into_inner());
-        (
-            inherited_window_state(current.as_ref(), replace_session),
-            inherited_screen_name(current.as_ref(), replace_session),
+        opening_window(&current, first_of_run)
+    };
+    // The screen: a Compatible copy's was decided with the copy, before the
+    // stream was resolved, and is not looked at again, neither where Vela's
+    // window is now nor what the record says now (review finding pw-1);
+    // whichever player runs the play is asked for it, also mpv's own window
+    // when the embedded player cannot start the play after all (review
+    // finding pw-2). Any other play's screen is decided now, once the stream
+    // is resolved, like the window state above (the plan's Slice 1; third
+    // review of pw-1, comment 5), as for a play in mpv's own window: the
+    // only player that uses it, also for a play the embedded player cannot
+    // start.
+    let screen_name = screen_at_launch(selection.screen, async || {
+        decide_play_screen(
+            state,
+            replace_session,
+            crate::player::PlayerKind::External,
+            saved_first_screen.as_deref(),
         )
-    };
-    let screen_name = if inherited_screen_name.is_some() {
-        inherited_screen_name
-    } else if let Some(app) = state.app_handle.get() {
-        display::current_screen_name(app).await
-    } else {
-        None
-    };
-    let window_observation = playback::WindowStateObservation::default();
+        .await
+        .0
+    })
+    .await;
+    // How Vela opens this window stands until mpv reports otherwise, even
+    // when the reader never connects (pw-9). The requested screen is not a
+    // measurement of where the compositor actually placed the window.
+    let window_observation =
+        playback::WindowStateObservation::opened_at(inherited_window_state);
 
-    // A failed resolve leaves the currently-playing context intact. Only once
-    // the replacement has a real stream do we provisionally install its
-    // context. The play lock keeps the expected session valid between the
-    // check above and this installation.
-    let new_cursor = playlist.map(|location| PlaylistCursor {
-        owner: location.owner,
-        playlist_id: location.playlist_id,
-        entry_id: location.entry_id,
-        index: location.index,
-        session_id: session_id.to_string(),
-    });
-    let previous_cursor = {
-        let mut cursor = state.playlist_cursor.lock().await;
-        std::mem::replace(&mut *cursor, new_cursor)
-    };
-    install_playback_session(state, session_id, item, run_kind, next_affinity).await;
-
-    // Cancel the prior tracker and terminate the prior mpv so we never run two
-    // players. The kill is a non-blocking syscall; the reap is handed to the
-    // periodic reaper via reap_queue.
-    if let Some(prev) = state
-        .tracking_stop
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .take()
-    {
-        prev.store(true, Ordering::Relaxed);
-    }
-    let prev_child = state
-        .current_child
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .take();
-    let mut prior_include_error = None;
-    if let Some(mut child) = prev_child {
-        if let Err(error) = child.remove_consumed_header_include() {
-            prior_include_error = Some(error);
-        }
-        let _ = child.kill();
-        state
-            .reap_queue
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .push(child);
-    }
-
-    // Sources that keep no server-side progress (the local family) resolve
-    // resume_ms 0 — fall back to Vela's own stamped position so a Continue
-    // Watching click actually continues (2026-07-04 hero decision). A server
-    // that supplies a position still wins: it is the watch-state authority.
-    let local_resume_ms = if !start_from_beginning && resolved.resume_ms == 0 {
-        let cfg = config::load_config()
-            .map_err(|_| PlayFailure::fatal("could not read Vela settings".to_string()))?;
-        crate::recents::resume_stamp_ms(&cfg, &item.rating_key)
-    } else {
-        0
-    };
-    // An Automatic step-down resumes at the position the replaced player had
-    // actually reached — the server's stamp lags it by up to a report interval,
-    // and resuming even a few seconds back is a visible stutter in what should
-    // look like the picture quality changing.
-    let resume_ms = match resume_override_ms {
-        Some(exact) => exact,
-        None => playback_start_ms(start_from_beginning, resolved.resume_ms, local_resume_ms),
-    };
-    // Resolve the bundled mpv autocrop script here (the command layer holds the
-    // AppHandle; `playback::play` does not). Whether it's injected depends on the
-    // `mpv_autocrop` config mode, decided in `play`. `resolve` only computes the
-    // path; `play` existence-checks before use.
-    let resolve_resource = |name: &str| {
-        state.app_handle.get().and_then(|app| {
-            use tauri::Manager;
-            app.path()
-                .resolve(
-                    format!("mpv-scripts/{name}"),
-                    tauri::path::BaseDirectory::Resource,
-                )
-                .ok()
-                .map(|p| p.to_string_lossy().into_owned())
-        })
-    };
-    let autocrop_script = resolve_resource("autocrop.lua");
-    // Vela's trigger shim rides next to the stock script (auto mode disables
-    // the stock trigger and lets the shim fire detection after a settle
-    // delay — the stock trigger breaks on --start resumes; see the shim).
-    let autocrop_shim = resolve_resource("vela-autocrop.lua");
     // Grab the teardown handle before `resolved` is consumed below. Whatever
     // started a transcode is obliged to stop it: neither server has a
     // keep-alive, and how an abandoned session expires is unknown.
     let transcode_session = resolved.transcode_session.clone();
-    // Own the session in app state from here on. The end callback alone is not
-    // enough: app exit kills mpv and returns without waiting for any tracker
-    // tail, so a teardown that only exists inside that callback — or in a task
-    // detached from it — can be lost with the runtime and leave an encoder
-    // running on the user's server (finding `tr-4`). Registering here also
-    // covers the launch-failure path below, which never reaches the callback.
-    if let Some(session) = transcode_session.clone() {
-        if let Some(replaced) = register_active_transcode(&state.active_transcode, &src, session) {
-            // A play that supersedes another must stop the encoder it
-            // supersedes; the old tracker's tail can no longer claim it.
-            stop_transcode_record(replaced).await;
-        }
-    }
-    let markers_script = resolve_resource("vela-markers.lua");
-    // Keep only the kinds the user actually enabled: the script must never be
-    // handed a range it is not allowed to act on.
-    let markers: Vec<crate::source::MediaMarker> = resolved
-        .markers
-        .into_iter()
-        .filter(|marker| !skip_policy_for(marker.kind, &skip_policies).is_off())
-        .collect();
-    let spec = playback::PlaySpec {
-        url: resolved.url,
-        title: item.title.clone(),
-        http_headers: resolved.http_headers,
-        start_seconds: resume_ms as f64 / 1000.0,
-        autocrop_script,
-        autocrop_shim,
-        inherited_window_state,
-        screen_name,
-        window_observation: window_observation.clone(),
-        markers_script,
-        markers,
-        intro_policy: skip_policies.intro,
-        credits_policy: skip_policies.credits,
-        commercial_policy: skip_policies.commercial,
-        // Automatic only. Whether a lower tier actually exists is NOT checked
-        // here: that needs a decision round trip per play, and a verdict is
-        // rare — `apply_step_down` resolves the ladder when one actually
-        // arrives, and declines if there is nowhere to go.
-        step_down: automatic_manages(continues_automatic, &quality).then(|| {
-            let queue = state.step_down.clone();
-            let session = session_id.to_string();
-            let already = steps_taken;
-            let running_quality = quality.clone();
-            std::sync::Arc::new(move |position_ms: u64, reason| {
-                queue.request(StepDownRequest {
-                    session_id: session.clone(),
-                    position_ms,
-                    reason,
-                    steps_taken: already,
-                    current_quality: running_quality.clone(),
-                });
-            }) as playback::StepDownNotify
-        }),
-        duration: item.duration_ms.map(Duration::from_millis),
-        osd_notice,
-        steps_taken,
-    };
     // The tracker can observe a very fast mpv exit before this async command
     // resumes from spawn_blocking. Hold its final recents stamp until the
     // post-launch record attempt has completed, or finish() could run first
@@ -5053,146 +6012,457 @@ async fn play_by_key_locked(
     let recents_ready = std::sync::Arc::new(PlayStartGate::default());
     let playback_started_at_ms = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
     let _release_recents_on_return = OpenPlayStartGateOnDrop(recents_ready.clone());
-    // Every tracker tail publishes a refresh after its final sampled server
-    // check-in. That keeps quit/error progress current; a joined clean EOF gets
-    // a second, authoritative refresh from the async dispatcher after exact-
-    // session completion curation and any backend-owned successor start.
-    // Payloads carry ids only — never URLs or tokens.
-    let on_end: Option<playback::EndNotify> = {
-        use tauri::Emitter;
-        let app = state.app_handle.get().cloned();
-        let source_id = src.id().to_string();
-        let item_key = item.rating_key.clone();
-        let watch_key = item.watch_key.clone();
-        let watch_backings = watched_state_backings(item);
-        let media_type = item.media_type.clone();
-        let session_id = session_id.to_string();
-        let recents_ready = recents_ready.clone();
-        let playback_started_at_ms = playback_started_at_ms.clone();
-        let advance = state.playback_advance.clone();
-        let transcode_slot = state.active_transcode.clone();
-        let transcode_session = transcode_session.clone();
-        Some(std::sync::Arc::new(move |position_ms: u64| {
-            // Stop the server-side transcode first: it costs the user's server
-            // real work, and the recents/event bookkeeping below must not be
-            // able to skip it by returning early. This runs on the tracker's
-            // own thread, outside any runtime, so it BLOCKS until the DELETE
-            // lands or its deadline expires rather than detaching a task the
-            // process may outlive.
-            if let Some(session) = transcode_session.as_deref() {
-                if let Some(record) = take_active_transcode(&transcode_slot, session) {
-                    stop_transcode_record_blocking(record);
-                }
-            }
-            if !recents_ready.wait_succeeded() {
-                return;
-            }
-            // Stamp Vela's recents BEFORE emitting, so the refresh the event
-            // triggers reads the updated list. Runs on the tracker thread —
-            // synchronous config I/O is fine there.
-            let now_ms = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_millis() as u64)
-                .unwrap_or(0);
-            let key = item_key.clone();
-            let finishing_session = session_id.clone();
-            let _ = config::update(move |cfg| {
-                crate::recents::finish_session(cfg, &key, &finishing_session, position_ms, now_ms);
-                Ok(())
-            });
-            if let Some(app) = &app {
-                let _ = app.emit(
-                    "playback-ended",
-                    serde_json::json!({ "sourceId": source_id, "itemKey": item_key.clone() }),
-                );
-            }
-            advance.mark_ended(PlaybackCompletion {
-                session_id: session_id.clone(),
-                item_key: item_key.clone(),
-                watch_key: watch_key.clone(),
-                started_at_ms: playback_started_at_ms.load(Ordering::SeqCst),
-                watch_backings: watch_backings.clone(),
-                media_type: media_type.clone(),
-            });
-        }) as playback::EndNotify)
-    };
-    let progress = resolved.progress;
-    let child_slot = state.current_child.clone();
-    let shutting_down = state.shutting_down.clone();
-    let advance = state.playback_advance.clone();
-    let playback_session = session_id.to_string();
-    let played = if let Some(error) = prior_include_error {
-        Err(error)
-    } else {
-        tauri::async_runtime::spawn_blocking(move || {
-            playback::play(
-                &spec,
-                progress,
-                &child_slot,
-                &shutting_down,
-                &advance,
-                playback_session,
-                on_end,
-            )
-        })
-        .await
-        .map_err(|e| format!("playback task failed: {e}"))
-        .and_then(|r| r)
-    };
-    let recent = item.clone();
-    let recent_session = session_id.to_string();
-    let completion_started_at_ms = playback_started_at_ms.clone();
-    let launched_window_session = PlaybackWindowSession {
-        session_id: session_id.to_string(),
-        observation: window_observation,
-    };
-    let played = after_successful_play(played, || {
-        *state
-            .playback_window_session
+
+    // What starting the play consists of, once its session is installed:
+    // stop the previous player, register a transcode, start the player.
+    // WRITTEN here, RUN below. It is a block of its own, built before the
+    // installation and awaited right after it, for one reason: ONE place
+    // undoes the installation when the play does not start (the `Err` arm
+    // below), and a failure must not be able to leave this function between
+    // the two. Inside this block a `?` or a `return` leaves the block, with
+    // a message that arm receives. Between the installation and the arm
+    // there is then a single line, which cannot fail (review finding sel-1).
+    let launch = async {
+        // Cancel the prior tracker and terminate the prior mpv so we never run two
+        // players. The kill is a non-blocking syscall; the reap is handed to the
+        // periodic reaper via reap_queue.
+        if let Some(prev) = state
+            .tracking_stop
             .lock()
-            .unwrap_or_else(|e| e.into_inner()) = Some(launched_window_session);
-        let started_at_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|duration| duration.as_millis() as u64)
-            .unwrap_or(0);
-        completion_started_at_ms.store(started_at_ms, Ordering::SeqCst);
-        if let Err(e) = config::update(move |cfg| {
-            crate::recents::record_play_start(
-                cfg,
-                recent,
-                start_from_beginning,
-                recent_session,
-                started_at_ms,
-            );
-            Ok(())
-        }) {
-            eprintln!("vela: couldn't record started playback: {e}");
+            .unwrap_or_else(|e| e.into_inner())
+            .take()
+        {
+            prev.store(true, Ordering::Relaxed);
         }
-    });
-    let stop = match played {
-        Ok(stop) => stop,
-        Err(message) => {
-            // mpv never started, so no tracker tail will ever run: this is the
-            // only chance to stop what the resolve already committed us to.
-            if let Some(session) = transcode_session.as_deref() {
-                if let Some(record) = take_active_transcode(&state.active_transcode, session) {
-                    stop_transcode_record(record).await;
+        let prev_child = state
+            .current_child
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
+        let mut prior_include_error = None;
+        if let Some(mut child) = prev_child {
+            if let Err(error) = child.remove_consumed_header_include() {
+                prior_include_error = Some(error);
+            }
+            let _ = child.kill();
+            state
+                .reap_queue
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(child);
+        }
+
+        // Sources that keep no server-side progress (the local family) resolve
+        // resume_ms 0 — fall back to Vela's own stamped position so a Continue
+        // Watching click actually continues (2026-07-04 hero decision). A server
+        // that supplies a position still wins: it is the watch-state authority.
+        let local_resume_ms = if !start_from_beginning && resolved.resume_ms == 0 {
+            let cfg = config::load_config()
+                .map_err(|_| "could not read Vela settings".to_string())?;
+            crate::recents::resume_stamp_ms(&cfg, &item.rating_key)
+        } else {
+            0
+        };
+        // An Automatic step-down resumes at the position the replaced player had
+        // actually reached — the server's stamp lags it by up to a report interval,
+        // and resuming even a few seconds back is a visible stutter in what should
+        // look like the picture quality changing.
+        let resume_ms = match resume_override_ms {
+            Some(exact) => exact,
+            None => playback_start_ms(start_from_beginning, resolved.resume_ms, local_resume_ms),
+        };
+        // Resolve the bundled mpv autocrop script here (the command layer holds the
+        // AppHandle; `playback::play` does not). Whether it's injected depends on the
+        // `mpv_autocrop` config mode, decided when the launch is described
+        // (`player::launch::build_launch`). `resolve` only computes the
+        // path; `play` existence-checks before use.
+        let resolve_resource = |name: &str| {
+            state.app_handle.get().and_then(|app| {
+                use tauri::Manager;
+                app.path()
+                    .resolve(
+                        format!("mpv-scripts/{name}"),
+                        tauri::path::BaseDirectory::Resource,
+                    )
+                    .ok()
+                    .map(|p| p.to_string_lossy().into_owned())
+            })
+        };
+        let autocrop_script = resolve_resource("autocrop.lua");
+        // Vela's trigger shim rides next to the stock script (auto mode disables
+        // the stock trigger and lets the shim fire detection after a settle
+        // delay — the stock trigger breaks on --start resumes; see the shim).
+        let autocrop_shim = resolve_resource("vela-autocrop.lua");
+        // Vela's own crop script, the only one a play in Vela's own window
+        // loads (same mode, same existence check when the launch is described).
+        let crop_script = resolve_resource("vela-crop.lua");
+        // Own the session in app state from here on. The end callback alone is not
+        // enough: app exit kills mpv and returns without waiting for any tracker
+        // tail, so a teardown that only exists inside that callback — or in a task
+        // detached from it — can be lost with the runtime and leave an encoder
+        // running on the user's server (finding `tr-4`). Registering here also
+        // covers the launch-failure path below, which never reaches the callback.
+        if let Some(session) = transcode_session.clone() {
+            if let Some(replaced) = register_active_transcode(&state.active_transcode, &src, session) {
+                // A play that supersedes another must stop the encoder it
+                // supersedes; the old tracker's tail can no longer claim it.
+                stop_transcode_record(replaced).await;
+            }
+        }
+        let markers_script = resolve_resource("vela-markers.lua");
+        // Keep only the kinds the user actually enabled: the script must never be
+        // handed a range it is not allowed to act on.
+        let markers: Vec<crate::source::MediaMarker> = resolved
+            .markers
+            .into_iter()
+            .filter(|marker| !skip_policy_for(marker.kind, &skip_policies).is_off())
+            .collect();
+        // The player chosen above runs this play (decisions D1 and D3 of
+        // `.agents/plans/embedded-player.md`). A fallback never fails the
+        // play; it is explained once, in one line, on the player that did
+        // start.
+        *state.active_playback_player.lock().await = Some((session_id.to_string(), player_choice.kind));
+        // What this play does about explaining a fallback: once per run of Vela,
+        // and never from an automatic relaunch (`player::FallbackNotices::plan`).
+        let notice_plan = state
+            .embedded_fallback_notices
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .plan(player.is_none(), player_choice.fallback.as_ref());
+        // A notice the launch already carries wins; the explanation then stays
+        // due for a later play.
+        if let Some(reason) = &notice_plan.explain {
+            // Once per reason, like the line on screen: the on-screen line is
+            // short and gone in two seconds, and this is where to look later.
+            eprintln!(
+                "vela: playing in the external player: {}",
+                reason.notice()
+            );
+        }
+        let explained = notice_plan.explain.filter(|_| osd_notice.is_none());
+        let fallback_notice = explained.as_ref().map(|reason| reason.notice());
+        // The user has been told only once the line has really reached the
+        // player. It is sent a moment after the player starts, and a play that is
+        // replaced before then never shows it: that explanation stays due.
+        let told_when_shown = |reason: crate::player::EmbeddedUnavailable| {
+            let notices = state.embedded_fallback_notices.clone();
+            std::sync::Arc::new(move || {
+                notices
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .explained(&reason);
+            }) as playback::NoticeShown
+        };
+        let on_notice_shown = explained.map(told_when_shown);
+        // D3, the last case: the embedded player could run when asked, a
+        // moment ago, and cannot start this play after all. `playback::play`
+        // then starts the play in the external player, and this is what the
+        // play says about it: the same one line, under the same once-per-run
+        // rule, as for a play that was given the external player to begin
+        // with.
+        let if_embedded_cannot_start = match player_choice.kind {
+            crate::player::PlayerKind::External => playback::EmbeddedFallback::default(),
+            crate::player::PlayerKind::Embedded => {
+                let explain = state
+                    .embedded_fallback_notices
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .plan(
+                        player.is_none(),
+                        Some(&crate::player::EmbeddedUnavailable::StartFailed),
+                    )
+                    .explain;
+                playback::EmbeddedFallback {
+                    notice: explain.as_ref().map(|reason| reason.notice()),
+                    on_notice_shown: explain.map(told_when_shown),
                 }
             }
-            // The old player has already been terminated. Restore its cursor
-            // bookkeeping for the established failure contract, but never
-            // re-authorize its dead session for delayed continuation work.
-            clear_playback_session_if(state, session_id).await;
-            let mut cursor = state.playlist_cursor.lock().await;
-            if cursor
-                .as_ref()
-                .is_none_or(|current| current.session_id == session_id)
-            {
-                *cursor = previous_cursor;
-            }
-            return Err(PlayFailure::fatal(message));
+        };
+        // Whether the player checks a certificate for this play: an `https`
+        // stream with the check on (`mpv_tls_verify`). Only then is a play
+        // that ended before it was seen to start reported as one whose
+        // certificate may have been refused; any other early end is
+        // reported as it always was.
+        let certificate_checked = playback_certificate_checked(certificate_check_on, &resolved.url);
+        let spec = playback::PlaySpec {
+            player: player_choice.kind,
+            url: resolved.url,
+            title: item.title.clone(),
+            http_headers: resolved.http_headers,
+            start_seconds: resume_ms as f64 / 1000.0,
+            autocrop_script,
+            autocrop_shim,
+            crop_script,
+            inherited_window_state,
+            screen_name,
+            window_observation: window_observation.clone(),
+            markers_script,
+            markers,
+            intro_policy: skip_policies.intro,
+            credits_policy: skip_policies.credits,
+            commercial_policy: skip_policies.commercial,
+            // Automatic only. Whether a lower tier actually exists is NOT checked
+            // here: that needs a decision round trip per play, and a verdict is
+            // rare — `apply_step_down` resolves the ladder when one actually
+            // arrives, and declines if there is nowhere to go.
+            step_down: automatic_manages(continues_automatic, &quality).then(|| {
+                let queue = state.step_down.clone();
+                let session = session_id.to_string();
+                let already = steps_taken;
+                let running_quality = quality.clone();
+                std::sync::Arc::new(move |position_ms: u64, reason| {
+                    queue.request(StepDownRequest {
+                        session_id: session.clone(),
+                        position_ms,
+                        reason,
+                        steps_taken: already,
+                        current_quality: running_quality.clone(),
+                    });
+                }) as playback::StepDownNotify
+            }),
+            duration: item.duration_ms.map(Duration::from_millis),
+            osd_notice: osd_notice.or(fallback_notice),
+            on_notice_shown,
+            if_embedded_cannot_start,
+            steps_taken,
+        };
+        // Every tracker tail publishes a refresh after its final sampled server
+        // check-in. That keeps quit/error progress current; a joined clean EOF gets
+        // a second, authoritative refresh from the async dispatcher after exact-
+        // session completion curation and any backend-owned successor start.
+        // This first one also names its session and says whether the run is
+        // over (`end_is_run_over`): an end that is not clean reaches no
+        // dispatcher, and the page leaves the run's fullscreen on it.
+        // Payloads carry ids and flags only — never URLs or tokens.
+        let on_end: Option<playback::EndNotify> = {
+            use tauri::Emitter;
+            let latest_window = state.playback_window_session.clone();
+            let app = state.app_handle.get().cloned();
+            let source_id = src.id().to_string();
+            let item_key = item.rating_key.clone();
+            let watch_key = item.watch_key.clone();
+            let watch_backings = watched_state_backings(item);
+            let media_type = item.media_type.clone();
+            let session_id = session_id.to_string();
+            let recents_ready = recents_ready.clone();
+            let playback_started_at_ms = playback_started_at_ms.clone();
+            let advance = state.playback_advance.clone();
+            let transcode_slot = state.active_transcode.clone();
+            let transcode_session = transcode_session.clone();
+            Some(std::sync::Arc::new(move |end: playback::PlaybackEnd| {
+                let position_ms = end.position_ms;
+                // Stop the server-side transcode first: it costs the user's server
+                // real work, and the recents/event bookkeeping below must not be
+                // able to skip it by returning early. This runs on the tracker's
+                // own thread, outside any runtime, so it BLOCKS until the DELETE
+                // lands or its deadline expires rather than detaching a task the
+                // process may outlive.
+                if let Some(session) = transcode_session.as_deref() {
+                    if let Some(record) = take_active_transcode(&transcode_slot, session) {
+                        stop_transcode_record_blocking(record);
+                    }
+                }
+                if !recents_ready.wait_succeeded() {
+                    return;
+                }
+                // Stamp Vela's recents BEFORE emitting, so the refresh the event
+                // triggers reads the updated list. Runs on the tracker thread —
+                // synchronous config I/O is fine there.
+                let now_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis() as u64)
+                    .unwrap_or(0);
+                let key = item_key.clone();
+                let finishing_session = session_id.clone();
+                // How the play left its window, kept for the next run of Vela
+                // in the same write as the recents stamp: at the end of a play
+                // and never on a timer. What the window-state reader has
+                // applied by now depends on how the play ended:
+                // - The play ended by itself (mpv quit or reached its end):
+                //   the tracker's tail or the end watcher got here on the
+                //   reader's `done`, which the reader sets only after it read
+                //   mpv's connection to its end. This is all the play reported.
+                // - mpv ended before the reader had connected: the reader gave
+                //   up and set `done`; the opening flags and size are handed
+                //   on, and the settings keep what they had for unknown
+                //   fields, including the unobserved screen (pw-9).
+                // - The play was cancelled by a newer play: the tail and the
+                //   end watcher got here on the stop flag, which does not wait
+                //   for the reader. The reader may still be running, with
+                //   lines unread; it applies at most the line it is reading
+                //   and stops at the next. A change it applies after this
+                //   write is saved only by a later write: Vela's exit (which
+                //   waits for this reader while this is still the last
+                //   external play, review finding pw-8), or, when the newer
+                //   play runs in mpv's own window, that play's end or Vela's
+                //   exit, which save the newer play's window instead. A change
+                //   it never reads is lost, and when no play in mpv's own
+                //   window follows (the newer one is embedded, or fails to
+                //   start) the window saved here stays saved after Vela exits.
+                // - Vela is quitting: the exit kills mpv, hands the window
+                //   over (waiting for this reader) and only then sets the stop
+                //   flag, so a connected reader reaches the end of the killed
+                //   mpv's connection first, as in the first case.
+                // The start gate above has opened, so a play that started has
+                // been published. Whether it is still the last external play
+                // is decided inside the write.
+                let _ = write_play_end(
+                    |change| config::update(change),
+                    &latest_window,
+                    &session_id,
+                    move |cfg| {
+                        crate::recents::finish_session(cfg, &key, &finishing_session, position_ms, now_ms);
+                    },
+                );
+                if let Some(app) = &app {
+                    use tauri::Manager;
+                    // A plain thread outside any runtime: the active
+                    // session's lock is waited for here, and held only to
+                    // read it.
+                    let run_over = tracker_end_is_run_over(
+                        &app.state::<AppState>(),
+                        advance.saw_eof(&session_id),
+                        &session_id,
+                    );
+                    let _ = app.emit(
+                        "playback-ended",
+                        serde_json::json!({
+                            "sourceId": source_id,
+                            "itemKey": item_key.clone(),
+                            "sessionId": session_id.clone(),
+                            "runOver": run_over,
+                            "failedToStart": run_over && end.failed_to_start && certificate_checked,
+                        }),
+                    );
+                }
+                advance.mark_ended(PlaybackCompletion {
+                    session_id: session_id.clone(),
+                    item_key: item_key.clone(),
+                    watch_key: watch_key.clone(),
+                    started_at_ms: playback_started_at_ms.load(Ordering::SeqCst),
+                    watch_backings: watch_backings.clone(),
+                    media_type: media_type.clone(),
+                });
+            }) as playback::EndNotify)
+        };
+        let progress = resolved.progress;
+        let child_slot = state.current_child.clone();
+        let shutting_down = state.shutting_down.clone();
+        let advance = state.playback_advance.clone();
+        let playback_session = session_id.to_string();
+        let embedded_launcher =
+            crate::player::embedded_launcher(&state.embedded, state.app_handle.get());
+        // The player view's state; `play` hands it to an embedded play only.
+        let on_state = state.app_handle.get().cloned().map(|app| {
+            std::sync::Arc::new(move |player_state: &crate::player::report::PlayerState| {
+                let _ = tauri::Emitter::emit(&app, crate::player::report::EVENT, player_state);
+            }) as crate::player::report::StateNotify
+        });
+        let played = if let Some(error) = prior_include_error {
+            Err(error)
+        } else {
+            tauri::async_runtime::spawn_blocking(move || {
+                playback::play(
+                    &spec,
+                    progress,
+                    playback::Players {
+                        slot: &child_slot,
+                        shutting_down: &shutting_down,
+                        embedded: embedded_launcher.as_deref(),
+                    },
+                    &advance,
+                    playback_session,
+                    on_end,
+                    on_state,
+                )
+            })
+            .await
+            .map_err(|e| format!("playback task failed: {e}"))
+            .and_then(|r| r)
+        };
+        // Which player is running the play. Not always the one chosen: see
+        // `if_embedded_cannot_start` above. What is recorded about the play
+        // follows the player that started.
+        let fell_back = played
+            .as_ref()
+            .is_ok_and(|started| started.player != player_choice.kind);
+        if fell_back {
+            *state.active_playback_player.lock().await =
+                Some((session_id.to_string(), crate::player::PlayerKind::External));
         }
+        let played = played.map(|started| started.stop);
+        let started_player = if fell_back {
+            crate::player::PlayerKind::External
+        } else {
+            player_choice.kind
+        };
+        let recent = item.clone();
+        let recent_session = session_id.to_string();
+        let completion_started_at_ms = playback_started_at_ms.clone();
+        let launched_window_session = PlaybackWindowSession {
+            session_id: session_id.to_string(),
+            player: started_player,
+            observation: window_observation,
+        };
+        let window_slot = &state.playback_window_session;
+        let played = publish_started_play(played, window_slot, launched_window_session, || {
+            // Only a play that started, in the player it was given, has shown
+            // that there is nothing to fall back from. (An explanation is
+            // recorded when it is shown, above.)
+            if notice_plan.forget_when_started && !fell_back {
+                state
+                    .embedded_fallback_notices
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .forget();
+            }
+            let started_at_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_millis() as u64)
+                .unwrap_or(0);
+            completion_started_at_ms.store(started_at_ms, Ordering::SeqCst);
+            if let Err(e) = config::update(move |cfg| {
+                crate::recents::record_play_start(
+                    cfg,
+                    recent,
+                    start_from_beginning,
+                    recent_session,
+                    started_at_ms,
+                );
+                Ok(())
+            }) {
+                eprintln!("vela: couldn't record started playback: {e}");
+            }
+        });
+        played
     };
+
+    // A failed resolve leaves the currently-playing context intact. Only once
+    // the replacement has a real stream do we provisionally install its
+    // context (`install_and_launch`). The play lock keeps the expected session
+    // valid between the check above and this installation.
+    let cursor = playlist.map(|location| PlaylistCursor {
+        owner: location.owner,
+        playlist_id: location.playlist_id,
+        entry_id: location.entry_id,
+        index: location.index,
+        session_id: session_id.to_string(),
+    });
+    let stop = install_and_launch(
+        state,
+        PlayInstall {
+            session_id,
+            item,
+            run_kind,
+            affinity_source_id: next_affinity,
+            cursor,
+            transcode_session: transcode_session.as_deref(),
+        },
+        launch,
+        |end| report_playback_ended(state, end),
+    )
+    .await
+    .map_err(PlayFailure::launch_failed)?;
     *state
         .tracking_stop
         .lock()
@@ -5201,6 +6471,150 @@ async fn play_by_key_locked(
     Ok(PlayCommandResult::Started {
         session_id: session_id.to_string(),
     })
+}
+
+/// The page says where it has put the video, in CSS pixels relative to the
+/// page. Kept even when nothing is playing: the next embedded play starts
+/// there. Not `async` on purpose, so that it runs on the window's own thread,
+/// the only one that may move the video surface.
+#[tauri::command]
+pub fn player_set_rect(
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) {
+    #[cfg(target_os = "linux")]
+    {
+        // `as` saturates and turns a NaN into 0; the host cuts the result to
+        // the page.
+        let reported = crate::player::embedded::Rect {
+            x: x.round() as i32,
+            y: y.round() as i32,
+            width: width.round() as i32,
+            height: height.round() as i32,
+        };
+        let slot = state
+            .current_child
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let session = match slot.as_ref() {
+            Some(crate::player::PlayerHandle::Embedded(session)) => Some(session),
+            _ => None,
+        };
+        state.embedded.place(&app, reported, session);
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (x, y, width, height, app, state);
+    }
+}
+
+/// The page has loaded. In embedded window mode this is the proof that the
+/// window came up well enough for the user to reach Settings (see
+/// `player::embedded::startup`); otherwise it means nothing.
+#[tauri::command]
+pub fn player_window_ready() {
+    #[cfg(target_os = "linux")]
+    crate::player::embedded::startup::window_came_up();
+}
+
+/// The player view's controls: one of ten commands to the embedded play the
+/// view belongs to (`crate::player::control`). A view left over from an
+/// earlier play reaches nothing, and an external player is never driven or
+/// stopped from here. The arguments are plain JSON so that every refusal is
+/// one of Vela's own fixed texts. All of it runs on the blocking pool: it
+/// takes the player slot's lock and may wait on mpv's socket.
+#[tauri::command]
+pub async fn player_command(
+    session_id: serde_json::Value,
+    name: serde_json::Value,
+    args: serde_json::Value,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let slot = state.current_child.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::player::control::command(&slot, &session_id, &name, &args)
+    })
+    .await
+    .unwrap_or_else(|_| Err(crate::player::control::NOT_RUNNING.to_string()))
+}
+
+/// The player view's fullscreen: on only for the running embedded play, off
+/// always. What the window really did arrives as `window-fullscreen`
+/// (`player::embedded::follow_fullscreen`); Tauri's own answer is only the
+/// last request. Whose play it is, is asked under the slot's lock, and the
+/// page's claim on fullscreen is recorded under that same lock
+/// (`AppState::player_fullscreen_held`, read by a launch that failed, review
+/// finding pc-2); the window is asked after that lock is let go of, from the
+/// blocking pool.
+///
+/// Answers whether the page holds the player's fullscreen once the request is
+/// dealt with: a refused "on" leaves the claim as it was. The page takes its
+/// own claim from this answer, so that its claim and this copy agree, and
+/// sends its requests one at a time (`fullscreenRequests` in
+/// `src/lib/playerControls.ts`), each after the last one's answer, so the
+/// window is asked in the order the page asked (review finding pc-2).
+#[tauri::command]
+pub async fn player_fullscreen(
+    session_id: serde_json::Value,
+    on: serde_json::Value,
+    app: tauri::AppHandle,
+) -> bool {
+    tauri::async_runtime::spawn_blocking(move || {
+        use tauri::Manager;
+        let on = on.as_bool() == Some(true);
+        let state = app.state::<AppState>();
+        let claim = claim_player_fullscreen(&state, &session_id, on);
+        if claim.ask_window {
+            if let Some(window) = app.webview_windows().into_values().next() {
+                let _ = window.set_fullscreen(on);
+            }
+        }
+        claim.held
+    })
+    .await
+    .unwrap_or(false)
+}
+
+/// What `player_fullscreen` does with one request.
+#[derive(Debug, PartialEq, Eq)]
+struct FullscreenClaim {
+    /// Whether the window is to be asked.
+    ask_window: bool,
+    /// Whether the page holds the player's fullscreen after the request.
+    held: bool,
+}
+
+/// The page's claim on the player's fullscreen, as `player_fullscreen` keeps
+/// it: on only for the running embedded play of `session_id`, recorded with
+/// the slot's lock held; off always. A refused "on" changes nothing.
+fn claim_player_fullscreen(
+    state: &AppState,
+    session_id: &serde_json::Value,
+    on: bool,
+) -> FullscreenClaim {
+    if !on {
+        state.player_fullscreen_held.store(false, Ordering::SeqCst);
+        return FullscreenClaim {
+            ask_window: true,
+            held: false,
+        };
+    }
+    let mut slot = state.current_child.lock().unwrap_or_else(|e| e.into_inner());
+    if !crate::player::control::is_running_embedded_play(&mut slot, session_id) {
+        return FullscreenClaim {
+            ask_window: false,
+            held: state.player_fullscreen_held.load(Ordering::SeqCst),
+        };
+    }
+    state.player_fullscreen_held.store(true, Ordering::SeqCst);
+    FullscreenClaim {
+        ask_window: true,
+        held: true,
+    }
 }
 
 /// Play one item, either resuming its resolved position or explicitly starting
@@ -5236,6 +6650,7 @@ pub async fn play_item(
             osd_notice: None,
             steps_taken: 0,
             continues_automatic: false,
+            player: None,
         },
     )
     .await
@@ -5267,47 +6682,36 @@ pub async fn resolve_playback_source_choice(
     source_id: String,
     state: State<'_, AppState>,
 ) -> Result<PlayCommandResult, String> {
-    let _play = state.play_lock.lock().await;
-    let pending = state
-        .playback_choices
-        .lock()
-        .await
-        .take_at(&request_id, Instant::now())
-        .ok_or_else(|| "this source choice expired or was superseded".to_string())?;
-    if !pending
-        .request
-        .choices
-        .iter()
-        .any(|choice| choice.source_id == source_id)
-    {
-        return Err("that source was not offered for this playback request".to_string());
-    }
-    match play_by_key_locked(
-        &state,
-        PlayLaunchRequest {
-            item: &pending.item,
-            start_from_beginning: pending.start_from_beginning,
-            session_id: &pending.session_id,
-            playlist: pending.playlist,
-            replace_session: pending.replace_session.as_deref(),
-            run_kind: pending.run_kind,
-            explicit_source_id: Some(&source_id),
-            persist_explicit_choice: false,
-            quality_override: None,
-            resume_override_ms: None,
-            osd_notice: None,
-            steps_taken: 0,
-            continues_automatic: false,
+    let state: &AppState = &state;
+    resolve_choice(
+        state,
+        &request_id,
+        &source_id,
+        |pending, source_id| async move {
+            play_by_key_locked(
+                state,
+                PlayLaunchRequest {
+                    item: &pending.item,
+                    start_from_beginning: pending.start_from_beginning,
+                    session_id: &pending.session_id,
+                    playlist: pending.playlist,
+                    replace_session: pending.replace_session.as_deref(),
+                    run_kind: pending.run_kind,
+                    explicit_source_id: Some(&source_id),
+                    persist_explicit_choice: false,
+                    quality_override: None,
+                    resume_override_ms: None,
+                    osd_notice: None,
+                    steps_taken: 0,
+                    continues_automatic: false,
+                    player: None,
+                },
+            )
+            .await
         },
+        |end| report_playback_ended(state, end),
     )
     .await
-    {
-        Ok(result) => Ok(result),
-        Err(failure) if failure.kind == PlayFailureKind::Superseded => {
-            Ok(PlayCommandResult::Superseded)
-        }
-        Err(failure) => Err(failure.message),
-    }
 }
 
 #[tauri::command]
@@ -5315,23 +6719,8 @@ pub async fn cancel_playback_source_choice(
     request_id: String,
     state: State<'_, AppState>,
 ) -> Result<bool, String> {
-    let _play = state.play_lock.lock().await;
-    let Some(pending) = state
-        .playback_choices
-        .lock()
-        .await
-        .take_at(&request_id, Instant::now())
-    else {
-        return Ok(false);
-    };
-    if let Some(expected) = pending.replace_session.as_deref() {
-        clear_playlist_cursor_if(&state, expected).await;
-        let mut run = state.playback_run.lock().await;
-        if run.as_ref().is_some_and(|run| run.session_id == expected) {
-            *run = None;
-        }
-    }
-    Ok(true)
+    let state: &AppState = &state;
+    Ok(cancel_choice(state, &request_id, |end| report_playback_ended(state, end)).await)
 }
 
 #[tauri::command]
@@ -5898,6 +7287,7 @@ async fn play_playlist_entries(
                 osd_notice: None,
                 steps_taken: 0,
                 continues_automatic: false,
+            player: None,
             },
         )
         .await
@@ -5982,6 +7372,7 @@ async fn play_server_playlist_entries(
                 osd_notice: None,
                 steps_taken: 0,
                 continues_automatic: false,
+            player: None,
             },
         )
         .await
@@ -6061,39 +7452,126 @@ fn emit_source_choice_required(state: &AppState, request_id: &str) {
     }
 }
 
-/// Handle one fully-finished clean EOF. Returns true only when the exact active
-/// single item or playlist genuinely ended, authorizing the frontend to apply
-/// Continue Playing. The UUID prevents queued older work from replacing a
-/// newer manual play.
-pub(crate) async fn advance_playlist(state: &AppState, ended_session: &str) -> bool {
+/// What follows a clean end of file, as [`advance_playlist`] leaves it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AfterCleanEnd {
+    /// The run genuinely ended: the frontend may apply Continue Playing.
+    ContinuePlaying,
+    /// A successor was started or is being chosen, or another play replaced
+    /// this one.
+    Successor,
+    /// Nothing follows and Continue Playing does not apply: the backend could
+    /// not start the run's successor, or no play is active at all (a launch
+    /// that replaced the ended play failed and was undone). The run is over.
+    RunOver,
+}
+
+/// The completion dispatcher's `playback-ended` for a clean end, once
+/// [`advance_playlist`] has answered `after`: its ids, whether the run is over
+/// (`RunOver`), and whether a successor is coming (`Successor`: another play
+/// is active, or one is being chosen). The page leaves the player's
+/// fullscreen on the first and keeps it on the second, also while that play
+/// has no view yet or plays in mpv's own window (review finding pc-2); a
+/// choice that then ends without a play reports the end of the run itself
+/// (`report_choice_end`). `successor` is always sent, true or false, and only
+/// in this report: it is how the page tells the dispatcher's report from a
+/// play's own (`endLeavesPlayerFullscreen`). Ids and flags only: never a URL,
+/// a title or a path.
+pub(crate) fn clean_end_report(completion: &PlaybackCompletion, after: AfterCleanEnd) -> serde_json::Value {
+    let source_id = completion
+        .item_key
+        .split_once(':')
+        .map(|(source, _)| source)
+        .unwrap_or_default();
+    serde_json::json!({
+        "sourceId": source_id,
+        "itemKey": completion.item_key.clone(),
+        "sessionId": completion.session_id.clone(),
+        "runOver": after == AfterCleanEnd::RunOver,
+        "successor": after == AfterCleanEnd::Successor,
+    })
+}
+
+/// The run's successor could not be started: the run is over unless another
+/// play has replaced the ended one meanwhile.
+async fn successor_failed(state: &AppState, ended_session: &str) -> AfterCleanEnd {
+    clear_playlist_cursor_if(state, ended_session).await;
+    let active = state.active_playback_session.lock().await;
+    if end_is_run_over(false, active.as_deref(), ended_session) {
+        AfterCleanEnd::RunOver
+    } else {
+        AfterCleanEnd::Successor
+    }
+}
+
+/// The ended play is not the active one: another play is, and it is the
+/// successor; or no play is active at all, and nothing is coming. A successor
+/// the page would start names the ended play as the one it replaces and would
+/// be refused, so Continue Playing does not apply either (review finding
+/// pc-2).
+async fn replaced_or_over(state: &AppState) -> AfterCleanEnd {
+    if state.active_playback_session.lock().await.is_some() {
+        AfterCleanEnd::Successor
+    } else {
+        AfterCleanEnd::RunOver
+    }
+}
+
+async fn finish_or_replaced(state: &AppState, ended_session: &str) -> AfterCleanEnd {
+    if finish_sequence_if_current(state, ended_session).await {
+        AfterCleanEnd::ContinuePlaying
+    } else {
+        replaced_or_over(state).await
+    }
+}
+
+/// A successor the dispatcher asked for has been started, or is being
+/// chosen; or it was refused because the ended play is no longer the active
+/// one (`replaced_or_over`). A choice keeps the run going while the user
+/// makes it; if it ends without a play, `cancel_choice` or `resolve_choice`
+/// reports the end of the run (review finding pc-2).
+async fn after_successor(state: &AppState, result: PlayCommandResult) -> AfterCleanEnd {
+    match result {
+        PlayCommandResult::Started { .. } => AfterCleanEnd::Successor,
+        PlayCommandResult::Superseded => replaced_or_over(state).await,
+        PlayCommandResult::SourceChoiceRequired { request } => {
+            emit_source_choice_required(state, &request.request_id);
+            AfterCleanEnd::Successor
+        }
+    }
+}
+
+/// Handle one fully-finished clean EOF. Says `ContinuePlaying` only when the
+/// exact active single item or playlist genuinely ended, authorizing the
+/// frontend to apply Continue Playing, and `RunOver` when a playlist's
+/// successor could not be started or no play is active any more. The UUID
+/// prevents queued older work from replacing a newer manual play.
+pub(crate) async fn advance_playlist(state: &AppState, ended_session: &str) -> AfterCleanEnd {
     if state
         .playback_choices
         .lock()
         .await
-        .has_manual_pending(Instant::now())
+        .mark_manual_pending(Instant::now())
     {
-        return false;
+        return AfterCleanEnd::Successor;
     }
     let cursor = state.playlist_cursor.lock().await.clone();
     let Some(cursor) = cursor else {
-        return finish_sequence_if_current(state, ended_session).await;
+        return finish_or_replaced(state, ended_session).await;
     };
     if cursor.session_id != ended_session {
-        return false;
+        return replaced_or_over(state).await;
     };
     if cursor.owner == PlaylistOwner::Server {
         let items = match fetch_server_playlist_items(state, &cursor.playlist_id).await {
             Ok(items) => items,
-            Err(_) => {
-                clear_playlist_cursor_if(state, ended_session).await;
-                return false;
-            }
+            Err(_) => return successor_failed(state, ended_session).await,
         };
         let next_index = cursor.index.saturating_add(1);
         if next_index >= items.len() {
-            return finish_sequence_if_current(state, ended_session).await;
+            return finish_or_replaced(state, ended_session).await;
         }
-        let result = match play_server_playlist_entries(
+        return match play_server_playlist_entries(
             state,
             cursor.playlist_id,
             items,
@@ -6103,26 +7581,17 @@ pub(crate) async fn advance_playlist(state: &AppState, ended_session: &str) -> b
         )
         .await
         {
-            Ok(PlayCommandResult::Started { .. } | PlayCommandResult::Superseded) => false,
-            Ok(PlayCommandResult::SourceChoiceRequired { request }) => {
-                emit_source_choice_required(state, &request.request_id);
-                false
-            }
+            Ok(result) => after_successor(state, result).await,
             Err(error) => {
                 eprintln!("vela: server playlist auto-advance stopped: {error}");
-                clear_playlist_cursor_if(state, ended_session).await;
-                false
+                successor_failed(state, ended_session).await
             }
         };
-        return result;
     }
     let lookup = cursor.playlist_id.clone();
     let playlist = match playlist_store(move || crate::playlists::get(&lookup)).await {
         Ok(playlist) => playlist,
-        Err(_) => {
-            clear_playlist_cursor_if(state, ended_session).await;
-            return false;
-        }
+        Err(_) => return successor_failed(state, ended_session).await,
     };
     let next_index = next_playlist_index(
         playlist.items.iter().map(|entry| entry.id.as_str()),
@@ -6130,7 +7599,7 @@ pub(crate) async fn advance_playlist(state: &AppState, ended_session: &str) -> b
         &cursor,
     );
     if next_index >= playlist.items.len() {
-        return finish_sequence_if_current(state, ended_session).await;
+        return finish_or_replaced(state, ended_session).await;
     }
     // Use the same freshly-read snapshot that produced `next_index`. A second
     // read here would let an edit between the reads invalidate the stable-entry
@@ -6145,15 +7614,10 @@ pub(crate) async fn advance_playlist(state: &AppState, ended_session: &str) -> b
     )
     .await
     {
-        Ok(PlayCommandResult::Started { .. } | PlayCommandResult::Superseded) => false,
-        Ok(PlayCommandResult::SourceChoiceRequired { request }) => {
-            emit_source_choice_required(state, &request.request_id);
-            false
-        }
+        Ok(result) => after_successor(state, result).await,
         Err(error) => {
             eprintln!("vela: playlist auto-advance stopped: {error}");
-            clear_playlist_cursor_if(state, ended_session).await;
-            false
+            successor_failed(state, ended_session).await
         }
     }
 }
@@ -6188,6 +7652,26 @@ fn after_successful_play<T>(
         on_success();
     }
     result
+}
+
+/// What a play that started leaves behind: its window, in the record the next
+/// play opens its window from (`PlaybackWindowRecord::publish`), then
+/// `on_success`. A play that did not start publishes nothing, so the record
+/// of the plays that did start stays in place through any number of failed
+/// launches.
+fn publish_started_play<T>(
+    played: Result<T, String>,
+    window_session: &std::sync::Mutex<PlaybackWindowRecord>,
+    launched: PlaybackWindowSession,
+    on_success: impl FnOnce(),
+) -> Result<T, String> {
+    after_successful_play(played, || {
+        window_session
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .publish(launched);
+        on_success();
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -6341,9 +7825,29 @@ fn attr(xml: &str, name: &str) -> Option<String> {
     }
 }
 
+#[cfg(all(test, target_os = "linux"))]
+#[path = "run_over_tests.rs"]
+mod run_over_tests;
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn playback_certificate_check_requires_both_https_and_the_setting() {
+        for (check_on, url, expected) in [
+            (true, "https://media.invalid/stream", true),
+            (true, "http://media.invalid/stream", false),
+            (false, "https://media.invalid/stream", false),
+            (false, "http://media.invalid/stream", false),
+        ] {
+            assert_eq!(
+                playback_certificate_checked(check_on, url),
+                expected,
+                "certificate checked: setting={check_on}, url={url}"
+            );
+        }
+    }
 
     fn linked_server(name: &str, machine_identifier: &str) -> PlexServer {
         PlexServer {
@@ -6907,6 +8411,7 @@ mod tests {
             session_id: format!("future-{request_id}"),
             playlist: None,
             replace_session: replace_session.map(str::to_string),
+            run_waiting: replace_session.is_some(),
             run_kind: Some(PlaybackRunKind::Series),
         }
     }
@@ -7136,8 +8641,12 @@ mod tests {
         assert_eq!(calls, 1, "a failed launch must not run the side effect");
     }
 
-    #[test]
-    fn automatic_window_state_requires_the_exact_replaced_session() {
+    /// A record of a play that left its window fullscreen, not maximized, on
+    /// DP-1.
+    fn observed_window_session(
+        session_id: &str,
+        player: crate::player::PlayerKind,
+    ) -> PlaybackWindowSession {
         let observation = playback::WindowStateObservation::default();
         observation.apply_ipc_event(&serde_json::json!({
             "event": "property-change",
@@ -7154,63 +8663,1958 @@ mod tests {
             "name": "display-names",
             "data": ["DP-1"]
         }));
-        let current = PlaybackWindowSession {
-            session_id: "completed".to_string(),
+        PlaybackWindowSession {
+            session_id: session_id.to_string(),
+            player,
             observation,
-        };
+        }
+    }
 
-        assert_eq!(
-            inherited_window_state(Some(&current), Some("completed")),
-            playback::PlaybackWindowState {
-                fullscreen: Some(true),
-                maximized: Some(false),
-            }
-        );
-        assert_eq!(
-            inherited_window_state(Some(&current), None),
-            playback::PlaybackWindowState::default(),
-            "manual play must not inherit the current process"
-        );
-        assert_eq!(
-            inherited_window_state(Some(&current), Some("stale")),
-            playback::PlaybackWindowState::default(),
-            "a delayed continuation must not inherit a newer process"
-        );
-        assert_eq!(
-            inherited_window_state(None, Some("completed")),
-            playback::PlaybackWindowState::default()
-        );
-        assert_eq!(
-            inherited_screen_name(Some(&current), Some("completed")).as_deref(),
-            Some("DP-1")
-        );
-        assert_eq!(inherited_screen_name(Some(&current), None), None);
-        assert_eq!(inherited_screen_name(Some(&current), Some("stale")), None);
+    /// The record after these plays started, in this order.
+    fn published<const N: usize>(started: [PlaybackWindowSession; N]) -> PlaybackWindowRecord {
+        let mut record = PlaybackWindowRecord::default();
+        for play in started {
+            record.publish(play);
+        }
+        record
+    }
+
+    /// A play in mpv's own window that left it windowed, not maximized, on
+    /// HDMI-1.
+    fn windowed_session(session_id: &str) -> PlaybackWindowSession {
+        let observation = playback::WindowStateObservation::default();
+        for (name, data) in [
+            ("fullscreen", serde_json::json!(false)),
+            ("window-maximized", serde_json::json!(false)),
+            ("display-names", serde_json::json!(["HDMI-1"])),
+        ] {
+            observation.apply_ipc_event(&serde_json::json!({
+                "event": "property-change",
+                "name": name,
+                "data": data
+            }));
+        }
+        PlaybackWindowSession {
+            session_id: session_id.to_string(),
+            player: crate::player::PlayerKind::External,
+            observation,
+        }
     }
 
     #[test]
-    fn window_session_publication_stays_behind_successful_launch_boundary() {
-        let published = std::sync::Mutex::new(None);
-        let failed_record = PlaybackWindowSession {
-            session_id: "failed".to_string(),
-            observation: playback::WindowStateObservation::default(),
+    fn an_embedded_play_does_not_make_the_setting_apply_again() {
+        // Review finding pw-6, the reviewer's sequence: the setting says
+        // "Full screen" for the first window of a run; the first external
+        // play is left windowed; an embedded play follows; the next external
+        // play opens windowed, as the first external play left its window.
+        // Published the way the launch path publishes.
+        let full_screen = playback::PlaybackWindowState {
+            fullscreen: Some(true),
+            ..Default::default()
         };
-        let result = after_successful_play(Err::<(), _>("spawn failed".to_string()), || {
-            *published.lock().unwrap() = Some(failed_record)
-        });
-        assert_eq!(result, Err("spawn failed".to_string()));
-        assert!(published.lock().unwrap().is_none());
-
-        let successful_record = PlaybackWindowSession {
-            session_id: "launched".to_string(),
-            observation: playback::WindowStateObservation::default(),
-        };
-        after_successful_play(Ok(()), || {
-            *published.lock().unwrap() = Some(successful_record)
-        })
-        .unwrap();
+        let slot = std::sync::Mutex::new(PlaybackWindowRecord::default());
         assert_eq!(
-            published.lock().unwrap().as_ref().unwrap().session_id,
+            opening_window(&slot.lock().unwrap(), full_screen),
+            full_screen,
+            "the first external window of a run follows the setting"
+        );
+        assert_eq!(external_screen(&slot.lock().unwrap(), None).as_deref(), Some(VELAS));
+        publish_started_play(Ok(()), &slot, windowed_session("external"), || {}).unwrap();
+        let embedded = observed_window_session("embedded", crate::player::PlayerKind::Embedded);
+        publish_started_play(Ok(()), &slot, embedded, || {}).unwrap();
+        let record = slot.lock().unwrap();
+        assert_eq!(
+            (opening_window(&record, full_screen), external_screen(&record, None)),
+            (
+                playback::PlaybackWindowState {
+                    fullscreen: Some(false),
+                    maximized: Some(false),
+                    windowed_size: None,
+                },
+                Some("HDMI-1".to_string())
+            ),
+            "an embedded play in between must not erase the last external window"
+        );
+        // The latest play is the embedded one; the window the external play
+        // left is still the one an end or an exit saves for the next run
+        // (this assertion said None before; the attack on pw-6 showed that
+        // this run and the next then disagree).
+        assert_eq!(record.latest().unwrap().session_id, "embedded");
+        assert_eq!(
+            window_to_remember(&record, "external").map(|(_, window, screen)| (window, screen)),
+            Some((
+                opening_window(&record, Default::default()),
+                external_screen(&record, None)
+            ))
+        );
+        assert_eq!(window_to_remember(&record, "embedded"), None);
+    }
+
+    #[test]
+    fn an_external_plays_late_end_after_an_embedded_play_saves_its_window() {
+        // Review finding pw-6, the attack's sequence: an external play is
+        // left windowed on HDMI-1; an embedded play starts before the
+        // external play's end has run. The next mpv window of this run opens
+        // as the external play left it, and so must the next run's first.
+        let settings = HeldSettings::default();
+        let slot = std::sync::Mutex::new(PlaybackWindowRecord::default());
+        publish_started_play(Ok(()), &slot, windowed_session("external"), || {}).unwrap();
+        let embedded = observed_window_session("embedded", crate::player::PlayerKind::Embedded);
+        publish_started_play(Ok(()), &slot, embedded, || {}).unwrap();
+        let in_this_run = external_screen(&slot.lock().unwrap(), None);
+        assert_eq!(in_this_run.as_deref(), Some("HDMI-1"));
+
+        // The embedded play's end saves nothing.
+        write_play_end(|change| settings.update(change), &slot, "embedded", |_| {}).unwrap();
+        assert_eq!(settings.window(), None);
+        // The external play's late end saves its window.
+        write_play_end(|change| settings.update(change), &slot, "external", |_| {}).unwrap();
+        let saved = Some(config::MpvWindow {
+            fullscreen: Some(false),
+            maximized: Some(false),
+            screen: Some("HDMI-1".to_string()),
+            ..Default::default()
+        });
+        assert_eq!(settings.window(), saved, "the next run opens as this run would");
+
+        // Quitting before that end has run saves the same window.
+        let settings = HeldSettings::default();
+        remember_window_on_exit_with(&slot, || settings.read(), |change| settings.update(change));
+        assert_eq!(settings.window(), saved, "quitting saves it too");
+
+        // A newer external play takes over: the older one's end saves nothing.
+        let settings = HeldSettings::default();
+        let newer = observed_window_session("newer", crate::player::PlayerKind::External);
+        publish_started_play(Ok(()), &slot, newer, || {}).unwrap();
+        write_play_end(|change| settings.update(change), &slot, "external", |_| {}).unwrap();
+        assert_eq!(settings.window(), None);
+    }
+
+    #[test]
+    fn a_manual_play_inherits_the_last_observed_window_state() {
+        // Nothing names the session the next play replaces: a manual play
+        // and an automatic successor read the same record.
+        let current = observed_window_session("last", crate::player::PlayerKind::External);
+        assert_eq!(
+            inherited_window_state(&published([current.clone()])),
+            playback::PlaybackWindowState {
+                fullscreen: Some(true),
+                maximized: Some(false),
+                windowed_size: None,
+            }
+        );
+        assert_eq!(
+            external_screen(&published([current]), None).as_deref(),
+            Some("DP-1")
+        );
+    }
+
+    // What these tests said of `inherited_screen_name` (no screen inherited,
+    // so the launch asked for the screen holding Vela's window) they now say
+    // of `screen_for_play`, which names that screen at once: `VELAS`.
+
+    #[test]
+    fn nothing_published_inherits_nothing() {
+        assert_eq!(
+            inherited_window_state(&PlaybackWindowRecord::default()),
+            playback::PlaybackWindowState::default()
+        );
+        assert_eq!(
+            external_screen(&PlaybackWindowRecord::default(), None).as_deref(),
+            Some(VELAS)
+        );
+        // A play opened without known state that has reported nothing leaves
+        // both unknown, so the configured options still decide.
+        let silent = PlaybackWindowSession {
+            session_id: "silent".to_string(),
+            player: crate::player::PlayerKind::External,
+            observation: playback::WindowStateObservation::default(),
+        };
+        assert_eq!(
+            inherited_window_state(&published([silent.clone()])),
+            playback::PlaybackWindowState::default()
+        );
+        assert_eq!(external_screen(&published([silent]), None).as_deref(), Some(VELAS));
+    }
+
+    #[test]
+    fn the_next_play_stays_fullscreen_when_the_previous_reader_never_connected() {
+        let slot = std::sync::Mutex::new(PlaybackWindowRecord::default());
+        let cfg = config::AppConfig {
+            mpv_window_mode: Some("fullscreen".to_string()),
+            ..Default::default()
+        };
+        let opened = opening_window(
+            &slot.lock().unwrap(),
+            config::first_window_of_run(&cfg).unwrap().0,
+        );
+        assert_eq!(opened.fullscreen, Some(true));
+        publish_started_play(
+            Ok(()),
+            &slot,
+            PlaybackWindowSession {
+                session_id: "never-connected".to_string(),
+                player: crate::player::PlayerKind::External,
+                observation: playback::WindowStateObservation::opened_at(opened),
+            },
+            || {},
+        ).unwrap();
+
+        // No IPC events at all. A contrary first-window setting must not
+        // disguise whether this run actually handed the fullscreen on. The
+        // play reported no screen either, so the next one is decided for the
+        // screen holding Vela's window, not for the setting's.
+        let next = opens(&slot.lock().unwrap(), stored_first_window());
+        assert_eq!(
+            next, (opened, Some(VELAS.to_string())),
+            "the next play must inherit fullscreen even when the prior reader never connected"
+        );
+    }
+
+    // A never-connected play can set either flag, both, or neither. Older
+    // settings are deliberately contrary; unobserved fields must survive.
+    fn never_connected_window_cases() -> [(playback::PlaybackWindowState, config::MpvWindow); 4] {
+        [
+            (Some(true), Some(false), Some(true), Some(false)),
+            (Some(true), None, Some(true), Some(true)),
+            (None, Some(false), Some(false), Some(false)),
+            (None, None, Some(false), Some(true)),
+        ].map(|(fullscreen, maximized, saved_fullscreen, saved_maximized)| (
+            playback::PlaybackWindowState {
+                fullscreen,
+                maximized,
+                windowed_size: None,
+            },
+            config::MpvWindow {
+                fullscreen: saved_fullscreen,
+                maximized: saved_maximized,
+                screen: Some("previous-screen".to_string()),
+                width: Some(1024),
+                height: Some(576),
+            },
+        ))
+    }
+
+    fn settings_before_never_connected_play() -> HeldSettings {
+        HeldSettings(std::sync::Mutex::new(config::AppConfig {
+            mpv_window: Some(config::MpvWindow {
+                fullscreen: Some(false),
+                maximized: Some(true),
+                screen: Some("previous-screen".to_string()),
+                width: Some(1024),
+                height: Some(576),
+            }),
+            ..Default::default()
+        }))
+    }
+
+    #[test]
+    fn a_never_connected_plays_end_saves_its_opening_flags() {
+        for (opened, expected) in never_connected_window_cases() {
+            let settings = settings_before_never_connected_play();
+            let slot = std::sync::Mutex::new(PlaybackWindowRecord::default());
+            publish_started_play(
+                Ok(()),
+                &slot,
+                PlaybackWindowSession {
+                    session_id: "never-connected".to_string(),
+                    player: crate::player::PlayerKind::External,
+                    observation: playback::WindowStateObservation::opened_at(opened),
+                },
+                || {},
+            ).unwrap();
+            write_play_end(
+                |change| settings.update(change), &slot, "never-connected", |_| {},
+            ).unwrap();
+            assert_eq!(
+                settings.window(), Some(expected),
+                "the play's end must save opening flags and keep fields it never knew: {opened:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn quitting_saves_a_never_connected_plays_opening_flags() {
+        for (opened, expected) in never_connected_window_cases() {
+            let settings = settings_before_never_connected_play();
+            let slot = std::sync::Mutex::new(PlaybackWindowRecord::default());
+            publish_started_play(
+                Ok(()),
+                &slot,
+                PlaybackWindowSession {
+                    session_id: "never-connected".to_string(),
+                    player: crate::player::PlayerKind::External,
+                    observation: playback::WindowStateObservation::opened_at(opened),
+                },
+                || {},
+            ).unwrap();
+            // Its end has not run. Use the real exit rule with in-memory
+            // settings, as the existing exit tests do.
+            remember_window_on_exit_with(&slot, || settings.read(), |change| settings.update(change));
+            assert_eq!(
+                settings.window(), Some(expected),
+                "Vela's exit must save opening flags and keep fields it never knew: {opened:?}"
+            );
+            remember_window_on_exit_with(&slot, || settings.read(), |_| {
+                panic!("quitting again must not rewrite the same opening state")
+            });
+        }
+    }
+
+    #[test]
+    fn an_embedded_play_leaves_no_window_state_to_inherit() {
+        // The embedded player has no window of its own: what its mpv reports
+        // must not decide how the next mpv window opens.
+        let embedded = observed_window_session("embedded", crate::player::PlayerKind::Embedded);
+        assert_eq!(
+            inherited_window_state(&published([embedded.clone()])),
+            playback::PlaybackWindowState::default()
+        );
+        assert_eq!(external_screen(&published([embedded]), None).as_deref(), Some(VELAS));
+    }
+
+    /// The name of the screen holding Vela's window in these tests.
+    const VELAS: &str = "VELAS-SCREEN";
+
+    /// Screens as seen when the connected outputs cannot be listed: every
+    /// name is taken as it is.
+    fn unlisted_screens() -> display::Screens {
+        display::Screens {
+            velas: Some(VELAS.to_string()),
+            ..Default::default()
+        }
+    }
+
+    /// The screen a play in mpv's own window is decided to be shown on, the
+    /// connected outputs unlisted, `saved` the screen the setting saved for
+    /// the first window of a run.
+    fn external_screen(record: &PlaybackWindowRecord, saved: Option<&str>) -> Option<String> {
+        screen_for_play(
+            record,
+            None,
+            crate::player::PlayerKind::External,
+            saved,
+            &unlisted_screens(),
+        )
+        .name
+    }
+
+    /// What the player window setting gives the first play of a run: here a
+    /// stored window that is NOT fullscreen, on another screen.
+    fn stored_first_window() -> config::OpeningWindow {
+        (
+            playback::PlaybackWindowState {
+                fullscreen: Some(false),
+                maximized: Some(true),
+                windowed_size: Some((800, 450)),
+            },
+            Some("HDMI-1".to_string()),
+        )
+    }
+
+    /// `opening_window` and `screen_for_play` together, as the play path
+    /// uses them: how the mpv window opens, and where.
+    fn opens(record: &PlaybackWindowRecord, first_of_run: config::OpeningWindow) -> config::OpeningWindow {
+        (
+            opening_window(record, first_of_run.0),
+            external_screen(record, first_of_run.1.as_deref()),
+        )
+    }
+
+    #[test]
+    fn what_this_run_observed_wins_over_the_stored_window() {
+        let current = observed_window_session("last", crate::player::PlayerKind::External);
+        assert_eq!(
+            opens(&published([current]), stored_first_window()),
+            (
+                playback::PlaybackWindowState {
+                    fullscreen: Some(true),
+                    maximized: Some(false),
+                    windowed_size: None,
+                },
+                Some("DP-1".to_string())
+            )
+        );
+        // Even a play of this run that reported nothing wins: the setting
+        // decides only the first window of a run.
+        let silent = PlaybackWindowSession {
+            session_id: "silent".to_string(),
+            player: crate::player::PlayerKind::External,
+            observation: playback::WindowStateObservation::default(),
+        };
+        assert_eq!(
+            opens(&published([silent]), stored_first_window()),
+            (playback::PlaybackWindowState::default(), Some(VELAS.to_string()))
+        );
+    }
+
+    #[test]
+    fn the_first_window_of_a_run_comes_from_the_setting() {
+        assert_eq!(
+            opens(&PlaybackWindowRecord::default(), stored_first_window()),
+            stored_first_window()
+        );
+        // An embedded play opened no mpv window, so the next external play is
+        // still the first window of the run.
+        let embedded = observed_window_session("embedded", crate::player::PlayerKind::Embedded);
+        assert_eq!(
+            opens(&published([embedded]), stored_first_window()),
+            stored_first_window()
+        );
+    }
+
+    #[test]
+    fn only_the_latest_play_hands_its_window_over_when_it_ends() {
+        let latest = observed_window_session("latest", crate::player::PlayerKind::External);
+        assert_eq!(
+            window_to_remember(&published([latest.clone()]), "latest"),
+            Some((
+                crate::player::PlayerKind::External,
+                playback::PlaybackWindowState {
+                    fullscreen: Some(true),
+                    maximized: Some(false),
+                    windowed_size: None,
+                },
+                Some("DP-1".to_string())
+            ))
+        );
+        // A play whose end arrives after a newer play started.
+        assert_eq!(window_to_remember(&published([latest]), "older"), None);
+        assert_eq!(window_to_remember(&PlaybackWindowRecord::default(), "latest"), None);
+        // An embedded play has no window of its own to hand over. (This
+        // assertion handed over its player for the settings to refuse; the
+        // record now hands over only the last external play's window, review
+        // finding pw-6, and the settings still refuse any other player.)
+        let embedded = observed_window_session("embedded", crate::player::PlayerKind::Embedded);
+        assert_eq!(window_to_remember(&published([embedded]), "embedded"), None);
+    }
+
+    #[test]
+    fn quitting_writes_the_window_only_when_the_stored_one_changes() {
+        let latest = std::sync::Mutex::new(published([observed_window_session(
+            "latest",
+            crate::player::PlayerKind::External,
+        )]));
+        // What quitting writes, when it writes: the settings it read, changed.
+        let quit_with = |load: std::io::Result<config::AppConfig>| {
+            let read = load.as_ref().ok().cloned();
+            let mut stored = None;
+            remember_window_on_exit_with(
+                &latest,
+                || load,
+                |change| {
+                    let mut cfg = read.expect("a write follows only a read");
+                    change(&mut cfg)?;
+                    stored = Some(cfg);
+                    Ok(())
+                },
+            );
+            stored
+        };
+        // Nothing stored yet: quitting stores the latest play's window.
+        let cfg = quit_with(Ok(config::AppConfig::default()))
+            .expect("quitting stores a window not yet stored");
+        assert_eq!(
+            cfg.mpv_window,
+            Some(config::MpvWindow {
+                fullscreen: Some(true),
+                maximized: Some(false),
+                screen: Some("DP-1".to_string()),
+                ..Default::default()
+            })
+        );
+        // That play's end (or an earlier quit) already stored it: no write.
+        assert!(quit_with(Ok(cfg)).is_none());
+        // Settings that cannot be read are left alone.
+        assert!(quit_with(Err(std::io::Error::other("unreadable"))).is_none());
+    }
+
+    #[test]
+    fn quitting_waits_for_the_window_hand_over_only_so_long() {
+        // Review finding pw-4: another Vela holds the settings lock. Quitting
+        // returns once the limit has passed; the hand-over goes on waiting,
+        // and writes once the lock is free. Real settings files, in a folder
+        // of the test's own.
+        let dir = std::env::temp_dir().join(format!("vela-exit-window-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.json");
+        let lock_path = dir.join("config.lock");
+        let held = crate::storage::open_private_lock(&lock_path).unwrap();
+        held.lock().unwrap();
+
+        let record = std::sync::Arc::new(std::sync::Mutex::new(published([
+            observed_window_session("latest", crate::player::PlayerKind::External),
+        ])));
+        let (wrote, written) = std::sync::mpsc::channel();
+        let (returned, quit) = std::sync::mpsc::channel();
+        let limit = Duration::from_millis(200);
+        {
+            let (path, lock_path) = (path.clone(), lock_path.clone());
+            std::thread::spawn(move || {
+                let started = Instant::now();
+                let finished = hand_over_within(limit, move || {
+                    remember_window_on_exit_with(
+                        &record,
+                        || Ok(config::AppConfig::default()),
+                        |change| config::update_at(&path, &lock_path, change),
+                    );
+                    let _ = wrote.send(());
+                });
+                let _ = returned.send((finished, started.elapsed()));
+            });
+        }
+        let (finished, waited) = quit
+            .recv_timeout(Duration::from_secs(5))
+            .expect("quitting must not wait for a settings lock somebody else holds");
+        assert!(!finished, "the hand-over cannot have finished while the lock is held");
+        assert!(waited >= limit && waited < Duration::from_secs(2), "waited {waited:?}");
+        assert!(written.try_recv().is_err());
+
+        held.unlock().unwrap();
+        written
+            .recv_timeout(Duration::from_secs(10))
+            .expect("the hand-over still writes once the lock is free");
+        let saved: config::AppConfig = crate::storage::load_json(&path).unwrap();
+        assert_eq!(saved.mpv_window.and_then(|window| window.fullscreen), Some(true));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_hand_over_that_finishes_in_time_is_waited_for() {
+        assert!(playback::with_test_watchdog(
+            Duration::from_secs(5),
+            "the completed hand-over",
+            || { hand_over_within(Duration::from_secs(10), || {}) }
+        ));
+    }
+
+    /// An external play opened windowed, its observation shared with the
+    /// record as the launch shares it.
+    fn windowed_play_in_record(
+        session_id: &str,
+        player: crate::player::PlayerKind,
+    ) -> (
+        playback::WindowStateObservation,
+        std::sync::Arc<std::sync::Mutex<PlaybackWindowRecord>>,
+    ) {
+        let observation = playback::WindowStateObservation::opened_at(playback::PlaybackWindowState {
+            fullscreen: Some(false),
+            maximized: Some(false),
+            windowed_size: None,
+        });
+        let record = std::sync::Arc::new(std::sync::Mutex::new(published([PlaybackWindowSession {
+            session_id: session_id.to_string(),
+            player,
+            observation: observation.clone(),
+        }])));
+        (observation, record)
+    }
+
+    /// The exit's hand-over with settings held in memory.
+    fn quit_into(
+        settings: &std::sync::Arc<HeldSettings>,
+        record: std::sync::Arc<std::sync::Mutex<PlaybackWindowRecord>>,
+        limit: Duration,
+        reader_limit: Duration,
+    ) -> (bool, Duration) {
+        let (read, write) = (settings.clone(), settings.clone());
+        // Every caller expects at most the two-second hand-over limit (or
+        // an immediate return). Keep the five-second watchdog independent
+        // of that limit, and measure only the operation on its own thread.
+        playback::with_test_watchdog(
+            Duration::from_secs(5),
+            "the exit window hand-over",
+            move || {
+                let started = Instant::now();
+                let finished = hand_over_window_on_exit(
+                    record,
+                    limit,
+                    reader_limit,
+                    move || read.read(),
+                    move |change| write.update(change),
+                );
+                (finished, started.elapsed())
+            },
+        )
+    }
+
+    #[test]
+    fn quitting_waits_for_a_reader_still_applying_what_mpv_sent() {
+        // Review finding pw-8, the reviewer's probe: the play's reader has
+        // received mpv's fullscreen=true and applies it only after a delay
+        // shorter than the limit. Quitting must save fullscreen.
+        let (observation, record) = windowed_play_in_record("play", crate::player::PlayerKind::External);
+        let reading = observation.reader_started();
+        let reader = std::thread::spawn(move || {
+            std::thread::sleep(EXIT_READER_DRAIN_LIMIT / 5);
+            observation.apply_ipc_event(&serde_json::json!({
+                "event": "property-change",
+                "name": "fullscreen",
+                "data": true
+            }));
+            drop(reading);
+        });
+        let settings = std::sync::Arc::new(HeldSettings::default());
+        let (finished, _) = quit_into(&settings, record, EXIT_WINDOW_HANDOVER_LIMIT, EXIT_READER_DRAIN_LIMIT);
+        reader.join().unwrap();
+        assert!(finished);
+        assert_eq!(
+            settings.window().and_then(|window| window.fullscreen),
+            Some(true),
+            "quitting must save the change the reader had received"
+        );
+    }
+
+    #[test]
+    fn quitting_hands_over_what_is_known_when_the_reader_never_finishes() {
+        let (observation, record) = windowed_play_in_record("play", crate::player::PlayerKind::External);
+        let reading = observation.reader_started();
+        let settings = std::sync::Arc::new(HeldSettings::default());
+        let (finished, waited) = quit_into(&settings, record, EXIT_WINDOW_HANDOVER_LIMIT, EXIT_READER_DRAIN_LIMIT);
+        assert!(finished, "the hand-over finishes once the reader's limit has passed");
+        assert!(
+            waited >= EXIT_READER_DRAIN_LIMIT && waited < EXIT_WINDOW_HANDOVER_LIMIT,
+            "waited {waited:?}"
+        );
+        assert_eq!(
+            settings.window().and_then(|window| window.fullscreen),
+            Some(false),
+            "what is known is saved"
+        );
+        drop(reading);
+    }
+
+    #[test]
+    fn quitting_waits_at_most_the_hand_over_limit_in_all() {
+        // Review finding pw-4's limit holds with the reader's wait inside it:
+        // a reader that never finishes and a settings write that never ends.
+        let (observation, record) =
+            windowed_play_in_record("play", crate::player::PlayerKind::External);
+        let reading = observation.reader_started();
+        let (_release, stuck) = std::sync::mpsc::channel::<()>();
+        let limit = EXIT_WINDOW_HANDOVER_LIMIT;
+        let (finished, waited) = playback::with_test_watchdog(
+            Duration::from_secs(5),
+            "the exit hand-over with a stuck settings write",
+            move || {
+                let started = Instant::now();
+                let finished = hand_over_window_on_exit(
+                    record,
+                    limit,
+                    EXIT_READER_DRAIN_LIMIT,
+                    || Ok(config::AppConfig::default()),
+                    move |_| {
+                        let _ = stuck.recv();
+                        Ok(())
+                    },
+                );
+                (finished, started.elapsed())
+            },
+        );
+        assert!(!finished, "the write cannot have finished");
+        assert!(
+            waited >= limit && waited < limit + Duration::from_millis(300),
+            "quitting waited {waited:?}, more than the hand-over's limit"
+        );
+        drop(reading);
+    }
+
+    #[test]
+    fn quitting_twice_waits_for_a_reader_that_never_finishes_only_once() {
+        // The exit handler runs on tauri's ExitRequested and again on its
+        // Exit. A reader still running after the first hand-over (its mpv
+        // started under another process that the kill ended instead) must
+        // not add a second limit to the exit.
+        let (observation, record) = windowed_play_in_record("play", crate::player::PlayerKind::External);
+        let reading = observation.reader_started();
+        let settings = std::sync::Arc::new(HeldSettings::default());
+        let (finished, first) =
+            quit_into(&settings, record.clone(), EXIT_WINDOW_HANDOVER_LIMIT, EXIT_READER_DRAIN_LIMIT);
+        assert!(finished && first >= EXIT_READER_DRAIN_LIMIT, "the first waited {first:?}");
+        let (finished, second) =
+            quit_into(&settings, record, EXIT_WINDOW_HANDOVER_LIMIT, EXIT_READER_DRAIN_LIMIT);
+        assert!(finished);
+        assert!(
+            second < EXIT_READER_DRAIN_LIMIT / 2,
+            "the second hand-over waited {second:?} for a reader the first gave up on"
+        );
+        assert_eq!(settings.window().and_then(|window| window.fullscreen), Some(false));
+        drop(reading);
+    }
+
+    #[test]
+    fn quitting_leaves_the_record_free_while_it_waits_for_the_reader() {
+        // The record's lock is taken only to find the play: an end callback
+        // writing during the exit's wait is not held up by it.
+        let (observation, record) =
+            windowed_play_in_record("play", crate::player::PlayerKind::External);
+        let reading = observation.reader_started();
+        let waiting = {
+            let record = record.clone();
+            std::thread::spawn(move || wait_for_last_external_reader(&record, Duration::from_secs(3)))
+        };
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(!waiting.is_finished(), "the wait is still going on");
+        assert!(
+            record.try_lock().is_ok(),
+            "the record must be free while quitting waits for the reader"
+        );
+        drop(reading);
+        assert_eq!(
+            playback::with_test_watchdog(
+                Duration::from_secs(5),
+                "the reader wait after releasing the record",
+                move || { waiting.join().unwrap() }
+            ),
+            playback::ReaderWait::FinishedWithin
+        );
+    }
+
+    fn last_reader_wait_in_test(
+        record: &std::sync::Arc<std::sync::Mutex<PlaybackWindowRecord>>,
+        limit: Duration,
+    ) -> playback::ReaderWait {
+        let record = record.clone();
+        playback::with_test_watchdog(
+            Duration::from_secs(5),
+            "the last external reader's wait",
+            move || wait_for_last_external_reader(&record, limit),
+        )
+    }
+
+    #[test]
+    fn quitting_does_not_wait_for_a_reader_that_has_finished() {
+        let (observation, record) = windowed_play_in_record("play", crate::player::PlayerKind::External);
+        drop(observation.reader_started());
+        assert_eq!(
+            last_reader_wait_in_test(&record, Duration::from_secs(10)),
+            playback::ReaderWait::AlreadyFinished
+        );
+        let settings = std::sync::Arc::new(HeldSettings::default());
+        let (finished, waited) =
+            quit_into(&settings, record, Duration::from_secs(20), Duration::from_secs(10));
+        assert!(finished);
+        assert!(waited < Duration::from_secs(1), "quitting waited {waited:?} for a finished reader");
+        assert_eq!(settings.window().and_then(|window| window.fullscreen), Some(false));
+    }
+
+    #[test]
+    fn quitting_does_not_wait_without_a_play_in_mpvs_own_window() {
+        // No play at all.
+        let empty = std::sync::Arc::new(std::sync::Mutex::new(PlaybackWindowRecord::default()));
+        assert_eq!(
+            last_reader_wait_in_test(&empty, Duration::from_secs(10)),
+            playback::ReaderWait::NoReader
+        );
+        let settings = std::sync::Arc::new(HeldSettings::default());
+        let (finished, waited) =
+            quit_into(&settings, empty, Duration::from_secs(20), Duration::from_secs(10));
+        assert!(finished && waited < Duration::from_secs(1), "waited {waited:?}");
+        assert_eq!(settings.window(), None);
+
+        // Only an embedded play, its reader still running: not waited for.
+        let (observation, record) = windowed_play_in_record("embedded", crate::player::PlayerKind::Embedded);
+        let reading = observation.reader_started();
+        assert_eq!(
+            last_reader_wait_in_test(&record, Duration::from_secs(10)),
+            playback::ReaderWait::NoReader
+        );
+        let (finished, waited) =
+            quit_into(&settings, record, Duration::from_secs(20), Duration::from_secs(10));
+        assert!(finished && waited < Duration::from_secs(1), "waited {waited:?}");
+        drop(reading);
+    }
+
+    /// Settings held in memory and changed one change at a time, as
+    /// `config::update` changes the file under its lock.
+    #[derive(Default)]
+    struct HeldSettings(std::sync::Mutex<config::AppConfig>);
+
+    impl HeldSettings {
+        fn read(&self) -> std::io::Result<config::AppConfig> {
+            Ok(self.0.lock().unwrap().clone())
+        }
+
+        fn update(&self, change: SettingsChange<'_>) -> Result<(), String> {
+            change(&mut self.0.lock().unwrap())
+        }
+
+        fn window(&self) -> Option<config::MpvWindow> {
+            self.0.lock().unwrap().mpv_window.clone()
+        }
+    }
+
+    fn report_windowed(observation: &playback::WindowStateObservation) {
+        observation.apply_ipc_event(&serde_json::json!({
+            "event": "property-change",
+            "name": "fullscreen",
+            "data": false
+        }));
+    }
+
+    #[test]
+    fn an_older_plays_end_cannot_save_over_a_newer_plays_window() {
+        // Review finding pw-5, the reviewer's first probe: play A's end is
+        // about to write; while it waits for the settings lock, play B starts
+        // and B's end saves B's window; then A's write runs. It still writes
+        // A's recents stamp, and not A's window.
+        let settings = HeldSettings::default();
+        let slot = std::sync::Mutex::new(published([observed_window_session(
+            "A",
+            crate::player::PlayerKind::External,
+        )]));
+        let finished = std::cell::Cell::new(false);
+        write_play_end(
+            |change| {
+                slot.lock().unwrap().publish(windowed_session("B"));
+                write_play_end(|change| settings.update(change), &slot, "B", |_| {}).unwrap();
+                settings.update(change)
+            },
+            &slot,
+            "A",
+            |_| finished.set(true),
+        )
+        .unwrap();
+        assert!(finished.get(), "the older play's recents stamp is still written");
+        assert_eq!(
+            settings.window(),
+            Some(config::MpvWindow {
+                fullscreen: Some(false),
+                maximized: Some(false),
+                screen: Some("HDMI-1".to_string()),
+                ..Default::default()
+            }),
+            "the newer play's window must stay"
+        );
+    }
+
+    #[test]
+    fn an_exit_that_waited_cannot_save_an_earlier_look_over_the_plays_end() {
+        // Review finding pw-5, the reviewer's second probe: quitting looks at
+        // the play's window (full screen) and waits for the settings lock;
+        // meanwhile the play reports that it left full screen and its end
+        // saves that. Quitting then writes what is true when it writes.
+        let settings = HeldSettings::default();
+        let play = observed_window_session("play", crate::player::PlayerKind::External);
+        let slot = std::sync::Mutex::new(published([play.clone()]));
+        remember_window_on_exit_with(
+            &slot,
+            || settings.read(),
+            |change| {
+                report_windowed(&play.observation);
+                write_play_end(|change| settings.update(change), &slot, "play", |_| {}).unwrap();
+                settings.update(change)
+            },
+        );
+        assert_eq!(settings.window().and_then(|window| window.fullscreen), Some(false));
+    }
+
+    #[test]
+    fn a_plays_end_that_waited_cannot_save_an_earlier_look_over_an_exit() {
+        // The other order: the play's end waits for the settings lock while
+        // a later report arrives and quitting saves it.
+        let settings = HeldSettings::default();
+        let play = observed_window_session("play", crate::player::PlayerKind::External);
+        let slot = std::sync::Mutex::new(published([play.clone()]));
+        write_play_end(
+            |change| {
+                report_windowed(&play.observation);
+                remember_window_on_exit_with(&slot, || settings.read(), |change| settings.update(change));
+                settings.update(change)
+            },
+            &slot,
+            "play",
+            |_| {},
+        )
+        .unwrap();
+        assert_eq!(settings.window().and_then(|window| window.fullscreen), Some(false));
+    }
+
+    #[test]
+    fn video_player_setting_stores_only_embedded_and_rejects_unknown_values() {
+        let dir = std::env::temp_dir().join(format!("vela-player-setting-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.json");
+        let lock = dir.join("config.lock");
+        for (player, expected) in [("embedded", Some("embedded")), ("external", None)] {
+            config::update_at(&path, &lock, |cfg| apply_player(cfg, player)).unwrap();
+            let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            assert_eq!(saved.get("player"), expected.map(serde_json::Value::from).as_ref());
+        }
+        let saved = std::fs::read(&path).unwrap();
+        for player in ["", "Embedded", "external ", "internal"] {
+            assert_eq!(
+                config::update_at(&path, &lock, |cfg| apply_player(cfg, player)),
+                Err("unknown video player".to_string())
+            );
+            assert_eq!(std::fs::read(&path).unwrap(), saved);
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn leaving_remember_removes_the_stored_window() {
+        let stored = config::MpvWindow {
+            fullscreen: Some(true),
+            ..Default::default()
+        };
+        for mode in [
+            config::MpvWindowMode::Fullscreen,
+            config::MpvWindowMode::Default,
+        ] {
+            let mut cfg = config::AppConfig {
+                mpv_window: Some(stored.clone()),
+                ..Default::default()
+            };
+            apply_mpv_window_mode(&mut cfg, mode);
+            assert_eq!(cfg.mpv_window_mode.as_deref(), Some(mode.as_str()));
+            assert_eq!(cfg.mpv_window, None, "{mode:?} must not keep the window");
+        }
+        // Remember is the default and is stored as no value; what it has
+        // stored stays.
+        let mut cfg = config::AppConfig {
+            mpv_window_mode: Some("fullscreen".to_string()),
+            mpv_window: Some(stored.clone()),
+            ..Default::default()
+        };
+        apply_mpv_window_mode(&mut cfg, config::MpvWindowMode::Remember);
+        assert_eq!(cfg.mpv_window_mode, None);
+        assert_eq!(cfg.mpv_window, Some(stored));
+    }
+
+    // ---- the screen a play is shown on, decided once (review findings pw-1
+    // and pw-2): `screen_for_play`, `display::profile_basis`, `rank_and_place`
+
+    /// An output connected now, by these names, at this size.
+    fn output(names: &[&str], width_px: u32, height_px: u32) -> display::Output {
+        display::Output {
+            names: names.iter().map(|name| name.to_string()).collect(),
+            width_px,
+            height_px,
+            position: None,
+        }
+    }
+
+    /// Screens as seen with Vela's window on `velas`, these outputs connected.
+    fn screens_with(velas: &str, connected: &[display::Output]) -> display::Screens {
+        display::Screens {
+            velas: Some(velas.to_string()),
+            velas_output: connected
+                .iter()
+                .find(|output| output.names.iter().any(|name| name == velas))
+                .cloned(),
+            connected: Some(connected.to_vec()),
+            seen: connected.to_vec(),
+        }
+    }
+
+    /// DP-1, a 4K HDR screen, and HDMI-1, a 1080p one.
+    fn two_screens() -> [display::Output; 2] {
+        [output(&["DP-1"], 3840, 2160), output(&["HDMI-1"], 1920, 1080)]
+    }
+
+    /// A play whose window was observed on these screens, at this size.
+    fn session_observed_on(
+        session_id: &str,
+        player: crate::player::PlayerKind,
+        names: &[&str],
+        size: Option<(u32, u32)>,
+    ) -> PlaybackWindowSession {
+        let observation = playback::WindowStateObservation::default();
+        let mut events = vec![("display-names", serde_json::json!(names))];
+        if let Some((width, height)) = size {
+            events.push(("display-width", serde_json::json!(width)));
+            events.push(("display-height", serde_json::json!(height)));
+        }
+        for (name, data) in events {
+            observation.apply_ipc_event(&serde_json::json!({
+                "event": "property-change",
+                "name": name,
+                "data": data
+            }));
+        }
+        PlaybackWindowSession {
+            session_id: session_id.to_string(),
+            player,
+            observation,
+        }
+    }
+
+    /// Two copies of one title: 4K HDR and 1080p SDR.
+    fn two_copies() -> Vec<crate::selection::PlaybackCandidate> {
+        let copy = |version: &str, width, height, hdr| crate::selection::PlaybackCandidate {
+            source_id: "server".to_string(),
+            version_id: version.to_string(),
+            width,
+            height,
+            hdr,
+            bitrate: 10,
+            direct_play_rank: 0,
+            locality: crate::locality::EndpointLocality::Lan,
+        };
+        vec![copy("4k-hdr", 3840, 2160, true), copy("1080p-sdr", 1920, 1080, false)]
+    }
+
+    /// The Compatible target for the decided screen, made by the real
+    /// `compatibility_target_from`, no overrides, with its HDR state given
+    /// (the system is not asked here).
+    fn target_for(
+        screen: &PlayScreen,
+        screens: &display::Screens,
+        hdr: display::HdrState,
+    ) -> crate::selection::CompatibilityTarget {
+        tauri::async_runtime::block_on(compatibility_target_from(
+            screen,
+            screens,
+            display::DisplayOverrides::default(),
+            async |_: &display::ProfileBasis| hdr,
+        ))
+    }
+
+    #[test]
+    fn a_compatible_target_is_made_for_the_decided_screen() {
+        // Third review of finding pw-1, comment 6: the target's construction
+        // itself, with made-up screens. DP-1 (4K) is decided; Vela's window
+        // is on HDMI-1 (1080p). The target is DP-1's, the HDR state is asked
+        // for DP-1 and the answer counts, and the overrides go on top.
+        use crate::player::PlayerKind::External;
+        let screens = screens_with("HDMI-1", &two_screens());
+        let screen = screen_for_play(&PlaybackWindowRecord::default(), None, External, Some("DP-1"), &screens);
+        assert_eq!(screen.name.as_deref(), Some("DP-1"));
+        let make = |overrides, answer: display::HdrState| {
+            let asked = std::cell::RefCell::new(Vec::new());
+            let target = tauri::async_runtime::block_on(compatibility_target_from(
+                &screen,
+                &screens,
+                overrides,
+                async |basis: &display::ProfileBasis| {
+                    asked.borrow_mut().push((basis.name.clone(), basis.width_px, basis.height_px));
+                    answer
+                },
+            ));
+            (
+                (target.width, target.height, target.hdr),
+                asked.into_inner(),
+            )
+        };
+        let dp1 = vec![(Some("DP-1".to_string()), 3840, 2160)];
+        assert_eq!(
+            make(display::DisplayOverrides::default(), display::HdrState::Enabled),
+            ((3840, 2160, display::HdrState::Enabled), dp1.clone()),
+            "the decided output's size, and its HDR state asked for it"
+        );
+        assert_eq!(
+            make(display::DisplayOverrides::default(), display::HdrState::Disabled),
+            ((3840, 2160, display::HdrState::Disabled), dp1.clone()),
+            "the HDR answer counts"
+        );
+        let overrides = display::DisplayOverrides {
+            resolution: Some(display::ResolutionOverride::P1080),
+            hdr: Some(display::HdrOverride::Disabled),
+        };
+        assert_eq!(
+            make(overrides, display::HdrState::Enabled),
+            ((1920, 1080, display::HdrState::Disabled), dp1),
+            "the overrides go on top"
+        );
+    }
+
+    #[test]
+    fn a_compatible_target_is_the_decided_screens_when_what_is_connected_is_not_known() {
+        // The attack on the fourth repair, finding 1, its two probes, from
+        // what was seen through the decision of the screen to the target:
+        // the list is incomplete, so nothing is known to be connected, and
+        // the saved first screen is still ranked for its own size, not for
+        // Vela's screen.
+        use crate::player::PlayerKind::External;
+        use display::{NamedMonitor, PlatformOutputs};
+        let target_of = |screens: &display::Screens, saved: &str| {
+            let screen = screen_for_play(&PlaybackWindowRecord::default(), None, External, Some(saved), screens);
+            let target = tauri::async_runtime::block_on(compatibility_target_from(
+                &screen,
+                screens,
+                display::DisplayOverrides::default(),
+                async |_: &display::ProfileBasis| display::HdrState::Disabled,
+            ));
+            (screen.name, target.width, target.height)
+        };
+        // Wayland: Vela on a 1080p screen the compositor lists by model only.
+        let model = NamedMonitor::for_test("U2720Q", Some("U2720Q"), 1920, 1080, 0);
+        let wayland = display::screens_from(
+            Some(model.clone()),
+            Some(vec![model]),
+            PlatformOutputs::Incomplete(vec![
+                output(&["U2720Q"], 1920, 1080),
+                output(&["DP-1", "XG27UQDMS"], 3840, 2160),
+            ]),
+        );
+        assert_eq!(wayland.connected, None);
+        assert_eq!(target_of(&wayland, "DP-1"), (Some("DP-1".to_string()), 3840, 2160), "Wayland");
+        // macOS: one monitor without the name mpv takes for it.
+        let first = NamedMonitor::for_test("Monitor #1", None, 5120, 2880, 0);
+        let second = NamedMonitor::for_test("Monitor #2", Some("LG HDR 4K (7)"), 3840, 2160, 5120);
+        let mac = display::screens_from(Some(first.clone()), Some(vec![first, second]), PlatformOutputs::NoneToAdd);
+        assert_eq!(mac.connected, None);
+        assert_eq!(
+            target_of(&mac, "LG HDR 4K (7)"),
+            (Some("LG HDR 4K (7)".to_string()), 3840, 2160),
+            "macOS"
+        );
+    }
+
+    #[test]
+    fn a_compatible_target_counts_the_size_observed_on_the_decided_screen() {
+        // The attack on the fourth repair, finding 2: the size mpv observed
+        // on the decided output counts over its listed size. The last play
+        // was observed on DP-1 at 2560x1440, which is listed at 4K; Vela's
+        // window is on HDMI-1.
+        use crate::player::PlayerKind::External;
+        let screens = screens_with("HDMI-1", &two_screens());
+        let record = published([session_observed_on("last", External, &["DP-1"], Some((2560, 1440)))]);
+        let screen = screen_for_play(&record, None, External, None, &screens);
+        assert_eq!(screen.name.as_deref(), Some("DP-1"));
+        assert!(screen.observed.is_some(), "the name was taken from the observation");
+        let target = target_for(&screen, &screens, display::HdrState::Disabled);
+        assert_eq!(
+            (target.width, target.height),
+            (2560, 1440),
+            "the size observed on the decided output counts"
+        );
+    }
+
+    /// The copy a Compatible choice gives and where the play is shown.
+    fn compatible_choice(
+        screen: &PlayScreen,
+        screens: &display::Screens,
+        hdr: display::HdrState,
+    ) -> (String, Option<String>) {
+        let target = target_for(screen, screens, hdr);
+        let (winner, destination) = rank_and_place(
+            &mut two_copies(),
+            Ranking::ForScreen {
+                screen: screen.clone(),
+                target,
+            },
+        )
+        .unwrap();
+        let PlayDestination::RankedFor(name) = destination else {
+            panic!("a Compatible choice carries the screen it was ranked for: {destination:?}");
+        };
+        (winner.version_id, name)
+    }
+
+    #[test]
+    fn a_compatible_choice_follows_the_screen_the_play_opens_on() {
+        // Per player and per record. Where this test said "nothing" (the
+        // screen holding Vela's window, looked up at the launch), the screen
+        // is now named at once: VELAS.
+        use crate::player::PlayerKind::{Embedded, External};
+        let screens = unlisted_screens();
+        let decide = |record: &PlaybackWindowRecord, replace: Option<&str>, upcoming| {
+            screen_for_play(record, replace, upcoming, None, &screens).name
+        };
+        let named = |name: &str| Some(name.to_string());
+        let external = published([observed_window_session("last", External)]);
+        assert_eq!(
+            decide(&external, None, External),
+            named("DP-1"),
+            "a manual play opens on the last window's screen, so it is chosen for that one"
+        );
+        assert_eq!(decide(&external, Some("other"), External), named("DP-1"));
+        let embedded = published([observed_window_session("embedded", Embedded)]);
+        assert_eq!(
+            decide(&embedded, Some("embedded"), Embedded),
+            named("DP-1"),
+            "an embedded play's exact successor keeps its observed display"
+        );
+        assert_eq!(decide(&embedded, None, Embedded), named(VELAS));
+        assert_eq!(decide(&embedded, Some("stale"), Embedded), named(VELAS));
+        assert_eq!(
+            decide(&embedded, None, External),
+            named(VELAS),
+            "no mpv window yet in this run: the next one opens on Vela's screen"
+        );
+        assert_eq!(decide(&PlaybackWindowRecord::default(), None, External), named(VELAS));
+        // An embedded play after an external one: the next play in mpv's
+        // window opens on the external play's screen, so that is the one it
+        // counts; the next embedded play is shown in Vela's window.
+        let both = published([
+            windowed_session("external"),
+            observed_window_session("embedded", Embedded),
+        ]);
+        assert_eq!(decide(&both, None, External), named("HDMI-1"));
+        assert_eq!(decide(&both, Some("embedded"), External), named("HDMI-1"));
+        assert_eq!(decide(&both, Some("embedded"), Embedded), named("DP-1"));
+        assert_eq!(decide(&both, None, Embedded), named(VELAS));
+        // A play that wanted the embedded player and fell back to mpv's own
+        // window at start is published as an external play. The next embedded
+        // play that replaces it (the next item of a playlist) is not the
+        // successor of an embedded play: it is shown in Vela's window, so it
+        // is decided for Vela's screen, not for the mpv window's.
+        let fell_back = published([observed_window_session("last", External)]);
+        assert_eq!(
+            decide(&fell_back, Some("last"), Embedded),
+            named(VELAS),
+            "only an embedded play's successor keeps its observed screen"
+        );
+    }
+
+    #[test]
+    fn a_play_opens_on_the_screen_its_copy_was_ranked_for() {
+        // Review finding pw-1, the reviewer's first probe: the copy is ranked
+        // for DP-1, where the last mpv window was; while the stream is
+        // resolved that mpv reports HDMI-1. The play opens on DP-1, the screen
+        // its copy was chosen for. The steps are the play path's, in its order.
+        use crate::player::PlayerKind::External;
+        let last = session_observed_on("last", External, &["DP-1"], Some((3840, 2160)));
+        last.observation.apply_ipc_event(&serde_json::json!({
+            "event": "property-change", "name": "fullscreen", "data": false
+        }));
+        let slot = std::sync::Mutex::new(published([last.clone()]));
+        let screens = screens_with("HDMI-1", &two_screens());
+        // Choosing the copy (`select_playback_version`).
+        let screen = screen_for_play(&slot.lock().unwrap(), None, External, None, &screens);
+        let (copy, destination) = compatible_choice(&screen, &screens, display::HdrState::Enabled);
+        assert_eq!((copy.as_str(), destination.as_deref()), ("4k-hdr", Some("DP-1")));
+        // A late report while the stream is resolved.
+        for (name, data) in [
+            ("display-names", serde_json::json!(["HDMI-1"])),
+            ("fullscreen", serde_json::json!(true)),
+        ] {
+            last.observation.apply_ipc_event(&serde_json::json!({
+                "event": "property-change", "name": name, "data": data
+            }));
+        }
+        // After resolution the window's state is still looked at now...
+        let window = opening_window(&slot.lock().unwrap(), Default::default());
+        assert_eq!(window.fullscreen, Some(true));
+        // ...and the screen is the one carried, which the copy was ranked
+        // for; deciding again would give the other one.
+        assert_eq!(
+            screen_for_play(&slot.lock().unwrap(), None, External, None, &screens).name.as_deref(),
+            Some("HDMI-1")
+        );
+        assert_eq!(destination.as_deref(), Some("DP-1"));
+    }
+
+    #[test]
+    fn the_screen_holding_velas_window_is_carried_by_name() {
+        // Review finding pw-1, comment 1: a play with no screen to inherit
+        // is ranked for the screen holding Vela's window, and must open on
+        // that screen, by name, even if Vela's window moves to another
+        // screen while the stream is resolved.
+        use crate::player::PlayerKind::External;
+        let record = PlaybackWindowRecord::default();
+        let before = screens_with("HDMI-1", &two_screens());
+        let screen = screen_for_play(&record, None, External, None, &before);
+        assert_eq!(screen.name.as_deref(), Some("HDMI-1"), "a concrete output, by name");
+        let (copy, destination) = compatible_choice(&screen, &before, display::HdrState::Disabled);
+        assert_eq!(copy, "1080p-sdr", "ranked for HDMI-1, a 1080p SDR screen");
+        assert_eq!(destination.as_deref(), Some("HDMI-1"));
+        // Vela's window is moved to DP-1. A second look would now name DP-1,
+        // which the 1080p copy was not chosen for; the selection keeps
+        // HDMI-1, and the launch takes nothing else (the play path's text is
+        // held by tests/player-window-ui.test.mjs).
+        let after = screens_with("DP-1", &two_screens());
+        assert_eq!(
+            screen_for_play(&record, None, External, None, &after).name.as_deref(),
+            Some("DP-1")
+        );
+        assert_eq!(destination.as_deref(), Some("HDMI-1"));
+    }
+
+    #[test]
+    fn the_first_play_of_a_run_is_ranked_for_the_saved_screen_it_opens_on() {
+        // Review finding pw-1, comment 4, and the plan's two "left as they
+        // are" items about the first window's screen: nothing played yet in
+        // this run, the setting saved DP-1, Vela's window is on HDMI-1.
+        use crate::player::PlayerKind::External;
+        let record = PlaybackWindowRecord::default();
+        let cfg = config::AppConfig {
+            mpv_window: Some(config::MpvWindow {
+                screen: Some("DP-1".to_string()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let (_, saved) = config::first_window_of_run(&cfg).unwrap();
+        let screens = screens_with("HDMI-1", &two_screens());
+        let screen = screen_for_play(&record, None, External, saved.as_deref(), &screens);
+        assert_eq!(screen.name.as_deref(), Some("DP-1"));
+        assert_eq!(
+            compatible_choice(&screen, &screens, display::HdrState::Enabled),
+            ("4k-hdr".to_string(), Some("DP-1".to_string())),
+            "ranked for the saved screen, the one it opens on"
+        );
+        // The saved screen is no longer connected: the play goes to Vela's
+        // screen, by name, and is ranked for it.
+        let unplugged = screens_with("HDMI-1", &[output(&["HDMI-1"], 1920, 1080)]);
+        let screen = screen_for_play(&record, None, External, saved.as_deref(), &unplugged);
+        assert_eq!(
+            compatible_choice(&screen, &unplugged, display::HdrState::Disabled),
+            ("1080p-sdr".to_string(), Some("HDMI-1".to_string()))
+        );
+        // A setting that does not use the saved screen sends the first play
+        // to Vela's screen.
+        let full_screen = config::AppConfig {
+            mpv_window_mode: Some("fullscreen".to_string()),
+            ..cfg
+        };
+        let (_, saved) = config::first_window_of_run(&full_screen).unwrap();
+        assert_eq!(saved, None);
+        assert_eq!(
+            screen_for_play(&record, None, External, saved.as_deref(), &screens).name.as_deref(),
+            Some("HDMI-1")
+        );
+    }
+
+    #[test]
+    fn a_screen_that_is_not_connected_is_passed_over() {
+        // Review finding pw-1, comment 2, what is checked: the output a play
+        // is decided to be shown on is connected when it is decided.
+        use crate::player::PlayerKind::{Embedded, External};
+        let only_hdmi = screens_with("HDMI-1", &[output(&["HDMI-1"], 1920, 1080)]);
+        let on_dp1 = published([session_observed_on("last", External, &["DP-1"], Some((3840, 2160)))]);
+        let screen = screen_for_play(&on_dp1, None, External, None, &only_hdmi);
+        assert_eq!(
+            screen,
+            PlayScreen { name: Some("HDMI-1".to_string()), observed: None },
+            "the last window's screen is gone: Vela's screen, and the observation does not count"
+        );
+        assert_eq!(
+            display::profile_basis(screen.name.as_deref(), screen.observed.as_ref(), &only_hdmi).width_px,
+            1920
+        );
+        // An embedded play's successor whose screen is gone.
+        let embedded = published([session_observed_on("embedded", Embedded, &["DP-1"], None)]);
+        assert_eq!(
+            screen_for_play(&embedded, Some("embedded"), Embedded, None, &only_hdmi).name.as_deref(),
+            Some("HDMI-1")
+        );
+        // Connected under another of its names (Wayland: the model Tauri
+        // gives and the connector mpv gives).
+        let both_names = screens_with("XG27UQDMS", &[output(&["DP-1", "XG27UQDMS"], 3840, 2160)]);
+        assert_eq!(
+            screen_for_play(&on_dp1, None, External, None, &both_names).name.as_deref(),
+            Some("DP-1")
+        );
+        // The outputs could not be listed, or the list names none: nothing
+        // can be told, and the name stands as before.
+        for unknown in [
+            unlisted_screens(),
+            display::Screens {
+                velas: Some(VELAS.to_string()),
+                velas_output: None,
+                connected: Some(vec![output(&[], 1920, 1080)]),
+                seen: vec![output(&[], 1920, 1080)],
+            },
+        ] {
+            assert_eq!(
+                screen_for_play(&on_dp1, None, External, None, &unknown).name.as_deref(),
+                Some("DP-1")
+            );
+        }
+        // Nothing is named at all: no name, as before.
+        let nameless = display::Screens {
+            velas: None,
+            velas_output: None,
+            connected: Some(vec![output(&["HDMI-1"], 1920, 1080)]),
+            seen: vec![output(&["HDMI-1"], 1920, 1080)],
+        };
+        assert_eq!(
+            screen_for_play(&on_dp1, None, External, None, &nameless),
+            PlayScreen::default()
+        );
+    }
+
+    #[test]
+    fn a_remembered_screen_stays_when_what_is_connected_is_not_known() {
+        // Third review of finding pw-1, comment 1, the reviewer's probe: on
+        // Wayland the compositor's list could not be read, while Tauri still
+        // lists its monitors by model. The remembered DP-1 is connected, and
+        // must stay the destination; it is not passed over for Vela's screen.
+        use crate::player::PlayerKind::External;
+        use display::{NamedMonitor, PlatformOutputs};
+        let on_dp1 = published([session_observed_on("last", External, &["DP-1"], Some((3840, 2160)))]);
+        let model = NamedMonitor::for_test("XG27UQDMS", Some("XG27UQDMS"), 3840, 2160, 0);
+        let seen = |platform| display::screens_from(Some(model.clone()), Some(vec![model.clone()]), platform);
+        let unread = seen(PlatformOutputs::Incomplete(Vec::new()));
+        assert_eq!(
+            screen_for_play(&on_dp1, None, External, None, &unread).name.as_deref(),
+            Some("DP-1"),
+            "nothing is known to be connected: the remembered screen stands"
+        );
+        // An output listed by its model only: the same.
+        let models_only = seen(PlatformOutputs::Incomplete(vec![output(&["XG27UQDMS"], 3840, 2160)]));
+        assert_eq!(
+            screen_for_play(&on_dp1, None, External, None, &models_only).name.as_deref(),
+            Some("DP-1")
+        );
+        // The same list read in full, naming DP-3 only: DP-1 is gone, and
+        // the play goes to Vela's screen, by its connector.
+        let complete = seen(PlatformOutputs::Complete(vec![output(&["DP-3", "XG27UQDMS"], 3840, 2160)]));
+        assert_eq!(
+            screen_for_play(&on_dp1, None, External, None, &complete).name.as_deref(),
+            Some("DP-3")
+        );
+    }
+
+    #[test]
+    fn an_observation_across_several_screens_is_shown_on_its_first() {
+        // Review finding pw-1, comment 3: a window across several screens
+        // reports them all; the screen decided, ranked for and opened on is
+        // the first, with two screens and three, in either order.
+        use crate::player::PlayerKind::External;
+        let three = [
+            output(&["DP-1"], 3840, 2160),
+            output(&["HDMI-1"], 1920, 1080),
+            output(&["eDP-1"], 2560, 1440),
+        ];
+        for (names, size, first, connected) in [
+            (vec!["DP-1", "HDMI-1"], (3000, 2000), "DP-1", &three[..2]),
+            (vec!["HDMI-1", "DP-1"], (1600, 900), "HDMI-1", &three[..2]),
+            (vec!["eDP-1", "DP-1", "HDMI-1"], (2400, 1350), "eDP-1", &three[..]),
+            (vec!["HDMI-1", "eDP-1", "DP-1"], (1280, 720), "HDMI-1", &three[..]),
+        ] {
+            let record = published([session_observed_on("last", External, &names, Some(size))]);
+            let screens = screens_with("DP-1", connected);
+            let screen = screen_for_play(&record, None, External, None, &screens);
+            assert_eq!(screen.name.as_deref(), Some(first), "{names:?}");
+            let basis = display::profile_basis(screen.name.as_deref(), screen.observed.as_ref(), &screens);
+            assert_eq!(
+                (basis.name.as_deref(), basis.width_px, basis.height_px),
+                (Some(first), size.0, size.1),
+                "ranked for the screen it is shown on, at the size observed there: {names:?}"
+            );
+            let (_, destination) = compatible_choice(&screen, &screens, display::HdrState::Disabled);
+            assert_eq!(destination.as_deref(), Some(first));
+        }
+    }
+
+    #[test]
+    fn the_ranking_ranks_by_its_policy_and_places_on_the_decided_screen() {
+        // Review finding pw-2, comment 6: the ranking step of
+        // `select_playback_version`, on behaviour. A 1080p SDR screen.
+        // Third review of pw-1, comment 5: only a ranking for a screen
+        // carries that screen; any other leaves it to the launch (where this
+        // test held the decided screen for Best, Fastest and a Compatible
+        // ranking without its target, it now holds DecidedAtLaunch).
+        use crate::selection::PlaybackSourcePolicy::{Best, Compatible, Fastest};
+        let screens = screens_with("HDMI-1", &two_screens());
+        let screen = screen_for_play(
+            &PlaybackWindowRecord::default(),
+            None,
+            crate::player::PlayerKind::External,
+            None,
+            &screens,
+        );
+        let target = target_for(&screen, &screens, display::HdrState::Disabled);
+        let rank = |ranking| {
+            let (winner, destination) = rank_and_place(&mut two_copies(), ranking).unwrap();
+            (winner.version_id, destination)
+        };
+        let for_screen = || Ranking::ForScreen {
+            screen: screen.clone(),
+            target,
+        };
+        assert_eq!(
+            rank(for_screen()),
+            ("1080p-sdr".to_string(), PlayDestination::RankedFor(Some("HDMI-1".to_string())))
+        );
+        let at_launch = PlayDestination::DecidedAtLaunch;
+        assert_eq!(rank(Ranking::ByPolicy(Best)), ("4k-hdr".to_string(), at_launch.clone()));
+        assert_eq!(rank(Ranking::ByPolicy(Fastest)), ("4k-hdr".to_string(), at_launch.clone()));
+        assert_eq!(
+            rank(Ranking::ByPolicy(Compatible)),
+            ("4k-hdr".to_string(), at_launch),
+            "without its target a Compatible ranking is a Best one"
+        );
+        assert_eq!(rank_and_place(&mut [], for_screen()), None, "no copy, no choice");
+    }
+
+    #[test]
+    fn only_a_compatible_choice_fixes_the_screen_before_resolution() {
+        // Third review of finding pw-1, comment 5, and the plan's Slice 1:
+        // a play whose copy was not ranked for a screen (Best here) decides
+        // its screen at the launch, after the stream is resolved, so a
+        // report from the play before that arrives meanwhile counts. The
+        // steps are the play path's, in its order.
+        use crate::player::PlayerKind::{Embedded, External};
+        let last = session_observed_on("last", External, &["DP-1"], Some((3840, 2160)));
+        let slot = std::sync::Mutex::new(published([last.clone()]));
+        let screens = screens_with("HDMI-1", &two_screens());
+        // The choice of copy, by Best: no screen.
+        let (_, destination) = rank_and_place(
+            &mut two_copies(),
+            Ranking::ByPolicy(crate::selection::PlaybackSourcePolicy::Best),
+        )
+        .unwrap();
+        assert_eq!(destination, PlayDestination::DecidedAtLaunch);
+        // A late report while the stream is resolved: the window moved.
+        last.observation.apply_ipc_event(&serde_json::json!({
+            "event": "property-change", "name": "display-names", "data": ["HDMI-1"]
+        }));
+        // The launch decides, once, as for mpv's own window.
+        let decided = std::cell::Cell::new(0);
+        let launch = |destination| {
+            tauri::async_runtime::block_on(screen_at_launch(destination, async || {
+                decided.set(decided.get() + 1);
+                screen_for_play(&slot.lock().unwrap(), None, External, None, &screens)
+            }))
+        };
+        assert_eq!(launch(destination), Some("HDMI-1".to_string()), "the late report counts");
+        assert_eq!(decided.get(), 1, "decided once, at the launch");
+        // A Compatible copy ranked for DP-1 is shown on DP-1, and the launch
+        // looks at nothing.
+        assert_eq!(
+            launch(PlayDestination::RankedFor(Some("DP-1".to_string()))),
+            Some("DP-1".to_string())
+        );
+        assert_eq!(decided.get(), 1, "a Compatible copy's screen is not decided again");
+        assert_eq!(launch(PlayDestination::RankedFor(None)), None);
+        assert_eq!(decided.get(), 1);
+        // A play that wants the embedded player is decided at the launch as
+        // for mpv's own window, where it opens if the embedded player cannot
+        // start it: where the last mpv window is, as before this work. The
+        // embedded rule would have given Vela's screen.
+        assert_eq!(
+            screen_for_play(&slot.lock().unwrap(), None, External, None, &screens).name,
+            Some("HDMI-1".to_string())
+        );
+        let gone = published([session_observed_on("gone", External, &["DP-1"], None)]);
+        assert_eq!(
+            screen_for_play(&gone, None, External, None, &screens).name,
+            Some("DP-1".to_string())
+        );
+        assert_eq!(
+            screen_for_play(&gone, None, Embedded, None, &screens).name,
+            Some("HDMI-1".to_string())
+        );
+    }
+
+    #[test]
+    fn an_embedded_play_is_ranked_for_the_screen_holding_velas_window() {
+        // Review finding pw-2, the reviewer's case: the last play ran in
+        // mpv's own window on DP-1, and the user's next play will run in the
+        // embedded player, inside Vela's window, on HDMI-1. It is ranked for
+        // HDMI-1, not for DP-1.
+        use crate::player::PlayerKind::{Embedded, External};
+        let external = published([session_observed_on("external", External, &["DP-1"], Some((3840, 2160)))]);
+        let screens = screens_with("HDMI-1", &two_screens());
+        let screen = screen_for_play(&external, None, Embedded, None, &screens);
+        assert_eq!(
+            compatible_choice(&screen, &screens, display::HdrState::Disabled),
+            ("1080p-sdr".to_string(), Some("HDMI-1".to_string()))
+        );
+    }
+
+    #[test]
+    fn a_play_that_cannot_run_embedded_is_ranked_for_the_mpv_window_it_opens() {
+        // Review finding pw-2, a play the setting sends to the embedded
+        // player while it cannot run (here: chosen after this run started).
+        // The play runs in mpv's own window, which opens on the last mpv
+        // window's screen, DP-1; its copy is ranked for DP-1 too. The steps
+        // are the play path's, in its order: the player is chosen, then the
+        // screen is decided, the copy ranked for it, and the window opens.
+        use crate::player::PlayerKind::{Embedded, External};
+        let record = published([session_observed_on("last", External, &["DP-1"], Some((3840, 2160)))]);
+        let screens = screens_with("HDMI-1", &two_screens());
+        let choice = crate::player::choose(
+            Embedded,
+            &Err(crate::player::EmbeddedUnavailable::NeedsRestart),
+        );
+        assert_eq!(choice.kind, External);
+        let screen = screen_for_play(&record, None, choice.kind, None, &screens);
+        assert_eq!(
+            compatible_choice(&screen, &screens, display::HdrState::Enabled),
+            ("4k-hdr".to_string(), Some("DP-1".to_string())),
+            "the play opens on the screen its copy was ranked for"
+        );
+        // The same play when the embedded player can run is shown in Vela's
+        // window and ranked for the screen holding it.
+        let choice = crate::player::choose(Embedded, &Ok(()));
+        let screen = screen_for_play(&record, None, choice.kind, None, &screens);
+        assert_eq!(screen.name.as_deref(), Some("HDMI-1"));
+    }
+
+    // Review finding pw-2, comment 5: an embedded play that could run and
+    // then cannot start. From the choice of player, through the decision of
+    // its screen and the ranking of its copy, to the mpv window `play` starts
+    // in its place, with stand-ins for the embedded player and for mpv.
+    #[cfg(unix)]
+    #[test]
+    fn a_play_the_embedded_player_cannot_start_opens_where_its_copy_was_ranked() {
+        use crate::playback::{embedded_spec, mpv_is, stand_in_for_mpv, FailingLauncher};
+        use crate::player::PlayerKind::{Embedded, External};
+        use std::sync::atomic::AtomicBool;
+        use std::sync::{Arc, Mutex};
+        // The last play ran in mpv's own window on DP-1; Vela's window is on
+        // HDMI-1; the embedded player can run.
+        let record = published([session_observed_on("last", External, &["DP-1"], Some((3840, 2160)))]);
+        let screens = screens_with("HDMI-1", &two_screens());
+        let choice = crate::player::choose(Embedded, &Ok(()));
+        assert_eq!(choice.kind, Embedded);
+        let screen = screen_for_play(&record, None, choice.kind, None, &screens);
+        let target = target_for(&screen, &screens, display::HdrState::Disabled);
+        assert_eq!(
+            (target.width, target.height),
+            (1920, 1080),
+            "ranked for HDMI-1's size, not for the 4K DP-1 the last mpv window was on"
+        );
+        // The real ranking, the real selection of its winner, and the real
+        // resolution of that selection (second review of finding pw-2): the
+        // version that won is the one resolved, out of two copies on one
+        // source, the 4K HDR one listed first.
+        let (winner, destination) = rank_and_place(
+            &mut two_copies(),
+            Ranking::ForScreen {
+                screen: screen.clone(),
+                target,
+            },
+        )
+        .unwrap();
+        assert_eq!(winner.version_id, "1080p-sdr", "ranked for HDMI-1");
+        let mut probed = HashMap::from([("server".to_string(), "title".to_string())]);
+        let selection = selection_for_winner(
+            versions_of(&two_copies()),
+            &mut probed,
+            &winner,
+            &catalog_item("server:title", "movie", 1, false),
+            choice,
+            destination,
+        )
+        .unwrap_or_else(|_| panic!("the winner is selected"));
+        assert_eq!(selection.version_id.as_deref(), Some("1080p-sdr"));
+        let resolved = tauri::async_runtime::block_on(resolve_selected(
+            &VersionedSource::default(),
+            &selection,
+            false,
+            config::PLAYBACK_QUALITY_ORIGINAL,
+        ))
+        .unwrap();
+        // The launch hands the play the resolved stream and its carried
+        // screen (`screen_at_launch`, which looks at nothing for it).
+        let PlayDestination::RankedFor(destination) = selection.screen else {
+            panic!("a Compatible choice carries its screen");
+        };
+        let mut spec = embedded_spec();
+        spec.url = resolved.url;
+        spec.screen_name = destination;
+        spec.inherited_window_state = opening_window(&record, Default::default());
+        let launcher = FailingLauncher {
+            asked: Arc::new(Mutex::new(Vec::new())),
+        };
+        let (program, arguments) = stand_in_for_mpv("late-fallback-screen");
+        let found = program.to_string_lossy().into_owned();
+        let _mpv = mpv_is(move || Ok(found.clone()));
+        let slot = Arc::new(Mutex::new(None));
+        let result = playback::play(
+            &spec,
+            playback::ProgressTarget::None,
+            playback::Players {
+                slot: &slot,
+                shutting_down: &Arc::new(AtomicBool::new(false)),
+                embedded: Some(&launcher),
+            },
+            &Arc::new(PlaybackAdvance::default()),
+            "late-fallback".to_string(),
+            None,
+            None,
+        );
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !arguments.exists() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let started_with = std::fs::read_to_string(&arguments).unwrap_or_default();
+        // Whatever happened, leave nothing running.
+        if let Some(mut player) = slot.lock().unwrap_or_else(|e| e.into_inner()).take() {
+            let _ = player.kill();
+        }
+        let _ = std::fs::remove_dir_all(program.parent().unwrap());
+        let started = result.unwrap_or_else(|reason| panic!("the play is not failed: {reason}"));
+        started.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        assert_eq!(started.player, External, "the embedded player could not start it");
+        let screen_option = started_with
+            .lines()
+            .rev()
+            .find(|argument| argument.starts_with("--screen-name="));
+        assert_eq!(
+            screen_option,
+            Some("--screen-name=HDMI-1"),
+            "the mpv window opens on the screen the copy was ranked for: {started_with}"
+        );
+        assert_eq!(
+            started_with.lines().last(),
+            Some("https://media.invalid/server/1080p-sdr"),
+            "the mpv window plays the version the copy was ranked for: {started_with}"
+        );
+    }
+
+    /// The versions a source offers for these candidates, in their order.
+    fn versions_of(candidates: &[crate::selection::PlaybackCandidate]) -> Vec<PlaybackVersion> {
+        candidates
+            .iter()
+            .map(|candidate| PlaybackVersion {
+                source_id: candidate.source_id.clone(),
+                source_name: "Server".to_string(),
+                item_key: format!("{}:title", candidate.source_id),
+                version_id: candidate.version_id.clone(),
+                width: candidate.width,
+                height: candidate.height,
+                hdr: candidate.hdr,
+                bitrate: candidate.bitrate,
+                direct_play_rank: candidate.direct_play_rank,
+                endpoint: url::Url::parse("https://media.invalid/").unwrap(),
+                provider_verified_local: false,
+            })
+            .collect()
+    }
+
+    /// A source whose stream for a version names that version, and which
+    /// records what each resolution was asked with: the key, the duration,
+    /// the version (`None`: the source's own copy), whether markers were
+    /// asked for, and the quality.
+    #[derive(Default)]
+    struct VersionedSource {
+        asked: std::sync::Mutex<Vec<AskedResolution>>,
+    }
+
+    /// One resolution asked of `VersionedSource`: key, duration, version,
+    /// markers, quality.
+    type AskedResolution = (String, Option<u64>, Option<String>, bool, String);
+
+    #[async_trait::async_trait]
+    impl crate::source::MediaSource for VersionedSource {
+        fn id(&self) -> String {
+            "server".to_string()
+        }
+        fn name(&self) -> String {
+            "Server".to_string()
+        }
+        fn kind(&self) -> &'static str {
+            "plex"
+        }
+        async fn sections(&self) -> Result<Vec<SectionDto>, String> {
+            Ok(vec![])
+        }
+        async fn hubs(&self) -> Result<Vec<HubDto>, String> {
+            Ok(vec![])
+        }
+        async fn items(
+            &self,
+            _key: &str,
+            _ty: &str,
+            _sort: Option<&str>,
+            _start: usize,
+            _size: usize,
+        ) -> Result<Vec<ItemDto>, String> {
+            Ok(vec![])
+        }
+        async fn search(&self, _query: &str) -> Result<Vec<ItemDto>, String> {
+            Ok(vec![])
+        }
+        async fn children(
+            &self,
+            _key: &str,
+            _start: usize,
+            _size: usize,
+        ) -> Result<Vec<ItemDto>, String> {
+            Ok(vec![])
+        }
+        async fn resolve_stream(
+            &self,
+            key: &str,
+            duration_ms: Option<u64>,
+            include_markers: bool,
+            quality: &str,
+        ) -> Result<crate::source::StreamResolution, String> {
+            self.asked.lock().unwrap().push((
+                key.to_string(),
+                duration_ms,
+                None,
+                include_markers,
+                quality.to_string(),
+            ));
+            Ok(Self::stream(format!("https://media.invalid/{key}/default")))
+        }
+        async fn resolve_stream_version(
+            &self,
+            key: &str,
+            duration_ms: Option<u64>,
+            version_id: &str,
+            include_markers: bool,
+            quality: &str,
+        ) -> Result<crate::source::StreamResolution, String> {
+            self.asked.lock().unwrap().push((
+                key.to_string(),
+                duration_ms,
+                Some(version_id.to_string()),
+                include_markers,
+                quality.to_string(),
+            ));
+            assert_eq!(key, "title", "resolved by the key its source was probed with");
+            Ok(Self::stream(format!("https://media.invalid/server/{version_id}")))
+        }
+    }
+
+    impl VersionedSource {
+        fn stream(url: String) -> crate::source::StreamResolution {
+            crate::source::StreamResolution {
+                url,
+                resume_ms: 0,
+                progress: playback::ProgressTarget::None,
+                http_headers: Vec::new(),
+                delivery: crate::source::Delivery::Original,
+                transcode_session: None,
+                markers: Vec::new(),
+            }
+        }
+    }
+
+    #[test]
+    fn a_selection_without_a_version_plays_the_sources_own_copy() {
+        // The other arm of resolve_selected: nothing ranked, the source's
+        // default copy.
+        let selection = PlaybackSelection {
+            source_id: "server".to_string(),
+            raw_item_key: "title".to_string(),
+            version_id: None,
+            item: catalog_item("server:title", "movie", 1, false),
+            player: crate::player::choose(crate::player::PlayerKind::External, &Ok(())),
+            screen: PlayDestination::DecidedAtLaunch,
+        };
+        let resolved = tauri::async_runtime::block_on(resolve_selected(
+            &VersionedSource::default(),
+            &selection,
+            false,
+            config::PLAYBACK_QUALITY_ORIGINAL,
+        ))
+        .unwrap();
+        assert_eq!(resolved.url, "https://media.invalid/title/default");
+    }
+
+    #[test]
+    fn a_selection_is_resolved_with_the_plays_duration_markers_and_quality() {
+        // The attack on the fourth repair, finding 4: each arm of
+        // resolve_selected hands the source the selected item's duration and
+        // the play's markers and quality, as they are given.
+        let mut item = catalog_item("server:title", "movie", 1, false);
+        item.duration_ms = Some(5_400_000);
+        let selection = |version_id: Option<&str>| PlaybackSelection {
+            source_id: "server".to_string(),
+            raw_item_key: "title".to_string(),
+            version_id: version_id.map(str::to_string),
+            item: item.clone(),
+            player: crate::player::choose(crate::player::PlayerKind::External, &Ok(())),
+            screen: PlayDestination::DecidedAtLaunch,
+        };
+        for version_id in [Some("1080p-sdr"), None] {
+            for (include_markers, quality) in [(true, "1080p-8"), (false, config::PLAYBACK_QUALITY_ORIGINAL)] {
+                let source = VersionedSource::default();
+                tauri::async_runtime::block_on(resolve_selected(
+                    &source,
+                    &selection(version_id),
+                    include_markers,
+                    quality,
+                ))
+                .unwrap();
+                assert_eq!(
+                    source.asked.into_inner().unwrap(),
+                    vec![(
+                        "title".to_string(),
+                        Some(5_400_000),
+                        version_id.map(str::to_string),
+                        include_markers,
+                        quality.to_string(),
+                    )],
+                    "version {version_id:?}, markers {include_markers}, quality {quality}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_winner_is_selected_by_its_source_and_its_version() {
+        // The attack on the fourth repair, finding 3: two servers number
+        // their copies alike (Plex media ids are per server), and the winner
+        // is the second server's "1". It is that server's copy that is
+        // selected and routed, not the first one listed with that id.
+        let copy = |source: &str, width, height| crate::selection::PlaybackCandidate {
+            source_id: source.to_string(),
+            version_id: "1".to_string(),
+            width,
+            height,
+            hdr: false,
+            bitrate: 10,
+            direct_play_rank: 0,
+            locality: crate::locality::EndpointLocality::Lan,
+        };
+        let candidates = [copy("first", 3840, 2160), copy("second", 1920, 1080)];
+        let mut probed = HashMap::from([
+            ("first".to_string(), "first-raw".to_string()),
+            ("second".to_string(), "second-raw".to_string()),
+        ]);
+        let selection = selection_for_winner(
+            versions_of(&candidates),
+            &mut probed,
+            &candidates[1],
+            &catalog_item("first:title", "movie", 1, false),
+            crate::player::choose(crate::player::PlayerKind::External, &Ok(())),
+            PlayDestination::DecidedAtLaunch,
+        )
+        .unwrap_or_else(|_| panic!("the winner is selected"));
+        assert_eq!(
+            (
+                selection.source_id.as_str(),
+                selection.raw_item_key.as_str(),
+                selection.version_id.as_deref(),
+                selection.item.rating_key.as_str(),
+                selection.item.source_id.as_str(),
+            ),
+            ("second", "second-raw", Some("1"), "second:title", "second"),
+            "the second server's copy, by the key it was probed with"
+        );
+    }
+
+    #[test]
+    fn a_failed_launch_keeps_the_previous_record() {
+        let slot = std::sync::Mutex::new(published([observed_window_session(
+            "earlier",
+            crate::player::PlayerKind::External,
+        )]));
+        let mut side_effects = 0;
+        let failed = PlaybackWindowSession {
+            session_id: "failed".to_string(),
+            player: crate::player::PlayerKind::External,
+            observation: playback::WindowStateObservation::default(),
+        };
+        let result = publish_started_play(
+            Err::<(), _>("spawn failed".to_string()),
+            &slot,
+            failed,
+            || side_effects += 1,
+        );
+        assert_eq!(result, Err("spawn failed".to_string()));
+        assert_eq!(side_effects, 0, "a failed launch runs no side effect");
+        {
+            let current = slot.lock().unwrap();
+            assert_eq!(current.latest().unwrap().session_id, "earlier");
+            assert_eq!(
+                inherited_window_state(&current).fullscreen,
+                Some(true),
+                "the next play still opens the way the last started play left it"
+            );
+        }
+
+        let launched = PlaybackWindowSession {
+            session_id: "launched".to_string(),
+            player: crate::player::PlayerKind::External,
+            observation: playback::WindowStateObservation::default(),
+        };
+        publish_started_play(Ok(()), &slot, launched, || side_effects += 1).unwrap();
+        assert_eq!(side_effects, 1);
+        assert_eq!(
+            slot.lock().unwrap().latest().unwrap().session_id,
             "launched"
         );
     }
@@ -7264,6 +10668,39 @@ mod tests {
         advance.mark_ended(completed.clone());
         assert_eq!(advance.take_ready(), Some(completed));
         assert_eq!(advance.take_ready(), None);
+    }
+
+    // pc-2: the tracker's end says whether a clean end of file was seen for
+    // exactly its session, and that sighting lasts until the two are joined.
+    #[test]
+    fn playback_advance_says_whether_a_clean_end_was_seen_for_a_session() {
+        let advance = PlaybackAdvance::default();
+        assert!(!advance.saw_eof("one"));
+        advance.mark_eof("one".to_string());
+        assert!(advance.saw_eof("one"));
+        assert!(!advance.saw_eof("other"));
+        advance.mark_ended(completion("one", "test:one"));
+        assert!(advance.take_ready().is_some());
+        assert!(!advance.saw_eof("one"), "joined, the sighting is gone");
+    }
+
+    // pc-2: which ends of a play end its run, by how the play ended. The
+    // page leaves the run's fullscreen on these and only these.
+    #[test]
+    fn an_end_is_the_end_of_the_run_only_when_it_is_not_clean_and_nothing_replaced_the_play() {
+        // A clean end: the dispatcher decides what follows (a playlist's next
+        // play, Continue Playing, or nothing), so the tracker's end does not.
+        assert!(!end_is_run_over(true, Some("a"), "a"));
+        // An error, a quit over mpv's socket, mpv dying: the play is still
+        // the active one, and nothing follows it.
+        assert!(end_is_run_over(false, Some("a"), "a"));
+        // A step-down or any other replacement installs the new play before
+        // the old one is stopped: the old one's end is not the run's.
+        assert!(!end_is_run_over(false, Some("b"), "a"));
+        assert!(!end_is_run_over(true, Some("b"), "a"));
+        // No play is active (a replacement that failed to start has been
+        // taken back): nothing follows.
+        assert!(end_is_run_over(false, None, "a"));
     }
 
     #[test]

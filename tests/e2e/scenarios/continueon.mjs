@@ -12,8 +12,11 @@ import {
   pollUntil,
   seedConfig,
   seedPlaylists,
+  velaConnected,
+  runPlayer,
 } from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
+import { shown } from '../proof.mjs';
 
 let mock;
 
@@ -46,6 +49,10 @@ async function nextMpv(seen, expectedId) {
   const socket = await waitForNewMpvSocket(seen, { timeoutMs: 20_000 });
   seen.add(socket);
   const mpv = await MpvIpc.connect(socket);
+  // playback::play: this client + position/window reader + EOF watcher;
+  // Original quality, no notice or health sampler.
+  // Embedded adds player::report::spawn_reporter for the view's state.
+  await velaConnected(socket, runPlayer === 'embedded' ? 4 : 3);
   await mpv.setProp('pause', true);
   const loaded = String(await pollUntil(
     () => mpv.getProp('path').catch(() => null),
@@ -80,6 +87,7 @@ function requestIndexAfter(start, predicate) {
 
 export default {
   name: 'continueon',
+  rows: ['4', '5', '14'],
 
   async seed({ configRoot }) {
     const mediaDir = makeClips(configRoot, ['on-a.mp4', 'on-b.mp4', 'on-c.mp4']);
@@ -371,5 +379,7 @@ export default {
     assert.deepEqual(playbackInfoIds(), ['on-a', 'on-b', 'on-c']);
     assert.deepEqual(mock.state.contractViolations, []);
     await screenshot('02-playlist-boundary');
+    // The end of its proof of its rows in this player (proof.mjs).
+    shown('4', '5', '14');
   },
 };

@@ -1,0 +1,188 @@
+// Judgements of what a scenario observed, as pure functions: they take what
+// was seen and say whether it is right, and nothing here watches, waits or
+// acts. The scenarios do the observing and ask these functions; the unit tests
+// (tests/e2e-judge.test.mjs, part of `npm run check`) hold the rules, so that a
+// rule taken out is seen without a run of the app.
+//
+// Importing this module does nothing.
+
+// Whether the play SKIPPED a range rather than playing through it (review
+// finding pa-1; markers.mjs, proveSkippedPast). The play was put at `startS`,
+// just ahead of the range [rangeStart, rangeEnd] (seconds), and resumed; each
+// sample is `{ t, ms }`: its position in seconds (null for a read that
+// failed) and the milliseconds since the play resumed (and `askedMs`, below).
+// The samples are judged in order:
+// - one at or past the range's end, taken inside the window, decides it: the
+//   skip happened, and the last position seen before it (`before`) and the
+//   sample past the end (`after`, at `ms`) are returned. Taken after the
+//   window it fails: by then ordinary playback has had time to get there,
+//   and one slow read of the position is enough to see nothing in between
+//   (review finding pa-1, verification round 1);
+// - one at or past rangeStart + marginS, short of the end, fails: the play
+//   was seen inside the range, so whatever crossed it was not one jump (the
+//   margin allows for the sample that sees the play just past the start,
+//   before the skip lands);
+// - once `windowMs` is over with neither, it fails: from startS ordinary
+//   playback cannot cross the range in that time, only a skip can.
+// A crossing also counts only if the play was watched across it: no more
+// than `maxGapMs` may lie between the last position seen before it and the
+// sample past the end. In a longer gap (one slow read, or reads that
+// failed) a skip that landed short of the end could have played the rest
+// unseen (verification round 2). `ms` is taken when a read has answered,
+// from a clock started before the play was told to resume, so a slow read
+// and a slow resume both count. A sample also carries `askedMs`, when its
+// read was asked for, and the gap runs from when the position before the
+// jump was ASKED for to when the one past the end was ANSWERED: an answer
+// can wait to be read (the test's process busy, a reply held in a buffer),
+// and the position in it is then older than the time it was read at; the
+// position was true no earlier than its read was asked for, and no later
+// than it was answered (verification round 3). A sample without both
+// times, in that order, is refused.
+// Returns null while undecided, `{ ok: true, before, after, ms }` or
+// `{ ok: false, why }`.
+export function skipJumpVerdict(samples, { startS, rangeStart, rangeEnd, windowMs, marginS, maxGapMs }) {
+  let before = startS;
+  // The earliest `before` can have been true: when its read was asked for;
+  // for the start, when the play was told to resume.
+  let beforeAskedMs = 0;
+  let last = null;
+  for (const { t, askedMs, ms } of samples) {
+    if (!(Number.isFinite(askedMs) && Number.isFinite(ms) && askedMs <= ms)) {
+      throw new Error(
+        'skipJumpVerdict: a sample needs the time its read was asked for (askedMs) and the time it was answered (ms), ' +
+          `in that order: ${JSON.stringify({ t, askedMs, ms })}`,
+      );
+    }
+    if (t != null && t >= rangeEnd) {
+      if (ms > windowMs) {
+        return {
+          ok: false,
+          why:
+            `the position was first seen past the range's end (${rangeEnd} s) ${ms} ms after playing on from ` +
+            `${startS.toFixed(2)} s, after the ${windowMs} ms in which only a skip can get it there; ` +
+            `it is ${t} (the sample before was ${before} s)`,
+        };
+      }
+      if (ms - beforeAskedMs > maxGapMs) {
+        return {
+          ok: false,
+          why:
+            `the play was not watched across the jump: ${ms - beforeAskedMs} ms lie between the position seen before it ` +
+            `(${before} s) and the one past the range's end (${t} s), more than the ${maxGapMs} ms allowed; ` +
+            'a skip that landed short of the end could have played the rest unseen',
+        };
+      }
+      return { ok: true, before, after: t, ms };
+    }
+    if (t != null && t >= rangeStart + marginS) {
+      return {
+        ok: false,
+        why:
+          `the play must jump from the range's start (${rangeStart} s) past its end ` +
+          `(${rangeEnd} s) in one step; it was seen inside the range at ${t} s ` +
+          `(the sample before was ${before} s), ${ms} ms after resuming from ${startS.toFixed(2)} s`,
+      };
+    }
+    if (t != null) {
+      before = t;
+      beforeAskedMs = askedMs;
+    }
+    last = t;
+    if (ms > windowMs) {
+      return {
+        ok: false,
+        why:
+          `the position must be past the range's end (${rangeEnd} s) within ${windowMs} ms ` +
+          `of playing on from ${startS.toFixed(2)} s, which only a skip can do; it is ${last}`,
+      };
+    }
+  }
+  return null;
+}
+
+// What is wrong with the timeline reports Plex received for one play that was
+// stopped (review finding pa-7; multiplex.mjs): `reports` are the query
+// objects of the play's /:/timeline requests, in the order they came;
+// `lastSeenMs` is the play's position as read from mpv when it was stopped
+// (the scenario holds the play still, paused, at that position before it
+// stops it, helpers.mjs stopStill; Vela tells Plex "playing" while a play is
+// paused, start_tracking_plex); `seekMs` the position the play was sent to
+// before it; `durationMs`,
+// `ratingKey` and `key` the item's. One sentence per broken rule, none when
+// all is well:
+// - exactly one report says state=stopped, and it is the last;
+// - before the last there is at least one report, and all say "playing";
+// - the stopped report names the item (its ratingKey, and its key);
+// - its time is past the seek and inside the item;
+// - its time is where the play stopped: within 500 ms of lastSeenMs, either
+//   way (the play does not move from there before the stop acts; an
+//   allowance of seconds once let a stop that took long fail and a report
+//   that was late pass, verification round 1; a reading taken while the
+//   play still moved let a correct report fail and a stale one pass,
+//   verification round 2),
+//   and before the item's end (a report at the full duration tells Plex it
+//   was watched to the end); lastSeenMs must have been read;
+// - it carries the item's duration;
+// - no report says the play got further than the stopped report's time.
+// The position and monotonicity rules are narrower than "500 ms either way" once a
+// "playing" report of the held position has come before the stop (multiplex
+// waits for one): the stopped report may then be no lower than that report,
+// so its lower bound is that report's position (exactly the hold when that
+// report is exact), and its upper bound is 500 ms above the measured hold.
+// A retry after an idle pooled connection closes (e50aa83) reaches this mock
+// once: the failed attempt was never handled. The mock immediately answers
+// each timeline it handles; a second stopped arrival fails even if identical
+// (fr-14).
+export function plexStopProblems(reports, { lastSeenMs, durationMs, ratingKey, key, seekMs }) {
+  const stopped = reports.filter((q) => q.state === 'stopped');
+  const one = `the play sends exactly one stopped timeline report, not ${stopped.length}`;
+  // With none there is nothing more to judge; with more, the first is judged.
+  if (stopped.length === 0) return [one];
+  const problems = stopped.length === 1 ? [] : [one];
+  const report = stopped[0];
+  if (reports.at(-1) !== report) problems.push('the stopped report comes last');
+  const earlier = reports.slice(0, -1);
+  if (!(earlier.length > 0 && earlier.every((q) => q.state === 'playing'))) {
+    problems.push('"playing" reports, and only those, come before it');
+  }
+  if (report.ratingKey !== ratingKey) {
+    problems.push(`the stopped report names the item played by its ratingKey ${ratingKey}, not ${report.ratingKey}`);
+  }
+  if (report.key !== key) problems.push(`the stopped report names the item played by its key ${key}, not ${report.key}`);
+  const finalMs = Number(report.time);
+  if (!(finalMs >= seekMs && finalMs <= durationMs)) {
+    problems.push(
+      `the stopped report carries the final position, past the ${seekMs} ms seek and inside the ${durationMs} ms item, not ${report.time}`,
+    );
+  }
+  if (!Number.isFinite(lastSeenMs)) {
+    problems.push(`the play's position as it was stopped was read from mpv, not ${lastSeenMs}`);
+  }
+  if (!(finalMs >= lastSeenMs - 500 && finalMs <= lastSeenMs + 500 && finalMs < durationMs)) {
+    problems.push(
+      `the stopped report's position (${report.time} ms) is where the play stopped: mpv held it at ${lastSeenMs} ms ` +
+        `as it was stopped, and the item ends at ${durationMs} ms`,
+    );
+  }
+  if (report.duration !== String(durationMs)) {
+    problems.push(`the stopped report carries the item's duration (${durationMs} ms), not ${report.duration}`);
+  }
+  if (!reports.every((q) => Number(q.time) <= finalMs)) {
+    problems.push('no report says the play got further than its final position');
+  }
+  return problems;
+}
+
+// How many connections a listening Unix socket has accepted, counted in the
+// text of /proc/net/unix (review finding pw-8; windowsetting.mjs, which waits
+// for Vela's own connections to an mpv before it changes or ends the play).
+// Each line there is one socket: `Num RefCount Protocol Flags Type St Inode
+// Path`. The accepted end of a connection carries the listening socket's
+// path and is in state 03 (connected); the listening socket itself is in
+// state 01; the connecting ends carry no path.
+export function acceptedConnections(procNetUnix, socketPath) {
+  return procNetUnix
+    .split('\n')
+    .map((line) => line.trim().split(/\s+/))
+    .filter((fields) => fields[7] === socketPath && fields[5] === '03').length;
+}

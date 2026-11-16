@@ -7,6 +7,7 @@ mod durable;
 mod display;
 mod locality;
 mod playback;
+mod player;
 mod playlists;
 mod plex_api;
 mod plex_library;
@@ -44,7 +45,7 @@ pub struct AppState {
     /// The currently-running mpv process, so a new play can terminate the old one.
     /// `Arc` so a background reaper can also try_wait() it (non-blocking) and clear
     /// the slot once it exits on its own, instead of leaving a zombie.
-    pub(crate) current_child: Arc<Mutex<Option<playback::ManagedChild>>>,
+    pub(crate) current_child: Arc<Mutex<Option<player::PlayerHandle>>>,
     /// Set as the app exits. Checked under `current_child`'s lock before launching
     /// mpv, so a play that races shutdown either sees this (and doesn't launch) or
     /// has already registered its child for the exit sweep to kill — no orphan.
@@ -63,7 +64,7 @@ pub struct AppState {
     /// spawn a per-child waiter thread (which could fail under thread exhaustion
     /// and drop the child unreaped) nor block on wait() (which could hang on a
     /// wedged player).
-    pub(crate) reap_queue: Arc<Mutex<Vec<playback::ManagedChild>>>,
+    pub(crate) reap_queue: Arc<Mutex<Vec<player::PlayerHandle>>>,
     /// Serializes play_item so overlapping clicks can't both spawn and orphan an mpv.
     pub play_lock: AsyncMutex<()>,
     /// Serializes explicit watched edits with clean-completion fan-out so
@@ -94,15 +95,44 @@ pub struct AppState {
     /// asks for the next episode, so this in-memory copy preserves the merged
     /// hierarchy without exposing it in the id-only completion event.
     pub(crate) active_playback_item: AsyncMutex<Option<(String, source::ItemDto)>>,
+    /// The player the active session runs in, so a relaunch that replaces it
+    /// (an Automatic step-down) stays in the same player even if the setting
+    /// changed in between.
+    pub(crate) active_playback_player: AsyncMutex<Option<(String, player::PlayerKind)>>,
+    /// The player view the page has been told is open (review finding
+    /// pc-2). Changed only together with the `player-opened` and
+    /// `player-closed` events, on the embedded play's own thread, and read by
+    /// a launch that failed, on the async command task, to name the view the
+    /// page is showing in the report it sends with the record's lock held.
+    pub(crate) player_view: player::ViewRecord,
+    /// Whether the page holds the player's fullscreen: set when
+    /// `player_fullscreen` turns fullscreen on for the running embedded play
+    /// (under the player slot's lock), cleared when it turns it off and when
+    /// the window is seen to leave fullscreen however that was asked for
+    /// (`player::embedded::follow_fullscreen`). It outlasts the play that
+    /// asked, as the page's own claim does, also across a play that fell back
+    /// to mpv's own window; nothing sets it for somebody who only ever uses
+    /// mpv's own window. A launch that failed reads it to know whether it owes
+    /// the page the report that the run is over (review finding pc-2).
+    pub(crate) player_fullscreen_held: AtomicBool,
+    /// Which embedded-player fallback the user has already been told about.
+    pub(crate) embedded_fallback_notices: Arc<Mutex<player::FallbackNotices>>,
+    /// The embedded player's side of the app: whether it can run here, and
+    /// where the page has put the video.
+    pub(crate) embedded: Arc<player::EmbeddedHost>,
     /// Exact in-memory Ask-mode run state. Affinity is tied to one active
     /// series/Vela-playlist session and is never persisted.
     pub(crate) playback_run: AsyncMutex<Option<commands::PlaybackRunState>>,
     /// Bounded, expiring source-choice requests. Resolved stream URLs,
     /// provider sessions, and auth headers never enter this store or its DTOs.
     pub(crate) playback_choices: AsyncMutex<commands::PlaybackChoiceRequests>,
-    /// Window-state observer for the latest successfully launched mpv session.
-    /// Exact automatic replacements may snapshot it; manual plays never do.
-    pub(crate) playback_window_session: Mutex<Option<commands::PlaybackWindowSession>>,
+    /// The window record of this run's plays: the latest play that started,
+    /// and the latest that started in mpv's own window
+    /// (`commands::PlaybackWindowRecord`). Every later play in this run opens
+    /// its window from the second, manual or automatic. Shared with each
+    /// play's end callback, which remembers its window for the next run only
+    /// while it is still the last play in mpv's own window.
+    pub(crate) playback_window_session: Arc<Mutex<commands::PlaybackWindowRecord>>,
     /// The Tauri app handle, set once at setup. Lets non-command code (the
     /// playback tracker tails) emit UI events such as `playback-ended`.
     pub app_handle: std::sync::OnceLock<tauri::AppHandle>,
@@ -113,6 +143,60 @@ pub struct AppState {
     /// Materialized merged children for the currently-open show or season.
     /// Continuation pages window the same source set and ordering as page 0.
     pub merged_children_snapshot: AsyncMutex<Option<commands::MergedChildrenSnapshot>>,
+}
+
+#[cfg(test)]
+impl AppState {
+    /// The state as `run` builds it, with no sources, a ready durable gate
+    /// and no app, for unit tests of code that takes the whole state.
+    pub(crate) fn for_tests() -> Self {
+        AppState {
+            registry: AsyncMutex::new(SourceRegistry::default()),
+            durable_gate: AsyncMutex::new(durable::DurableGate::ready()),
+            tracking_stop: Mutex::new(None),
+            current_child: Arc::new(Mutex::new(None)),
+            shutting_down: Arc::new(AtomicBool::new(false)),
+            active_transcode: Arc::new(Mutex::new(None)),
+            step_down: Arc::new(commands::StepDownQueue::default()),
+            reap_queue: Arc::new(Mutex::new(Vec::new())),
+            play_lock: AsyncMutex::new(()),
+            watch_edit_lock: AsyncMutex::new(()),
+            source_lock: AsyncMutex::new(()),
+            plex_link_sessions: AsyncMutex::new(Default::default()),
+            playback_advance: Arc::new(commands::PlaybackAdvance::default()),
+            playlist_cursor: AsyncMutex::new(None),
+            active_playback_session: AsyncMutex::new(None),
+            active_playback_item: AsyncMutex::new(None),
+            active_playback_player: AsyncMutex::new(None),
+            player_view: player::ViewRecord::default(),
+            player_fullscreen_held: AtomicBool::new(false),
+            embedded_fallback_notices: Arc::new(Mutex::new(player::FallbackNotices::default())),
+            embedded: Arc::new(player::EmbeddedHost::new()),
+            playback_run: AsyncMutex::new(None),
+            playback_choices: AsyncMutex::new(Default::default()),
+            playback_window_session: Arc::new(Mutex::new(Default::default())),
+            app_handle: std::sync::OnceLock::new(),
+            merged_snapshot: AsyncMutex::new(None),
+            merged_children_snapshot: AsyncMutex::new(None),
+        }
+    }
+}
+
+/// Decide, before any window exists, how this run of Vela creates its window,
+/// and do what that decision needs done first. Call once, first thing in
+/// `main`. Returns whether this run is in embedded window mode, in which
+/// WebKit's GPU renderer must be left on; every other run is started exactly
+/// as it always was. The reasoning is in `player::embedded::startup`.
+pub fn prepare_startup() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        use player::embedded::startup;
+        startup::prepare() == startup::WindowMode::Embedded
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        false
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -140,9 +224,14 @@ pub fn run() {
         playlist_cursor: AsyncMutex::new(None),
         active_playback_session: AsyncMutex::new(None),
         active_playback_item: AsyncMutex::new(None),
+        active_playback_player: AsyncMutex::new(None),
+        player_view: player::ViewRecord::default(),
+        player_fullscreen_held: AtomicBool::new(false),
+        embedded_fallback_notices: Arc::new(Mutex::new(player::FallbackNotices::default())),
+        embedded: Arc::new(player::EmbeddedHost::new()),
         playback_run: AsyncMutex::new(None),
         playback_choices: AsyncMutex::new(Default::default()),
-        playback_window_session: Mutex::new(None),
+        playback_window_session: Arc::new(Mutex::new(Default::default())),
         app_handle: std::sync::OnceLock::new(),
         merged_snapshot: AsyncMutex::new(None),
         merged_children_snapshot: AsyncMutex::new(None),
@@ -160,7 +249,7 @@ pub fn run() {
         {
             let mut guard = child_slot.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(child) = guard.as_mut() {
-                if matches!(child.try_wait(), Ok(Some(_))) {
+                if matches!(child.has_ended(), Ok(true)) {
                     *guard = None;
                 }
             }
@@ -170,10 +259,23 @@ pub fn run() {
         reap_queue
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .retain_mut(|child| {
-                playback::retain_child_after_try_wait(&child.try_wait())
-            });
+            .retain_mut(|child| player::retain_after_poll(&child.has_ended()));
     });
+
+    #[cfg_attr(not(target_os = "linux"), allow(unused_mut))]
+    let mut context = tauri::generate_context!();
+    #[cfg(target_os = "linux")]
+    {
+        use player::embedded::startup;
+        if startup::decision().mode == startup::WindowMode::Embedded {
+            // The video is drawn on a surface under the window and shows
+            // wherever the page is transparent. Everywhere else the page is
+            // opaque, so the window looks as it always did.
+            for window in &mut context.config_mut().app.windows {
+                window.transparent = true;
+            }
+        }
+    }
 
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -204,6 +306,10 @@ pub fn run() {
                 .app_handle
                 .set(app.handle().clone());
             durable::register_app_handle(app.handle().clone());
+
+            // What the window's fullscreen really is, for the player view.
+            #[cfg(target_os = "linux")]
+            player::embedded::follow_fullscreen(app.handle());
 
             // Automatic's step-down dispatcher. Deliberately NOT folded into the
             // completion dispatcher below, and deliberately declared BEFORE its
@@ -254,7 +360,8 @@ pub fn run() {
                     }
 
                     use tauri::Emitter;
-                    if commands::advance_playlist(&state, &completion.session_id).await {
+                    let after = commands::advance_playlist(&state, &completion.session_id).await;
+                    if after == commands::AfterCleanEnd::ContinuePlaying {
                         // Terminal policy reads the literal carousel that was
                         // rendered before this event. Publish continuation before
                         // any refresh or slow server synchronization can replace it.
@@ -275,17 +382,16 @@ pub fn run() {
                     // eligible hub items are visible without a manual refresh.
                     // This remains unconditional on server success: local
                     // curation and any backend-owned successor are already final.
-                    let source_id = completion
-                        .item_key
-                        .split_once(':')
-                        .map(|(source, _)| source)
-                        .unwrap_or_default();
+                    // It names its session and says whether the run is over (a
+                    // playlist whose successor could not be started, or no play
+                    // active at all): the page leaves the run's fullscreen on it;
+                    // and whether a successor is coming (another play is active,
+                    // or one is being chosen): the page keeps it then, even
+                    // before that play's view has opened or when it plays in
+                    // mpv's own window (review finding pc-2). Ids and flags only.
                     let _ = app_handle.emit(
                         "playback-ended",
-                        serde_json::json!({
-                            "sourceId": source_id,
-                            "itemKey": completion.item_key.clone(),
-                        }),
+                        commands::clean_end_report(&completion, after),
                     );
                 }
             });
@@ -310,6 +416,12 @@ pub fn run() {
             commands::set_mpv_advanced,
             commands::get_continue_playing,
             commands::set_continue_playing,
+            commands::get_mpv_window_mode,
+            commands::set_mpv_window_mode,
+            commands::get_player,
+            commands::set_player,
+            commands::get_mpv_tls_verify,
+            commands::set_mpv_tls_verify,
             commands::get_playback_preferences,
             commands::set_playback_preferences,
             commands::install_mpv,
@@ -334,6 +446,10 @@ pub fn run() {
             commands::get_person_items,
             commands::set_watched,
             commands::play_item,
+            commands::player_set_rect,
+            commands::player_window_ready,
+            commands::player_command,
+            commands::player_fullscreen,
             commands::get_playback_source_choice,
             commands::resolve_playback_source_choice,
             commands::cancel_playback_source_choice,
@@ -352,7 +468,7 @@ pub fn run() {
             commands::playlist_reorder,
             commands::playlist_play,
         ])
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building the tauri application")
         .run(|app_handle, event| {
             // On quit, stop the progress tracker and kill the player mpv we
@@ -393,6 +509,18 @@ pub fn run() {
                     }
                     queue.clear();
                 }
+                // An embedded play draws on the window's own connection.
+                // Dropping one above waited for it; any that would not end
+                // when Vela stopped waiting for it earlier gets one more
+                // moment here, bounded, before the process goes.
+                #[cfg(target_os = "linux")]
+                player::embedded::wait_for_unfinished_plays(std::time::Duration::from_secs(2));
+                // How the last play in mpv's own window left it, for the
+                // next run: a play still showing now never reaches its own
+                // end callback.
+                // Waited for briefly, on a thread of its own: a settings
+                // write that cannot finish in time is let go of.
+                commands::remember_window_on_exit(&state.playback_window_session);
                 let stop = state
                     .tracking_stop
                     .lock()

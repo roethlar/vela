@@ -10,7 +10,7 @@ pub async fn update_progress(
     client_identifier: &str,
     rating_key: &str,
     time: u64,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), reqwest::Error> {
     let url = format!("{}/:/progress", server_url);
     let mut params = HashMap::new();
     // Plex expects `key` for the metadata rating key, plus identifier
@@ -42,7 +42,7 @@ pub async fn update_timeline(
     state: &str,
     time: u64,
     duration: u64,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), reqwest::Error> {
     let url = format!("{}/:/timeline", server_url);
     let mut params = HashMap::new();
     params.insert("ratingKey", rating_key.to_string());

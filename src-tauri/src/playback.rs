@@ -1,10 +1,11 @@
-// External-mpv playback. mpv owns its own Vulkan/Wayland window, which is the
-// reliable way to get true HDR passthrough (10-bit PQ/BT.2020 negotiated with
-// the compositor). Position is read over mpv's JSON IPC socket and reported back
-// to the originating server (Plex or Jellyfin/Emby) so resume works.
+// One play, from start to end. `play` has the player started (how a launch is
+// described and who starts it lives in `crate::player`) and then supervises it
+// over mpv's JSON IPC socket: position is read there and reported back to the
+// originating server (Plex or Jellyfin/Emby) so resume works, and the end of
+// the file or of the session is noticed there. Nothing below depends on which
+// player is on the other end of the socket.
 
 use std::io::{BufRead, BufReader, Write};
-use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -29,527 +30,6 @@ fn ipc_connect(path: &str) -> std::io::Result<IpcStream> {
         .read(true)
         .write(true)
         .open(path)
-}
-
-/// Process-private, owner-only (0700) runtime directory with an unpredictable
-/// name, so a local user can't pre-create (symlink) the files we put here the
-/// way they could in world-writable `/tmp`. Holds mpv's IPC socket and the
-/// auth-header include file. The base stays under `/tmp` so socket paths keep
-/// well under the unix socket-path limit (notably macOS's 104 bytes), unlike
-/// the long per-user config dir.
-#[cfg(not(windows))]
-fn private_runtime_dir() -> Result<std::path::PathBuf, String> {
-    use std::sync::OnceLock;
-    // Cache the *result* of the one-time creation: the path is random per
-    // process and the directory is created exactly once, so a creation failure
-    // must stay failed (fail closed) rather than be silently retried.
-    static DIR: OnceLock<Result<std::path::PathBuf, String>> = OnceLock::new();
-    let dir = DIR.get_or_init(|| {
-        let d = std::path::PathBuf::from(format!(
-            "/tmp/vela-{}",
-            &uuid::Uuid::new_v4().simple().to_string()[..12]
-        ));
-        // Create the leaf NON-recursively and 0700 from the start: non-recursive
-        // gives O_EXCL semantics, so if anything already exists at this path (a
-        // symlink or a directory an attacker pre-created to redirect mpv's IPC
-        // socket) creation fails and we fail closed — we never adopt a path we
-        // didn't exclusively create. 0700-at-creation leaves no world-traversable
-        // window. Errors are propagated, not discarded.
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::DirBuilderExt;
-            std::fs::DirBuilder::new()
-                .mode(0o700)
-                .create(&d)
-                .map_err(|e| format!("couldn't create a private IPC directory: {e}"))?;
-        }
-        #[cfg(not(unix))]
-        {
-            std::fs::create_dir(&d)
-                .map_err(|e| format!("couldn't create the IPC directory: {e}"))?;
-        }
-        Ok(d)
-    });
-    let dir = dir.as_ref().map_err(|e| e.clone())?;
-    // Defense in depth: before each use, confirm it's still a real directory
-    // (symlink_metadata, so a symlink swapped in later is rejected — is_dir() is
-    // false for a symlink) and still private.
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let meta = std::fs::symlink_metadata(dir).map_err(|e| e.to_string())?;
-        if !meta.is_dir() {
-            return Err("IPC path is not a directory".to_string());
-        }
-        if meta.permissions().mode() & 0o077 != 0 {
-            return Err("IPC directory is not private (expected mode 0700)".to_string());
-        }
-    }
-    #[cfg(not(unix))]
-    {
-        if !dir.is_dir() {
-            return Err("IPC path is not a directory".to_string());
-        }
-    }
-    Ok(dir.clone())
-}
-
-/// Path for mpv's JSON IPC socket, inside [`private_runtime_dir`].
-#[cfg(not(windows))]
-fn ipc_socket_path() -> Result<String, String> {
-    let dir = private_runtime_dir()?;
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis())
-        .unwrap_or(0);
-    Ok(dir
-        .join(format!("mpv-{}-{}.sock", std::process::id(), ts))
-        .to_string_lossy()
-        .into_owned())
-}
-
-/// Where the per-launch mpv auth include lives. Unix uses the same
-/// process-private 0700 runtime dir as the IPC socket. Windows uses Vela's
-/// protected per-user config directory so its verified DACL can be established
-/// before credential bytes are written.
-fn header_conf_path() -> Result<std::path::PathBuf, String> {
-    let nonce = uuid::Uuid::new_v4().simple();
-    #[cfg(not(windows))]
-    {
-        Ok(private_runtime_dir()?.join(format!("mpv-headers-{}-{nonce}.conf", std::process::id())))
-    }
-    #[cfg(windows)]
-    {
-        crate::storage::config_dir_file(&format!("mpv-headers-{}-{nonce}.conf", std::process::id()))
-            .map_err(|_| "couldn't prepare the mpv auth config".to_string())
-    }
-}
-
-/// Deletes one launch's credential include when its owning child is reaped.
-/// The path is unique per launch, so a delayed old-child cleanup can never
-/// remove a newer player's credentials.
-#[derive(Debug)]
-struct HeaderInclude {
-    path: std::path::PathBuf,
-}
-
-impl HeaderInclude {
-    fn remove_now(&mut self) -> std::io::Result<()> {
-        // A transient sharing violation must not be the only cleanup attempt.
-        // Never print the path: it is credential-adjacent runtime state.
-        for attempt in 0..3 {
-            match std::fs::remove_file(&self.path) {
-                Ok(()) => return Ok(()),
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-                Err(_) if attempt < 2 => std::thread::yield_now(),
-                Err(error) => return Err(error),
-            }
-        }
-        unreachable!("the bounded removal loop always returns")
-    }
-}
-
-impl Drop for HeaderInclude {
-    fn drop(&mut self) {
-        if self.remove_now().is_err() {
-            eprintln!("vela: could not remove an mpv authentication include");
-        }
-    }
-}
-
-/// A child process and the private credential file it consumed. The reaper
-/// drops this wrapper only after `try_wait` reports exit. Query failures retain
-/// the wrapper so a transient OS error cannot orphan the credential include.
-pub(crate) struct ManagedChild {
-    child: std::process::Child,
-    _header_include: Option<HeaderInclude>,
-}
-
-impl ManagedChild {
-    fn new(child: std::process::Child, header_include: Option<HeaderInclude>) -> Self {
-        Self {
-            child,
-            _header_include: header_include,
-        }
-    }
-
-    pub(crate) fn kill(&mut self) -> std::io::Result<()> {
-        self.child.kill()
-    }
-
-    pub(crate) fn try_wait(&mut self) -> std::io::Result<Option<std::process::ExitStatus>> {
-        self.child.try_wait()
-    }
-
-    /// A player that has been running has already consumed its startup config.
-    /// Remove that include before a replacement launch writes another one. A
-    /// failed removal leaves ownership attached to this child and fails the
-    /// replacement closed.
-    pub(crate) fn remove_consumed_header_include(&mut self) -> Result<(), String> {
-        let Some(mut include) = self._header_include.take() else {
-            return Ok(());
-        };
-        if include.remove_now().is_ok() {
-            Ok(())
-        } else {
-            self._header_include = Some(include);
-            Err("could not remove the prior mpv authentication include".to_string())
-        }
-    }
-}
-
-pub(crate) fn retain_child_after_try_wait(
-    result: &std::io::Result<Option<std::process::ExitStatus>>,
-) -> bool {
-    !matches!(result, Ok(Some(_)))
-}
-
-/// Write the mpv include file that carries stream auth headers
-/// (`http-header-fields`). An include file — not a command-line option —
-/// because argv is world-readable (`/proc/<pid>/cmdline`) while this file is
-/// owner-only; and not the URL, because mpv renders `${path}` in its title,
-/// stats overlay (Shift+I), and playlist. mpv honors `--include` even under
-/// `--no-config`, and an include asserted after the user's extra args
-/// overrides any `--http-header-fields` they set — both verified against
-/// mpv 0.41 (the header reaches the wire exactly once). Each launch gets a
-/// unique file, held by [`ManagedChild`] until that exact child is reaped.
-fn write_header_include(headers: &[(String, String)]) -> Result<HeaderInclude, String> {
-    let path = header_conf_path()?;
-    write_header_include_at(&path, headers)
-}
-
-/// The testable core of [`write_header_include`]: validates and writes to an
-/// explicit path. Header names/values are restricted to characters that cannot
-/// escape mpv's quoted conf value or smuggle extra list entries or config
-/// lines — anything else fails closed, and the error text never echoes the
-/// offending value (it may be a credential).
-fn write_header_include_at(
-    path: &std::path::Path,
-    headers: &[(String, String)],
-) -> Result<HeaderInclude, String> {
-    write_header_include_at_with(path, headers, |file, content| file.write_all(content))
-}
-
-fn write_header_include_at_with(
-    path: &std::path::Path,
-    headers: &[(String, String)],
-    write_content: impl FnOnce(&mut std::fs::File, &[u8]) -> std::io::Result<()>,
-) -> Result<HeaderInclude, String> {
-    for (name, value) in headers {
-        if name.is_empty()
-            || !name
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-        {
-            return Err("invalid stream auth header name".to_string());
-        }
-        // `"` would close mpv's value quoting, `,` separates list entries, and
-        // control characters could inject config lines. `#` (mpv's comment
-        // marker) is excluded defensively too.
-        if !value
-            .chars()
-            .all(|c| (c.is_ascii_graphic() || c == ' ') && !['"', ',', '#'].contains(&c))
-        {
-            return Err("invalid stream auth header value".to_string());
-        }
-    }
-    let joined = headers
-        .iter()
-        .map(|(name, value)| format!("{name}: {value}"))
-        .collect::<Vec<_>>()
-        .join(",");
-    let content = format!("http-header-fields=\"{joined}\"\n");
-    // Replace only this explicit target (used by tests), then create exclusively
-    // with owner-only permissions from the first byte (never chmod-after-write).
-    // Production targets are unique per launch.
-    let _ = std::fs::remove_file(path);
-    let mut opts = std::fs::OpenOptions::new();
-    opts.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        opts.mode(0o600);
-    }
-    let mut f = opts
-        .open(path)
-        .map_err(|e| format!("couldn't write the mpv auth config: {e}"))?;
-    let guard = HeaderInclude {
-        path: path.to_path_buf(),
-    };
-    // On Windows this installs and verifies the protected current-user/SYSTEM/
-    // Administrators DACL. It must happen after empty-file creation but before
-    // the first credential byte. Unix re-verifies the already-0600 file.
-    if crate::storage::harden_existing_regular(path).is_err() {
-        drop(f);
-        drop(guard);
-        return Err("couldn't protect the mpv auth config".to_string());
-    }
-    if let Err(error) = write_content(&mut f, content.as_bytes()) {
-        drop(f);
-        drop(guard);
-        return Err(format!("couldn't write the mpv auth config: {error}"));
-    }
-    if let Err(error) = f.sync_all() {
-        drop(f);
-        drop(guard);
-        return Err(format!("couldn't write the mpv auth config: {error}"));
-    }
-    Ok(guard)
-}
-
-/// Locate the mpv executable. We can't rely on bare `mpv` resolving via `PATH`:
-/// GUI apps launched from Finder/Explorer get a minimal `PATH` that excludes
-/// Homebrew (`/opt/homebrew/bin`), scoop, winget shims, etc. So we try, in order:
-///   1. the user's explicit path from the Settings page (`mpv_path`),
-///   2. a copy shipped alongside the app (next to our own exe),
-///   3. bare `mpv` on `PATH`,
-///   4. a generous list of real-world install locations per OS.
-///
-/// Returns the command to run (a bare name if found on `PATH`, otherwise an
-/// absolute path).
-pub fn resolve_mpv() -> Result<Option<String>, String> {
-    // 1. Explicit override the user set in Settings → mpv player. Honored only
-    //    if it actually resolves to a runnable file (validated on save too).
-    if let Some(p) = crate::config::load_config()
-        .map_err(|_| "could not read Vela settings".to_string())?
-        .mpv_path
-    {
-        let p = p.trim().to_string();
-        if !p.is_empty() && mpv_usable(&p) {
-            return Ok(Some(p));
-        }
-    }
-    // 2. A bundled copy next to the app executable (zero-config "just works").
-    if let Some(p) = bundled_mpv().filter(|p| mpv_usable(p)) {
-        return Ok(Some(p));
-    }
-    // 3. Bare `mpv` on PATH.
-    if mpv_runs("mpv") {
-        return Ok(Some("mpv".to_string()));
-    }
-    // 4. Known install locations.
-    Ok(mpv_candidates().into_iter().find(|cand| mpv_usable(cand)))
-}
-
-/// True if `bin` (a bare name or path) is a *working* mpv: it must run
-/// `--version` and exit cleanly (status 0). We check `success()` rather than
-/// merely "the process started", because an mpv built for CPU features this
-/// machine lacks (e.g. an AVX2 build on a pre-Haswell CPU) launches but crashes
-/// immediately with an illegal-instruction exit — and that crash must count as
-/// "not usable", or we'd accept a build that can never actually play video.
-fn mpv_runs(bin: &str) -> bool {
-    Command::new(bin)
-        .arg("--version")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
-}
-
-/// Validate a user-supplied mpv path: it must exist as a file and actually run.
-/// Used both by `resolve_mpv` (config/env override) and by the `set_mpv_path`
-/// command so a saved override is known-good rather than a typo.
-pub fn mpv_usable(path: &str) -> bool {
-    let p = std::path::Path::new(path);
-    p.is_file() && mpv_runs(path)
-}
-
-/// Split the user's advanced mpv options (Settings → Advanced mpv options) into
-/// argv. One option per line — blank lines and `#` comments ignored — so there's no
-/// shell-quoting ambiguity around values that contain spaces (paths, filter graphs).
-fn parse_extra_mpv_args(raw: &str) -> Vec<String> {
-    raw.lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty() && !l.starts_with('#'))
-        .map(str::to_string)
-        .collect()
-}
-
-/// Construct the deterministic, non-media-specific portion of Vela's mpv
-/// launch. Per-play resources (credentials, IPC, title, resume point, scripts,
-/// and URL) stay in `play`; keeping defaults here makes their ordering directly
-/// testable without spawning mpv.
-fn base_mpv_command(mpv_bin: &str, cfg: &crate::config::AppConfig) -> Command {
-    let use_own_config = cfg.mpv_use_own_config.unwrap_or(false);
-    let mut cmd = Command::new(mpv_bin);
-    if !use_own_config {
-        // Keep Vela's playback deterministic unless the expert explicitly asks
-        // mpv to load their own configuration.
-        cmd.arg("--no-config");
-    }
-    cmd.arg("--no-ytdl")
-        .arg("--vo=gpu-next,gpu") // gpu-next is the libplacebo HDR path
-        .arg("--profile=gpu-hq")
-        .arg("--hwdec=auto")
-        .arg("--hwdec-codecs=all")
-        // Preserve source HDR metadata (PQ/BT.2020) for the compositor or OS.
-        .arg("--target-colorspace-hint=yes")
-        .arg("--hdr-compute-peak=yes");
-
-    // GPU API/context selection is platform-specific.
-    // * Linux: Vulkan via Wayland/X11 WSI is the reliable HDR path.
-    // * macOS: mpv only exposes Vulkan over Metal (macvk), so let it auto-pick.
-    // * Windows: D3D11 negotiates HDR through the DXGI swapchain.
-    #[cfg(target_os = "macos")]
-    {
-        cmd.arg("--gpu-api=vulkan"); // macvk (Metal-backed) only context on macOS
-    }
-    #[cfg(target_os = "windows")]
-    {
-        cmd.arg("--gpu-api=d3d11"); // HDR via DXGI swapchain on Windows 10/11
-    }
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    {
-        // Force Vulkan (the HDR-capable backend, always built into modern mpv)
-        // but let mpv auto-pick a context. Naming specific backends (e.g.
-        // x11vk) risks listing one a given build lacks — mpv validates option
-        // values up front and would exit after spawn() succeeded (silent failure).
-        cmd.arg("--gpu-api=vulkan");
-        // Enables the experimental Vulkan HDR WSI layer where present (KDE/NVIDIA).
-        cmd.env("ENABLE_HDR_WSI", "1");
-    }
-
-    #[cfg(target_os = "macos")]
-    if !use_own_config {
-        // AVFoundation owns AirPlay presentation timing and follows system
-        // route changes. CoreAudio remains initialization fallback.
-        cmd.arg("--ao=avfoundation,coreaudio");
-    }
-
-    // User-supplied advanced options remain last among defaults, so repeated
-    // mpv options retain their documented last-option-wins behavior.
-    if let Some(extra) = cfg.mpv_extra_args.as_deref() {
-        for arg in parse_extra_mpv_args(extra) {
-            cmd.arg(arg);
-        }
-    }
-
-    cmd
-}
-
-/// Look for an mpv shipped alongside our own executable — e.g. a packager (or a
-/// future bundled installer) dropped `mpv.exe` next to the app or in an `mpv/`
-/// subfolder. Resolved relative to the running binary so it works from any
-/// install location.
-fn bundled_mpv() -> Option<String> {
-    let exe = std::env::current_exe().ok()?;
-    let dir = exe.parent()?;
-    #[cfg(windows)]
-    let names = ["mpv.exe", r"mpv\mpv.exe"];
-    #[cfg(not(windows))]
-    let names = ["mpv", "mpv/mpv"];
-    for name in names {
-        let cand = dir.join(name);
-        if cand.is_file() {
-            return Some(cand.to_string_lossy().into_owned());
-        }
-    }
-    None
-}
-
-/// Common absolute install locations to probe when `mpv` isn't on `PATH`.
-fn mpv_candidates() -> Vec<String> {
-    #[cfg(target_os = "macos")]
-    {
-        let mut v = vec![
-            "/opt/homebrew/bin/mpv".into(),          // Apple Silicon Homebrew
-            "/usr/local/bin/mpv".into(),             // Intel Homebrew
-            "/opt/local/bin/mpv".into(),             // MacPorts
-            "/run/current-system/sw/bin/mpv".into(), // NixOS/nix-darwin
-            "/nix/var/nix/profiles/default/bin/mpv".into(),
-        ];
-        if let Ok(home) = std::env::var("HOME") {
-            v.push(format!("{home}/.nix-profile/bin/mpv"));
-        }
-        v
-    }
-    #[cfg(target_os = "windows")]
-    {
-        let mut v = Vec::new();
-        if let Ok(home) = std::env::var("USERPROFILE") {
-            // scoop: a shim on PATH normally, plus the real binary under apps/.
-            v.push(format!(r"{home}\scoop\shims\mpv.exe"));
-            v.push(format!(r"{home}\scoop\apps\mpv\current\mpv.exe"));
-        }
-        if let Ok(local) = std::env::var("LOCALAPPDATA") {
-            // winget drops a per-user shim under Links, and the real payload under
-            // Packages\<id>\... — scan the latter since the id/version vary.
-            v.push(format!(r"{local}\Microsoft\WinGet\Links\mpv.exe"));
-            v.extend(scan_winget_packages(&format!(
-                r"{local}\Microsoft\WinGet\Packages"
-            )));
-            v.push(format!(r"{local}\Programs\mpv\mpv.exe"));
-        }
-        if let Ok(pf) = std::env::var("ProgramFiles") {
-            v.push(format!(r"{pf}\mpv\mpv.exe"));
-        }
-        if let Ok(pf86) = std::env::var("ProgramFiles(x86)") {
-            v.push(format!(r"{pf86}\mpv\mpv.exe"));
-        }
-        if let Ok(pd) = std::env::var("ProgramData") {
-            // chocolatey shim.
-            v.push(format!(r"{pd}\chocolatey\bin\mpv.exe"));
-        }
-        v
-    }
-    #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        let mut v = vec![
-            "/usr/bin/mpv".into(),
-            "/bin/mpv".into(),
-            "/usr/local/bin/mpv".into(),
-            "/home/linuxbrew/.linuxbrew/bin/mpv".into(),
-            "/snap/bin/mpv".into(),
-            "/var/lib/flatpak/exports/bin/io.mpv.Mpv".into(),
-            "/run/current-system/sw/bin/mpv".into(),
-            "/nix/var/nix/profiles/default/bin/mpv".into(),
-        ];
-        if let Ok(home) = std::env::var("HOME") {
-            v.push(format!(
-                "{home}/.local/share/flatpak/exports/bin/io.mpv.Mpv"
-            ));
-            v.push(format!("{home}/.nix-profile/bin/mpv"));
-        }
-        v
-    }
-}
-
-/// Scan a winget `Packages` directory for `mpv.exe`. winget names each package
-/// folder `<PackageId>_<hash>` and lays the payload out flat inside, so we check
-/// each immediate subdirectory (and one nested level, since some packages nest a
-/// versioned folder) for the binary. Best-effort: returns whatever it finds.
-#[cfg(target_os = "windows")]
-fn scan_winget_packages(root: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let Ok(entries) = std::fs::read_dir(root) else {
-        return out;
-    };
-    for entry in entries.flatten() {
-        let dir = entry.path();
-        if !dir.is_dir() {
-            continue;
-        }
-        // Only look at packages that look like mpv to avoid walking everything.
-        let name = entry.file_name().to_string_lossy().to_lowercase();
-        if !name.contains("mpv") {
-            continue;
-        }
-        let direct = dir.join("mpv.exe");
-        if direct.is_file() {
-            out.push(direct.to_string_lossy().into_owned());
-        }
-        // One level deeper (e.g. an extracted versioned subfolder).
-        if let Ok(sub) = std::fs::read_dir(&dir) {
-            for s in sub.flatten() {
-                let cand = s.path().join("mpv.exe");
-                if cand.is_file() {
-                    out.push(cand.to_string_lossy().into_owned());
-                }
-            }
-        }
-    }
-    out
 }
 
 /// Everything the progress tracker needs to report back to Plex.
@@ -588,14 +68,134 @@ pub enum ProgressTarget {
     None,
 }
 
-/// Runtime mpv window state that may be carried to an exact automatic
-/// successor. `None` means mpv has not reported the property, which is distinct
-/// from an explicit `false` and therefore leaves configured launch options
-/// authoritative.
+/// Runtime mpv window state that is carried to the next play in this run of
+/// Vela, and, when the player window setting remembers it, to the first play
+/// of the next run (`config::MpvWindow`). `None` means Vela did not set the
+/// property at opening and mpv has not reported it, which is distinct from
+/// an explicit `false` and leaves configured launch options authoritative.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct PlaybackWindowState {
     pub fullscreen: Option<bool>,
     pub maximized: Option<bool>,
+    /// The window's size, width then height, as mpv reported it
+    /// (`osd-dimensions`) while the window was neither fullscreen nor
+    /// maximized, or else the size the play was opened with. Kept while the
+    /// window is fullscreen or maximized, and from one play to the next when
+    /// a play never shows its window at another size, so a play that opens
+    /// fullscreen still knows the size to return to. `None` when no usable
+    /// size is known.
+    pub windowed_size: Option<(u32, u32)>,
+}
+
+/// A reported window size is used only inside these bounds, in each
+/// dimension. Anything outside is not a window anyone sized: a player with
+/// no window reports 0, and a broken report must not open a huge window.
+const MIN_WINDOWED_SIZE: (u32, u32) = (160, 90);
+const MAX_WINDOWED_DIMENSION: u32 = 16384;
+
+/// How long a reported size must stand, with the window neither fullscreen
+/// nor maximized, before it counts as the windowed size. On X11 the size of
+/// a maximized window can be reported just before the maximized flag; the
+/// wait lets that flag arrive and discard the size.
+const WINDOWED_SIZE_SETTLE: Duration = Duration::from_millis(1000);
+
+/// The window state one mpv process reports, and the rule that turns its
+/// size reports into a windowed size. Pure: the caller passes the time of
+/// each event, so the rule is tested without mpv or a clock.
+#[derive(Debug, Clone, Copy, Default)]
+struct WindowTracker {
+    fullscreen: Option<bool>,
+    maximized: Option<bool>,
+    /// A size reported while the window was neither fullscreen nor
+    /// maximized, and when, not yet long enough ago to be confirmed.
+    candidate: Option<((u32, u32), Instant)>,
+    /// The last size that was confirmed as the windowed size.
+    confirmed: Option<(u32, u32)>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WindowChange {
+    Flag(WindowProperty, bool),
+    /// A width and a height that mpv reported together, in one
+    /// `osd-dimensions` event. A size is never put together from two
+    /// reports (review finding pw-3): one half of it could be the other
+    /// half of a size the window never was.
+    Size(u32, u32),
+}
+
+impl WindowTracker {
+    fn fullscreen_or_maximized(&self) -> bool {
+        self.fullscreen == Some(true) || self.maximized == Some(true)
+    }
+
+    /// Any event from the player, at `now`. A candidate that has stood for
+    /// the settle time with the window neither fullscreen nor maximized
+    /// becomes the windowed size; this runs before the event's own change,
+    /// so a flag that turns on later than that does not discard it.
+    fn tick(&mut self, now: Instant) {
+        if let Some((size, at)) = self.candidate {
+            if !self.fullscreen_or_maximized()
+                && now.saturating_duration_since(at) >= WINDOWED_SIZE_SETTLE
+            {
+                self.confirmed = Some(size);
+                self.candidate = None;
+            }
+        }
+    }
+
+    fn apply(&mut self, change: WindowChange, now: Instant) {
+        self.tick(now);
+        match change {
+            WindowChange::Flag(property, enabled) => {
+                match property {
+                    WindowProperty::Fullscreen => self.fullscreen = Some(enabled),
+                    WindowProperty::Maximized => self.maximized = Some(enabled),
+                }
+                // The size just reported may be the fullscreen or maximized
+                // one, reported before this flag.
+                if enabled {
+                    self.candidate = None;
+                }
+            }
+            WindowChange::Size(width, height) => self.observe_size(width, height, now),
+        }
+    }
+
+    fn observe_size(&mut self, width: u32, height: u32, now: Instant) {
+        // While fullscreen or maximized the size is the screen's or the
+        // work area's, not the window's.
+        if self.fullscreen_or_maximized() {
+            return;
+        }
+        // A size outside the bounds (a player with no window reports 0x0)
+        // changes nothing: not the candidate, not the confirmed size.
+        if !usable_windowed_size(width, height) {
+            return;
+        }
+        if self.candidate.map(|(size, _)| size) != Some((width, height)) {
+            self.candidate = Some(((width, height), now));
+        }
+    }
+
+    /// The state for the next play. A candidate not yet confirmed counts
+    /// when the window is neither fullscreen nor maximized: the user resized
+    /// it and quit within the settle time.
+    fn snapshot(&self) -> PlaybackWindowState {
+        let pending = self
+            .candidate
+            .filter(|_| !self.fullscreen_or_maximized())
+            .map(|(size, _)| size);
+        PlaybackWindowState {
+            fullscreen: self.fullscreen,
+            maximized: self.maximized,
+            windowed_size: pending.or(self.confirmed),
+        }
+    }
+}
+
+pub(crate) fn usable_windowed_size(width: u32, height: u32) -> bool {
+    (MIN_WINDOWED_SIZE.0..=MAX_WINDOWED_DIMENSION).contains(&width)
+        && (MIN_WINDOWED_SIZE.1..=MAX_WINDOWED_DIMENSION).contains(&height)
 }
 
 /// Per-launch observation handle. Each IPC reader owns a fresh handle so a
@@ -603,13 +203,144 @@ pub struct PlaybackWindowState {
 /// published state.
 #[derive(Debug, Clone, Default)]
 pub struct WindowStateObservation {
-    state: Arc<Mutex<PlaybackWindowState>>,
+    state: Arc<Mutex<WindowTracker>>,
     display: Arc<Mutex<crate::display::ObservedDisplay>>,
+    /// Whether the reader filling this observation has finished, so that
+    /// Vela's exit can wait for what mpv had already sent (review finding
+    /// pw-8, `wait_for_reader`).
+    reader: Arc<ReaderProgress>,
+}
+
+/// How far the window-state reader of one play has got. An observation no
+/// reader was started for stays `NotStarted`: one made by a test, or the
+/// `Default` handle. Every launched play starts a reader, an embedded one's
+/// too (`spawn_position_reader`, through `start_tracking_plex`,
+/// `start_tracking_jellyfin` or `spawn_end_watcher`); Vela's exit waits only
+/// for the reader of the last play in mpv's own window because it looks only
+/// at that play (`PlaybackWindowRecord::last_external`).
+#[derive(Debug, Default)]
+struct ReaderProgress {
+    phase: Mutex<ReaderPhase>,
+    changed: std::sync::Condvar,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+enum ReaderPhase {
+    #[default]
+    NotStarted,
+    Reading,
+    /// Still reading, and a wait has already given up on it. A later wait
+    /// gives up at once: Vela's exit handler runs twice in one exit (tauri's
+    /// `ExitRequested` and then `Exit`). A reader that outlived the first
+    /// wait is still trying to connect (it has nothing to apply), or reads
+    /// from an mpv the exit's kill did not end (an `mpv_path` that starts
+    /// mpv under another process, which the kill ends instead: it would
+    /// outlive the second wait as well), or is on a machine so loaded that
+    /// it took more than the whole limit. Only that last one could finish in
+    /// a second wait, and it is let go of so that the first two do not add a
+    /// second limit to every exit.
+    WaitedOut,
+    Finished,
+}
+
+/// What `WindowStateObservation::wait_for_reader` found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ReaderWait {
+    /// No reader was ever started for this observation: nothing to wait for.
+    NoReader,
+    /// The reader had finished before the wait began: no wait at all.
+    AlreadyFinished,
+    /// The reader finished during the wait.
+    FinishedWithin,
+    /// The limit passed with the reader still running, or an earlier wait
+    /// had given up on it already (then without waiting).
+    GaveUp,
+}
+
+/// Marks its observation's reader finished when it is dropped: on every way
+/// out of the reader's thread (the connection read to its end, never
+/// connected, told to stop, a panic unwinding it), and when the thread could
+/// not be started at all, since the closure that owns it is then dropped
+/// unrun. In a release build a panic aborts the whole process (`panic =
+/// "abort"`), so there that last way out ends Vela itself.
+pub(crate) struct ReaderFinishes(Arc<ReaderProgress>);
+
+impl Drop for ReaderFinishes {
+    fn drop(&mut self) {
+        *self.0.phase.lock().unwrap_or_else(|e| e.into_inner()) = ReaderPhase::Finished;
+        self.0.changed.notify_all();
+    }
+}
+
+/// Sets the position reader's done flag even when its thread unwinds.
+struct ReaderDone(Arc<AtomicBool>);
+
+impl Drop for ReaderDone {
+    fn drop(&mut self) {
+        // Release, read with Acquire where the startup evidence is read
+        // after it (`PositionReader::end`).
+        self.0.store(true, Ordering::Release);
+    }
 }
 
 impl WindowStateObservation {
+    /// A fresh handle carrying how Vela opened the window until mpv reports
+    /// otherwise. Each reported flag replaces its seed immediately; the size
+    /// counts as confirmed until mpv reports a windowed size of its own.
+    /// Unknown opening flags stay unknown. The requested screen is not an
+    /// observation: the compositor can place the window elsewhere, and
+    /// Prefer Compatible trusts the observed display's identity and size.
+    pub fn opened_at(window: PlaybackWindowState) -> Self {
+        Self {
+            state: Arc::new(Mutex::new(WindowTracker {
+                fullscreen: window.fullscreen,
+                maximized: window.maximized,
+                confirmed: window.windowed_size,
+                ..WindowTracker::default()
+            })),
+            display: Arc::default(),
+            reader: Arc::default(),
+        }
+    }
+
+    /// A reader starts filling this observation. It is running until the
+    /// returned guard is dropped.
+    pub(crate) fn reader_started(&self) -> ReaderFinishes {
+        *self.reader.phase.lock().unwrap_or_else(|e| e.into_inner()) = ReaderPhase::Reading;
+        ReaderFinishes(self.reader.clone())
+    }
+
+    /// Wait at most `limit` for this observation's reader to finish, and not
+    /// at all when none was started, it has finished already, or an earlier
+    /// wait has given up on it (`ReaderPhase::WaitedOut`). Holds no other
+    /// lock while it waits.
+    pub(crate) fn wait_for_reader(&self, limit: Duration) -> ReaderWait {
+        let phase = self.reader.phase.lock().unwrap_or_else(|e| e.into_inner());
+        match *phase {
+            ReaderPhase::NotStarted => ReaderWait::NoReader,
+            ReaderPhase::Finished => ReaderWait::AlreadyFinished,
+            ReaderPhase::WaitedOut => ReaderWait::GaveUp,
+            ReaderPhase::Reading => {
+                let (mut phase, _) = self
+                    .reader
+                    .changed
+                    .wait_timeout_while(phase, limit, |phase| *phase == ReaderPhase::Reading)
+                    .unwrap_or_else(|e| e.into_inner());
+                if *phase == ReaderPhase::Reading {
+                    *phase = ReaderPhase::WaitedOut;
+                    ReaderWait::GaveUp
+                } else {
+                    ReaderWait::FinishedWithin
+                }
+            }
+        }
+    }
+
     pub fn snapshot(&self) -> PlaybackWindowState {
-        *self.state.lock().unwrap_or_else(|e| e.into_inner())
+        self.state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .snapshot()
     }
 
     pub(crate) fn display_snapshot(&self) -> crate::display::ObservedDisplay {
@@ -619,12 +350,18 @@ impl WindowStateObservation {
             .clone()
     }
 
+    /// One event from the player's IPC connection, any event: every one
+    /// moves the window-size rule's clock on, not only the window's own.
     pub(crate) fn apply_ipc_event(&self, value: &serde_json::Value) {
-        if let Some((property, enabled)) = window_property_change(value) {
+        self.apply_ipc_event_at(value, Instant::now());
+    }
+
+    fn apply_ipc_event_at(&self, value: &serde_json::Value, now: Instant) {
+        {
             let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-            match property {
-                WindowProperty::Fullscreen => state.fullscreen = Some(enabled),
-                WindowProperty::Maximized => state.maximized = Some(enabled),
+            match window_property_change(value) {
+                Some(change) => state.apply(change, now),
+                None => state.tick(now),
             }
         }
         if let Some(change) = display_property_change(value) {
@@ -647,19 +384,36 @@ enum WindowProperty {
     Maximized,
 }
 
-/// Accept only owned boolean property-change events. Observe-property command
-/// replies, nulls, numeric/string coercions, and unrelated properties must not
-/// invent state.
-fn window_property_change(value: &serde_json::Value) -> Option<(WindowProperty, bool)> {
+/// Accept only owned property-change events of the exact JSON type: booleans
+/// for the two flags, and for the window size an `osd-dimensions` object
+/// whose `w` and `h` are both whole numbers that fit a u32. Observe-property
+/// command replies, nulls, numeric/string coercions, a size missing either
+/// half, and unrelated properties must not invent state.
+fn window_property_change(value: &serde_json::Value) -> Option<WindowChange> {
     if value.get("event")?.as_str()? != "property-change" {
         return None;
     }
-    let property = match value.get("name")?.as_str()? {
-        "fullscreen" => WindowProperty::Fullscreen,
-        "window-maximized" => WindowProperty::Maximized,
-        _ => return None,
+    let data = value.get("data")?;
+    let dimension = |key: &str| {
+        data.as_object()?
+            .get(key)?
+            .as_u64()
+            .and_then(|value| u32::try_from(value).ok())
     };
-    Some((property, value.get("data")?.as_bool()?))
+    match value.get("name")?.as_str()? {
+        "fullscreen" => Some(WindowChange::Flag(
+            WindowProperty::Fullscreen,
+            data.as_bool()?,
+        )),
+        "window-maximized" => Some(WindowChange::Flag(
+            WindowProperty::Maximized,
+            data.as_bool()?,
+        )),
+        // mpv sends `{"w":800,"h":450,"par":1.0,...}`, and `w` and `h` of 0
+        // while there is no video output.
+        "osd-dimensions" => Some(WindowChange::Size(dimension("w")?, dimension("h")?)),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -727,36 +481,13 @@ fn display_property_change(value: &serde_json::Value) -> Option<DisplayPropertyC
     }
 }
 
-/// Explicit inherited flags follow user/autocrop options so observed runtime
-/// state wins under mpv's last-value-wins option handling. Unknown properties
-/// are omitted, preserving normal configuration behavior.
-fn window_state_args(state: PlaybackWindowState) -> Vec<String> {
-    let mut args = Vec::with_capacity(2);
-    if let Some(maximized) = state.maximized {
-        args.push(format!(
-            "--window-maximized={}",
-            if maximized { "yes" } else { "no" }
-        ));
-    }
-    if let Some(fullscreen) = state.fullscreen {
-        args.push(format!(
-            "--fullscreen={}",
-            if fullscreen { "yes" } else { "no" }
-        ));
-    }
-    args
-}
-
-fn screen_name_arg(name: Option<&str>) -> Option<String> {
-    name.map(str::trim)
-        .filter(|name| !name.is_empty())
-        .map(|name| format!("--screen-name={name}"))
-}
-
 /// What to play, as opposed to the supervision plumbing `play` also takes:
 /// the stream URL, the human title for mpv's window/OSD, the auth headers the
-/// stream needs (see [`write_header_include`]), and the resume offset.
+/// stream needs (written to a private include; see `crate::player::launch`),
+/// and the resume offset.
 pub struct PlaySpec {
+    /// The player chosen for this play (`crate::player::choose`).
+    pub(crate) player: crate::player::PlayerKind,
     pub url: String,
     pub title: String,
     pub http_headers: Vec<(String, String)>,
@@ -765,7 +496,7 @@ pub struct PlaySpec {
     /// via Tauri's resource resolver (the caller has the `AppHandle`; `play`
     /// does not). `None` when it could not be resolved — autocrop is then
     /// skipped even if enabled. Whether it's actually injected depends on the
-    /// `mpv_autocrop` config mode, read in `play`.
+    /// `mpv_autocrop` config mode, read when the launch is described.
     pub autocrop_script: Option<String>,
     /// Absolute path to Vela's `vela-autocrop.lua` trigger shim (same resolver
     /// and existence check). Auto mode loads the stock script with its own
@@ -773,11 +504,21 @@ pub struct PlaySpec {
     /// delay — the stock trigger skips its delay on `--start` resumes and
     /// races hwdec init (see the shim header + `.agents/plans/autocrop-resume.md`).
     pub autocrop_shim: Option<String>,
-    /// Actual state sampled from the exact automatic predecessor. Manual plays
-    /// and unknown properties use the default (both `None`).
+    /// Absolute path to Vela's own `vela-crop.lua` (same resolver and
+    /// existence check), the cropping of a play in Vela's own window: the
+    /// stock script above is never loaded there. `None` when it could not be
+    /// resolved — that play is then uncropped.
+    pub crop_script: Option<String>,
+    /// Actual state sampled from the last play that started, manual or
+    /// automatic. The first play of a run gets what the player window setting
+    /// says (`config::first_window_of_run`); unknown properties stay `None`.
     pub inherited_window_state: PlaybackWindowState,
-    /// Native output containing Vela's window for a manual play, or the exact
-    /// observed predecessor output for an automatic successor.
+    /// The output the play is shown on, decided once with its copy
+    /// (`commands::screen_for_play`): for mpv's own window the output the last
+    /// external play's window was observed on (for the first play of a run,
+    /// the one the setting remembers), when connected, or else the output
+    /// holding Vela's window. Only mpv's own window is placed with it, which
+    /// includes a play the embedded player could not start.
     pub screen_name: Option<String>,
     /// Fresh handle populated by this launch's IPC reader and published by the
     /// command layer only after the full launch succeeds.
@@ -790,7 +531,7 @@ pub struct PlaySpec {
     /// filtered to the kinds whose policy is enabled. Empty means nothing is
     /// injected at all.
     pub markers: Vec<crate::source::MediaMarker>,
-    /// Resolved per-kind policies. `play` passes these to the script; it never
+    /// Resolved per-kind policies. The launch passes these to the script; it never
     /// reads config to derive them and never interprets a policy string.
     pub intro_policy: crate::config::SkipPolicy,
     pub credits_policy: crate::config::SkipPolicy,
@@ -808,343 +549,368 @@ pub struct PlaySpec {
     /// notices. Never set `--osd-font-size` to compensate; it is global and
     /// would override the user's own mpv config.
     pub osd_notice: Option<String>,
+    /// Called once when `osd_notice` has actually been handed to the player.
+    /// The notice is sent a moment after the player starts and is dropped if
+    /// the play is replaced first, so "the player started" does not mean "the
+    /// user was told" (review finding sel-3).
+    pub on_notice_shown: Option<NoticeShown>,
+    /// What this play says if it was given the embedded player and has to be
+    /// started in the external one after all ([`play`]).
+    pub(crate) if_embedded_cannot_start: EmbeddedFallback,
     /// Steps this LOGICAL play has already taken, carried into the new
     /// detector so the cap counts plays rather than mpv processes.
     pub steps_taken: u32,
 }
 
-/// mpv launch args for the autocrop feature, given the config `mode`
-/// (`"off"|"manual"|"auto"`) and the resolved script paths (already existence-
-/// checked by the caller; `None` when unresolved/missing). Pure so the injection
-/// is unit-testable without spawning mpv:
-/// - `off` / unknown, or no stock script → no args.
-/// - `manual` → load the stock script but disable its auto-crop, so it only
-///   crops on an explicit in-player `Shift+C`.
-/// - `auto` → stock script with auto disabled + the Vela shim owning the
-///   trigger (settle delay covers fresh AND resumed plays).
-/// - `auto` with the shim missing → degrade to the stock script's own auto
-///   trigger (fresh plays keep cropping; resume stays broken) — the caller
-///   logs the degradation.
-fn autocrop_args(mode: &str, script: Option<&str>, shim: Option<&str>) -> Vec<String> {
-    let Some(path) = script else {
-        return Vec::new();
-    };
-    match (mode, shim) {
-        ("manual", _) => vec![
-            format!("--script={path}"),
-            "--script-opts-append=autocrop-auto=no".to_string(),
-        ],
-        ("auto", Some(shim_path)) => vec![
-            format!("--script={path}"),
-            "--script-opts-append=autocrop-auto=no".to_string(),
-            format!("--script={shim_path}"),
-        ],
-        ("auto", None) => vec![format!("--script={path}")],
-        _ => Vec::new(),
-    }
+/// What a play given the embedded player shows when that player could not
+/// start it and the external one runs it instead: the one line that says so,
+/// and what to call once the line has been shown. Both absent for a play
+/// that explains nothing (the user has been told already, or the play is an
+/// automatic relaunch), and unused for a play given the external player.
+#[derive(Clone, Default)]
+pub(crate) struct EmbeddedFallback {
+    pub(crate) notice: Option<String>,
+    pub(crate) on_notice_shown: Option<NoticeShown>,
 }
 
-/// mpv launch args for marker skipping. Pure, so the injection is testable
-/// without spawning mpv. Every "don't act" condition collapses to no args:
-/// no resolved script, every policy Off, or no payload successfully written —
-/// the script is useless without its ranges, and injecting a `--script=` whose
-/// file is missing would make mpv refuse to start outright.
+/// A play that has started.
+pub struct PlayStarted {
+    /// Set to stop this play's trackers when another play replaces it.
+    pub stop: Arc<AtomicBool>,
+    /// The player running it. It is the one the play was given, except that a
+    /// play given the embedded player runs in the external one when the
+    /// embedded one could not start it.
+    pub(crate) player: crate::player::PlayerKind,
+}
+
+/// Start a play's player: the embedded one when the play was given it
+/// (`embedded` is then `Some`), otherwise the external one. "Otherwise"
+/// includes an embedded player that could not start the play: a play is never
+/// failed over the embedded player (decision D3 of
+/// `.agents/plans/embedded-player.md`; review finding ec-6). The play fails
+/// only if the external player cannot start it either.
 ///
-/// The payload PATH is deliberately absent here: it travels on the child's
-/// environment, because mpv's script-opts list is comma-split and would mangle
-/// Windows and user paths.
-fn markers_args(
-    script: Option<&str>,
-    intro: crate::config::SkipPolicy,
-    credits: crate::config::SkipPolicy,
-    commercial: crate::config::SkipPolicy,
-    has_payload: bool,
-) -> Vec<String> {
-    let Some(path) = script else {
-        return Vec::new();
+/// `embedded` fails only after putting back everything it did, so `external`
+/// starts as if it had been the first choice. One failure is different:
+/// when nothing may be started any more because Vela is exiting, the play
+/// ends there and the external player is not tried.
+fn start_player<P>(
+    embedded: Option<impl FnOnce() -> Result<P, NotStarted>>,
+    external: impl FnOnce() -> Result<P, String>,
+) -> Result<(P, crate::player::PlayerKind), String> {
+    use crate::player::PlayerKind;
+    let Some(embedded) = embedded else {
+        return external().map(|player| (player, PlayerKind::External));
     };
-    if !has_payload || (intro.is_off() && credits.is_off() && commercial.is_off()) {
-        return Vec::new();
-    }
-    vec![
-        format!("--script={path}"),
-        format!(
-            "--script-opts-append=vela-markers-intro-policy={}",
-            intro.as_option_value()
-        ),
-        format!(
-            "--script-opts-append=vela-markers-credits-policy={}",
-            credits.as_option_value()
-        ),
-        format!(
-            "--script-opts-append=vela-markers-commercial-policy={}",
-            commercial.as_option_value()
-        ),
-    ]
-}
-
-/// Unique per-launch payload name in this process's private directory. Mirrors
-/// [`header_conf_path`]: the caller never reuses a path, so a stale cleanup can
-/// never delete a newer launch's file.
-fn marker_payload_path() -> Result<std::path::PathBuf, String> {
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let name = format!(
-        "vela-markers-{}-{}.json",
-        std::process::id(),
-        COUNTER.fetch_add(1, Ordering::SeqCst)
-    );
-    #[cfg(not(windows))]
-    {
-        Ok(private_runtime_dir()?.join(name))
-    }
-    #[cfg(windows)]
-    {
-        crate::storage::config_dir_file(&name)
-            .map_err(|_| "couldn't prepare the marker payload".to_string())
-    }
-}
-
-/// Best-effort sweep of payloads this process left behind — normally the Lua
-/// script unlinks its own, so anything here is the residue of a crash. Only
-/// Vela's own prefix, only inside the directory we created ourselves.
-fn prune_marker_payloads(dir: &std::path::Path) {
-    let prefix = format!("vela-markers-{}-", std::process::id());
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let name = entry.file_name();
-        let Some(name) = name.to_str() else {
-            continue;
-        };
-        if name.starts_with(&prefix) && name.ends_with(".json") {
-            let _ = std::fs::remove_file(entry.path());
+    match embedded() {
+        Ok(player) => Ok((player, PlayerKind::Embedded)),
+        Err(NotStarted::MustNot(reason)) => Err(reason),
+        Err(NotStarted::CouldNot(reason)) => {
+            // The reason is the launcher's own words about its own failure:
+            // never a URL, a title or a credential.
+            eprintln!("vela: playing in the external player: {reason}");
+            external()
+                .map(|player| (player, PlayerKind::External))
+                .map_err(|other| format!("{reason} The external player could not start either: {other}"))
         }
     }
 }
 
-/// Write the marker payload for one launch. Non-fatal by construction: every
-/// failure returns `None` and playback proceeds without skipping. Never `?` this
-/// into the play path.
-fn try_write_marker_payload(markers: &[crate::source::MediaMarker]) -> Option<std::path::PathBuf> {
-    if markers.is_empty() {
-        return None;
-    }
-    #[derive(serde::Serialize)]
-    struct Payload<'a> {
-        markers: &'a [crate::source::MediaMarker],
-    }
-    let body = serde_json::to_vec(&Payload { markers }).ok()?;
-    let path = marker_payload_path().ok()?;
-    if let Some(dir) = path.parent() {
-        prune_marker_payloads(dir);
-    }
-    // Exclusive creation, owner-only from the first byte — same rule as the
-    // auth include, even though marker timings are not credentials.
-    let mut opts = std::fs::OpenOptions::new();
-    opts.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        opts.mode(0o600);
-    }
-    let mut file = opts.open(&path).ok()?;
-    if file.write_all(&body).is_err() {
-        // A partial file must not be handed to the script.
-        let _ = std::fs::remove_file(&path);
-        return None;
-    }
-    Some(path)
+/// Why the embedded player did not start a play.
+#[derive(Debug, PartialEq, Eq)]
+enum NotStarted {
+    /// It could not. The play goes to the external player.
+    CouldNot(String),
+    /// Nothing may be started any more. The play ends here.
+    MustNot(String),
 }
 
-/// Fired exactly once when a playback session ends — after the final server
-/// check-in for tracked sessions, or at mpv exit for untracked ones — with
-/// the last observed playback position in ms (0 when none was read). The
-/// caller wires this to recents recording + UI notification (a
-/// `playback-ended` Tauri event); this module stays UI-framework-free.
-pub type EndNotify = Arc<dyn Fn(u64) + Send + Sync>;
+/// What `play` answers once Vela has begun to exit.
+const SHUTTING_DOWN: &str = "Vela is shutting down.";
 
-/// Spawn mpv for `spec.url`, optionally seeking to `spec.start_seconds`, and
-/// start background progress reporting that runs until mpv exits. Publishes the
-/// child into `child_slot` the instant it's launched (so an app-exit that races
-/// tracker setup can still find and kill it), and returns the stop flag so a
-/// later play can cancel this one. The caller must have already cleared/killed
-/// any previous child, since this overwrites the slot.
+/// A test's stand-in for the search for the `mpv` program.
+#[cfg(test)]
+type FindMpv = Box<dyn Fn() -> Result<String, String>>;
+
+#[cfg(test)]
+thread_local! {
+    /// In effect on the thread that calls `play`. A test cannot depend on
+    /// what is installed on the machine it runs on, and must not start a
+    /// real player on it.
+    static MPV_FOR_THIS_TEST: std::cell::RefCell<Option<FindMpv>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// A socket path for a second launch of the same play, never the first
+/// launch's: an embedded player that failed to start may still own that one.
+fn another_ipc_path(taken: &str) -> Result<String, String> {
+    loop {
+        let path = crate::player::launch::new_ipc_path()?;
+        if path != taken {
+            return Ok(path);
+        }
+        // Each path carries a number of its own, so this is not reached;
+        // should it be, the next millisecond names another.
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
+/// What Vela observed before a play ended. Contains no mpv diagnostic text,
+/// which can carry stream URLs and credentials.
+#[derive(Default)]
+pub struct PlaybackEnd {
+    pub position_ms: u64,
+    /// No loaded file or position was observed before the IPC reader ended.
+    /// This is deliberately not a diagnosis: mpv can fail before IPC connects,
+    /// and its file errors do not reliably identify a refused certificate.
+    pub failed_to_start: bool,
+}
+
+/// Fired once after the final server check-in, or at mpv exit for untracked
+/// sessions. The caller records recents and notifies the UI.
+pub type EndNotify = Arc<dyn Fn(PlaybackEnd) + Send + Sync>;
+
+/// The longest an end notice waits for the EOF watcher. mpv writes its
+/// `end-file` before it closes the socket the watcher reads, and a watcher
+/// still trying to connect gives up once the end is known, so the watcher
+/// stops within moments of the end; this only bounds one that does not.
+const EOF_WATCHER_WAIT: Duration = Duration::from_secs(1);
+
+/// The EOF watcher's half of [`eof_watch`]: `watching` is dropped when the
+/// watcher stops, and nothing is ever sent on it.
+struct EofWatching {
+    watching: std::sync::mpsc::Sender<()>,
+    ended: Arc<AtomicBool>,
+}
+
+/// The end notice's half of [`eof_watch`].
+struct EofWait {
+    stopped: std::sync::mpsc::Receiver<()>,
+    ended: Arc<AtomicBool>,
+}
+
+/// The two halves that let an end notice wait for one EOF watcher: the
+/// notice tells the watcher the play has ended (so one still trying to
+/// connect gives up), and learns when the watcher has stopped.
+fn eof_watch() -> (EofWatching, EofWait) {
+    let (watching, stopped) = std::sync::mpsc::channel();
+    let ended = Arc::new(AtomicBool::new(false));
+    (
+        EofWatching {
+            watching,
+            ended: ended.clone(),
+        },
+        EofWait { stopped, ended },
+    )
+}
+
+/// `notify`, called once the EOF watcher of `wait` has stopped, or after
+/// [`EOF_WATCHER_WAIT`].
+fn after_eof_watcher(notify: EndNotify, wait: EofWait) -> EndNotify {
+    let EofWait { stopped, ended } = wait;
+    let stopped = Mutex::new(stopped);
+    Arc::new(move |position_ms| {
+        ended.store(true, Ordering::Relaxed);
+        let _ = stopped
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .recv_timeout(EOF_WATCHER_WAIT);
+        notify(position_ms);
+    })
+}
+
+/// See [`PlaySpec::on_notice_shown`].
+pub type NoticeShown = Arc<dyn Fn() + Send + Sync>;
+
+/// How long a notice waits after the player's IPC connection is up. Let the
+/// picture arrive first: a notice drawn over a black frame during load
+/// explains nothing.
+const OSD_NOTICE_DELAY: Duration = Duration::from_millis(1500);
+
+/// Where `play` publishes the player it starts, and what it can start one
+/// with.
+pub struct Players<'a> {
+    /// The app's current-player slot. The player is put here the instant it
+    /// is started, under the slot's lock.
+    pub(crate) slot: &'a Arc<Mutex<Option<crate::player::PlayerHandle>>>,
+    /// Set as the app exits, and checked under the slot's lock, so a play
+    /// that races the exit either does not start or is found by its sweep.
+    pub(crate) shutting_down: &'a Arc<AtomicBool>,
+    /// Starts embedded plays. `None` where there is no embedded player; the
+    /// external one needs nothing but the `mpv` program.
+    pub(crate) embedded: Option<&'a dyn crate::player::EmbeddedLauncher>,
+}
+
+/// A failed socket connection says nothing about a player still starting.
+/// Ask only the handle of this launch, using its non-blocking exit query.
+/// A busy slot, a replacement, or an OS query error supplies no evidence.
+#[derive(Clone, Default)]
+struct PlayerExit {
+    slot: Arc<Mutex<Option<crate::player::PlayerHandle>>>,
+    serial: u64,
+}
+
+impl PlayerExit {
+    fn confirmed(&self) -> bool {
+        let mut slot = match self.slot.try_lock() {
+            Ok(slot) => slot,
+            Err(std::sync::TryLockError::Poisoned(error)) => error.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => return false,
+        };
+        slot.as_mut().is_some_and(|player| {
+            player.serial() == self.serial && matches!(player.has_ended(), Ok(true))
+        })
+    }
+}
+
+/// What `play` answers when handed an embedded play and nothing to start it
+/// with.
+const NO_EMBEDDED_PLAYER: &str = "No embedded player is available here.";
+
+/// Start a player for `spec.url`, optionally seeking to `spec.start_seconds`,
+/// and start background progress reporting that runs until the player ends.
+/// Publishes the player into `player_slot` the instant it's launched (so an
+/// app-exit that races tracker setup can still find and kill it), and returns
+/// the stop flag so a later play can cancel this one. The caller must have
+/// already cleared/killed any previous player, since this overwrites the slot.
 pub fn play(
     spec: &PlaySpec,
     progress: ProgressTarget,
-    child_slot: &Arc<Mutex<Option<ManagedChild>>>,
-    shutting_down: &Arc<AtomicBool>,
+    players: Players<'_>,
     advance: &Arc<crate::commands::PlaybackAdvance>,
     session_id: String,
     on_end: Option<EndNotify>,
-) -> Result<Arc<AtomicBool>, String> {
-    // mpv emulates the IPC socket with a named pipe under \\.\pipe\ on Windows.
-    #[cfg(windows)]
-    let ipc_path = {
-        let pid = std::process::id();
-        let ts = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis())
-            .unwrap_or(0);
-        format!(r"\\.\pipe\mpv-plex-{}-{}", pid, ts)
+    on_state: Option<crate::player::report::StateNotify>,
+) -> Result<PlayStarted, String> {
+    let Players {
+        slot: player_slot,
+        shutting_down,
+        embedded,
+    } = players;
+    // Each player has its own way to be started, and neither may be started
+    // as the other: an embedded play is given an embedded launcher or is
+    // refused here, before anything has been done. A play is given the
+    // embedded kind only when `player::embedded_availability` said it can
+    // run, so a user does not reach the refusal.
+    //
+    // A launcher that cannot prepare the play is another matter: that is the
+    // embedded player failing to start, and the play goes on in the external
+    // one (`start_player`). So its answer is kept, not returned.
+    let embedded_start = match spec.player {
+        crate::player::PlayerKind::External => None,
+        crate::player::PlayerKind::Embedded => Some(
+            embedded
+                .ok_or_else(|| NO_EMBEDDED_PLAYER.to_string())?
+                .prepare(&session_id),
+        ),
     };
-    #[cfg(not(windows))]
-    let ipc_path = ipc_socket_path()?;
+    let ipc_path = crate::player::launch::new_ipc_path()?;
 
-    let mpv_bin = resolve_mpv()?
-        .ok_or_else(|| "mpv was not found. Install mpv to play video.".to_string())?;
+    // The external player is a program on the machine; the embedded one is
+    // not, and needs none unless it fails.
+    let find_mpv = || {
+        #[cfg(test)]
+        if let Some(found) = MPV_FOR_THIS_TEST.with(|find| find.borrow().as_ref().map(|find| find())) {
+            return found;
+        }
+        crate::player::external::resolve_mpv()?
+            .ok_or_else(|| "mpv was not found. Install mpv to play video.".to_string())
+    };
+    let mpv_bin = match embedded_start {
+        Some(_) => None,
+        None => Some(find_mpv()?),
+    };
 
     // Advanced/user mpv config (Settings → Advanced mpv options), loaded once here.
     let cfg =
         crate::config::load_config().map_err(|_| "could not read Vela settings".to_string())?;
-    let mut cmd = base_mpv_command(&mpv_bin, &cfg);
+    let plan = crate::player::launch::build_launch(spec, &cfg, &ipc_path)?;
 
-    // Bundled mpv autocrop script (Settings → Advanced). Placed with the user
-    // extra args (before the re-asserted IPC/title/URL block) so it can't clobber
-    // the socket. Only injected when enabled AND the bundled script actually
-    // exists — a missing `--script=` would make mpv refuse to launch, so skip and
-    // log instead. `autocrop-auto=no` in Manual mode keeps the known live
-    // `video-crop` hang off the every-play path (see config `mpv_autocrop`).
-    let autocrop_mode = cfg.mpv_autocrop.as_deref().unwrap_or("off");
-    if autocrop_mode != "off" {
-        let script = spec
-            .autocrop_script
-            .as_deref()
-            .filter(|p| std::path::Path::new(p).is_file());
-        if script.is_none() {
-            eprintln!(
-                "vela: autocrop is set to '{autocrop_mode}' but the bundled script \
-                 did not resolve; skipping (playback continues uncropped)"
-            );
-        }
-        let shim = spec
-            .autocrop_shim
-            .as_deref()
-            .filter(|p| std::path::Path::new(p).is_file());
-        if autocrop_mode == "auto" && script.is_some() && shim.is_none() {
-            eprintln!(
-                "vela: autocrop trigger shim (vela-autocrop.lua) did not resolve; \
-                 falling back to the stock auto trigger (resumed plays won't crop)"
-            );
-        }
-        for arg in autocrop_args(autocrop_mode, script, shim) {
-            cmd.arg(arg);
-        }
-    }
-
-    // Marker skipping. Like autocrop this lands after the user's own options so
-    // user configuration cannot replace Vela's policies, and every failure here
-    // degrades to a normal play rather than refusing one.
-    let marker_payload = {
-        let script = spec
-            .markers_script
-            .as_deref()
-            .filter(|path| std::path::Path::new(path).is_file());
-        let wanted = !(spec.intro_policy.is_off()
-            && spec.credits_policy.is_off()
-            && spec.commercial_policy.is_off());
-        if script.is_none() && wanted && !spec.markers.is_empty() {
-            eprintln!(
-                "vela: marker script (vela-markers.lua) did not resolve; \
-                 playing without skip controls"
-            );
-        }
-        let payload = if script.is_some() && wanted {
-            try_write_marker_payload(&spec.markers)
-        } else {
-            None
-        };
-        for arg in markers_args(
-            script,
-            spec.intro_policy,
-            spec.credits_policy,
-            spec.commercial_policy,
-            payload.is_some(),
-        ) {
-            cmd.arg(arg);
-        }
-        if let Some(path) = &payload {
-            // Child-only, and never on the command line: the payload path must
-            // not appear in the process argument list.
-            cmd.env("VELA_MARKERS_PAYLOAD", path);
-        }
-        payload
-    };
-
-    for arg in window_state_args(spec.inherited_window_state) {
-        cmd.arg(arg);
-    }
-    if let Some(screen_arg) = screen_name_arg(spec.screen_name.as_deref()) {
-        // Reassert after user options. On Wayland this is a placement request,
-        // not a guarantee; the compositor's actual choice is observed over IPC.
-        cmd.arg(screen_arg);
-    }
-
-    cmd.arg(format!("--input-ipc-server={}", ipc_path));
-    // Drive mpv's window title and OSD media-title from the human title, NOT the
-    // URL. Authenticated media URLs have historically carried tokens, and mpv's
-    // default title template derives from the URL — so without this a regression
-    // could leak one into the title bar or on-screen media name. Asserted after the
-    // user's extra args, so it can't be clobbered back into a leak. Fall back to a
-    // neutral label rather than letting mpv reach for the URL when title is empty.
-    let display_title = if spec.title.trim().is_empty() {
-        "Vela"
-    } else {
-        spec.title.as_str()
-    };
-    cmd.arg(format!("--force-media-title={}", display_title));
-    cmd.arg(format!("--title={}", display_title));
-    // Stream auth (e.g. Plex's X-Plex-Token) rides in an owner-only include
-    // file — see write_header_include for why neither argv nor the URL may
-    // carry it. Asserted after the user's extra args so a user-set
-    // --http-header-fields can't silently drop the auth the stream needs.
-    let header_include = if spec.http_headers.is_empty() {
-        None
-    } else {
-        let include = write_header_include(&spec.http_headers)?;
-        cmd.arg(format!("--include={}", include.path.to_string_lossy()));
-        Some(include)
-    };
-    if spec.start_seconds > 0.0 {
-        cmd.arg(format!("--start={}", spec.start_seconds));
-    }
-    // `--` terminates option parsing so a URL/path that begins with `-` (e.g. a
-    // hostile filename from a local folder or server) can't be read as an mpv
-    // option. In practice our URLs are absolute paths / http(s) / edl://, but
-    // this closes the option-injection vector regardless.
-    cmd.arg("--").arg(&spec.url);
-
-    // Launch mpv and publish it into the shared slot while still holding the
-    // lock, so launch+register is atomic w.r.t. the app-exit handler: it can
-    // never observe a launched-but-unregistered child and orphan it. The caller
-    // has already killed any prior child, so the slot is expected to be empty.
-    {
-        let mut slot = child_slot.lock().unwrap_or_else(|e| e.into_inner());
-        // Don't launch into a shutting-down app. The exit handler sets this flag
-        // and sweeps the slot under THIS lock, so checking it here (still holding
-        // the lock) closes the race where a play starting during exit would
-        // register an mpv the sweep had already passed.
-        if shutting_down.load(Ordering::SeqCst) {
-            // Nothing will read the payload now; the Lua unlink never happens.
-            if let Some(path) = &marker_payload {
-                let _ = std::fs::remove_file(path);
+    // Launch the player and publish it into the shared slot while still holding
+    // the lock, so launch+register is atomic w.r.t. the app-exit handler: it can
+    // never observe a launched-but-unregistered player and orphan it. The caller
+    // has already killed any prior player, so the slot is expected to be empty.
+    //
+    // Don't launch into a shutting-down app. The exit handler sets this flag
+    // and sweeps the slot under THIS lock, so checking it under the lock, each
+    // time the lock is taken to start a player, closes the race where a play
+    // starting during exit would register an mpv the sweep had already passed.
+    //
+    // The lock is the one the exit handler waits for on the window's thread, so
+    // nothing is done under it but that check and the start itself. Looking for
+    // the `mpv` program is not: it runs programs and waits for them. A play
+    // given the external player has looked already, above. A play that has to
+    // fall back to it looks, and describes its launch, between two holds of the
+    // lock (review finding ec-6, reopened for looking inside the first).
+    let mut external_ipc_path = None;
+    let (serial, started_player) = match (embedded_start, mpv_bin) {
+        (None, None) => return Err(NO_EMBEDDED_PLAYER.to_string()),
+        (None, Some(mpv_bin)) => {
+            let mut slot = player_slot.lock().unwrap_or_else(|e| e.into_inner());
+            if shutting_down.load(Ordering::SeqCst) {
+                plan.discard_marker_payload();
+                return Err(SHUTTING_DOWN.to_string());
             }
-            return Err("Vela is shutting down.".to_string());
+            let player = crate::player::external::launch(&mpv_bin, plan)?;
+            let serial = player.serial();
+            *slot = Some(player);
+            (serial, crate::player::PlayerKind::External)
         }
-        let child = cmd.spawn().map_err(|e| {
-            if let Some(path) = &marker_payload {
-                let _ = std::fs::remove_file(path);
-            }
-            if e.kind() == std::io::ErrorKind::NotFound {
-                "mpv was not found. Install mpv to play video.".to_string()
-            } else {
-                format!("failed to launch mpv: {}", e)
-            }
-        })?;
-        *slot = Some(ManagedChild::new(child, header_include));
-    }
-
+        (Some(prepared), _) => {
+            let own_config = cfg.mpv_use_own_config.unwrap_or(false);
+            start_player(
+                Some(|| {
+                    let mut slot = player_slot.lock().unwrap_or_else(|e| e.into_inner());
+                    if shutting_down.load(Ordering::SeqCst) {
+                        plan.discard_marker_payload();
+                        return Err(NotStarted::MustNot(SHUTTING_DOWN.to_string()));
+                    }
+                    let player = match prepared {
+                        Ok(start) => start(plan, own_config, &ipc_path),
+                        Err(reason) => {
+                            // Nothing will read what this launch wrote.
+                            plan.discard_marker_payload();
+                            Err(reason)
+                        }
+                    }
+                    .map_err(NotStarted::CouldNot)?;
+                    let serial = player.serial();
+                    *slot = Some(player);
+                    Ok(serial)
+                }),
+                || {
+                    // The lock is not held here. The same play, described
+                    // again for the other player, on a socket of its own.
+                    let mpv_bin = find_mpv()?;
+                    let path = another_ipc_path(&ipc_path)?;
+                    let plan = crate::player::launch::build_launch_for(
+                        spec,
+                        crate::player::PlayerKind::External,
+                        &cfg,
+                        &path,
+                    )?;
+                    let mut slot = player_slot.lock().unwrap_or_else(|e| e.into_inner());
+                    // Vela may have begun to exit while mpv was looked for.
+                    if shutting_down.load(Ordering::SeqCst) {
+                        plan.discard_marker_payload();
+                        return Err(SHUTTING_DOWN.to_string());
+                    }
+                    let player = crate::player::external::launch(&mpv_bin, plan)?;
+                    let serial = player.serial();
+                    *slot = Some(player);
+                    external_ipc_path = Some(path);
+                    Ok(serial)
+                },
+            )?
+        }
+    };
+    let player_exit = PlayerExit {
+        slot: player_slot.clone(),
+        serial,
+    };
+    // The trackers below follow the player that started, on its socket.
+    let ipc_path = external_ipc_path.unwrap_or(ipc_path);
+    let fell_back = started_player != spec.player;
     // Seed the tracked position with the resume point, so if mpv exits before
     // IPC reports a time-pos the final check-in reports the resume position
     // rather than 0 (which would clobber an existing resume point).
@@ -1156,14 +922,38 @@ pub fn play(
     // reports reason=quit/stop), only on reason=eof. Always-on regardless of
     // progress target. Failure to spawn the watcher is non-fatal — playback
     // still works, just without sequence advancement.
+    let state_session = session_id.clone();
+    let (eof_watching, eof_wait) = eof_watch();
     if let Err(e) = spawn_eof_watcher(
         ipc_path.clone(),
         stop_flag.clone(),
         advance.clone(),
         session_id,
+        eof_watching,
     ) {
         eprintln!("vela: couldn't spawn mpv EOF watcher: {e}");
     }
+
+    // The player view's state, for an embedded play only: one that runs in
+    // the external player, from the start or after falling back, has no view
+    // and never gets the notifier. Non-fatal like the watcher above: the play
+    // goes on, its view without controls. Only Linux has an embedded play.
+    #[cfg(target_os = "linux")]
+    if started_player == crate::player::PlayerKind::Embedded {
+        if let Some(notify) = on_state {
+            if let Err(e) = crate::player::report::spawn_reporter(
+                ipc_path.clone(),
+                stop_flag.clone(),
+                state_session,
+                spec.duration,
+                notify,
+            ) {
+                eprintln!("vela: couldn't spawn the player state reporter: {e}");
+            }
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = (on_state, state_session);
 
     // Automatic only. Like the EOF watcher, failing to spawn is non-fatal:
     // playback still works, it just cannot step itself down.
@@ -1181,11 +971,38 @@ pub fn play(
 
     // Explain a play the user did not ask for. Best-effort and fire-and-forget:
     // a notice that fails to render must never affect playback.
-    if let Some(notice) = spec.osd_notice.clone() {
-        if let Err(e) = spawn_osd_notice(ipc_path.clone(), stop_flag.clone(), notice) {
+    // A play that fell back from the embedded player explains that, unless
+    // it already carries a notice of its own; that explanation then stays due.
+    let (notice, on_notice_shown) = match &spec.osd_notice {
+        None if fell_back => (
+            spec.if_embedded_cannot_start.notice.clone(),
+            spec.if_embedded_cannot_start.on_notice_shown.clone(),
+        ),
+        carried => (carried.clone(), spec.on_notice_shown.clone()),
+    };
+    if let Some(notice) = notice {
+        if let Err(e) = spawn_osd_notice(
+            ipc_path.clone(),
+            stop_flag.clone(),
+            notice,
+            OSD_NOTICE_DELAY,
+            on_notice_shown,
+        ) {
             eprintln!("vela: couldn't show the playback notice: {e}");
         }
     }
+
+    // An embedded play is told of its end only once the EOF watcher has
+    // stopped reading, so whoever is told knows whether the end was a clean
+    // end of file: the page leaves the run's fullscreen at an end that is not
+    // (pc-2), and a clean end read late would cost a run going on its
+    // fullscreen. A play in the external player is told as before.
+    let on_end = match started_player {
+        crate::player::PlayerKind::Embedded => {
+            on_end.map(|notify| after_eof_watcher(notify, eof_wait))
+        }
+        crate::player::PlayerKind::External => on_end,
+    };
 
     // Route the end-of-session notifier: tracked sessions fire it from their
     // tracker tail (after the final server write, so a refresh triggered by it
@@ -1199,6 +1016,7 @@ pub fn play(
             start_ms,
             stop_flag.clone(),
             spec.window_observation.clone(),
+            player_exit,
             on_end,
         ),
         ProgressTarget::Jellyfin(track) if !track.base_url.is_empty() => start_tracking_jellyfin(
@@ -1207,12 +1025,14 @@ pub fn play(
             start_ms,
             stop_flag.clone(),
             spec.window_observation.clone(),
+            player_exit,
             on_end,
         ),
         _ => spawn_end_watcher(
             ipc_path,
             stop_flag.clone(),
             spec.window_observation.clone(),
+            player_exit,
             on_end,
         ),
     };
@@ -1226,16 +1046,19 @@ pub fn play(
         // wait() could block play() forever under play_lock if mpv wedged opening
         // a file on a hung mount before honoring kill().
         stop_flag.store(true, Ordering::Relaxed);
-        if let Some(child) = child_slot
+        if let Some(player) = player_slot
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .as_mut()
         {
-            let _ = child.kill();
+            let _ = player.kill();
         }
         return Err(format!("couldn't start playback tracking: {e}"));
     }
-    Ok(stop_flag)
+    Ok(PlayStarted {
+        stop: stop_flag,
+        player: started_player,
+    })
 }
 
 /// Tiny IPC listener that signals the playback dispatcher when mpv finishes a
@@ -1243,15 +1066,24 @@ pub fn play(
 /// errored (`error`), or otherwise-stopped exits never fire the notifier — so
 /// closing the player stops playback. Separate from the progress reader so it
 /// runs for every source even when no progress tracker is active.
+///
+/// `watching` is dropped when the watcher stops, by any way (and at once if
+/// it cannot be started); a watcher not yet connected when it is told the
+/// play has ended gives up at its next failed try.
 fn spawn_eof_watcher(
     socket_path: String,
     stop_flag: Arc<AtomicBool>,
     advance: Arc<crate::commands::PlaybackAdvance>,
     session_id: String,
+    watching: EofWatching,
 ) -> std::io::Result<()> {
     std::thread::Builder::new()
         .name("mpv-eof-watcher".into())
         .spawn(move || {
+            let EofWatching {
+                watching: _watching,
+                ended,
+            } = watching;
             // Brief connect retries: mpv may not have opened the socket yet.
             let mut stream = None;
             for _ in 0..50 {
@@ -1263,6 +1095,9 @@ fn spawn_eof_watcher(
                         stream = Some(s);
                         break;
                     }
+                    // The play is over and its socket gone: no end of file
+                    // will come.
+                    Err(_) if ended.load(Ordering::Relaxed) => return,
                     Err(_) => std::thread::sleep(Duration::from_millis(100)),
                 }
             }
@@ -1284,26 +1119,56 @@ fn spawn_eof_watcher(
     Ok(())
 }
 
-/// send buffer), publishing the latest position into the returned counter. The
-/// `done` flag is set when mpv exits or the connection drops. Does NO network I/O,
-/// so it's shared by every backend's poster.
+/// Position and startup evidence from the shared IPC reader.
+struct PositionReader {
+    last_t_ms: Arc<AtomicU64>,
+    done: Arc<AtomicBool>,
+    start_unconfirmed: Arc<AtomicBool>,
+}
+
+impl PositionReader {
+    fn end(&self, stop_flag: &AtomicBool) -> PlaybackEnd {
+        PlaybackEnd {
+            position_ms: self.last_t_ms.load(Ordering::Relaxed),
+            failed_to_start: self.done.load(Ordering::Acquire)
+                && self.start_unconfirmed.load(Ordering::Relaxed)
+                && !stop_flag.load(Ordering::Relaxed),
+        }
+    }
+}
+
+/// Observe position and window state without server I/O. `done` is set on
+/// every way out of the reader's thread, a panic included (the trackers wait
+/// on it): when the IPC connection ends, or cannot be made. A confirmed exit
+/// of the player ends the connect tries at once. The startup evidence lets
+/// the UI explain a play that ended before opening, even when IPC never
+/// connected.
 fn spawn_position_reader(
     socket_path: String,
     initial_ms: u64,
     stop_flag: Arc<AtomicBool>,
     window_observation: WindowStateObservation,
-) -> std::io::Result<(Arc<AtomicU64>, Arc<AtomicBool>)> {
+    player_exit: PlayerExit,
+) -> std::io::Result<PositionReader> {
     let last_t_ms = Arc::new(AtomicU64::new(initial_ms));
     let done = Arc::new(AtomicBool::new(false));
     let last_t_ms_r = last_t_ms.clone();
-    let done_r = done.clone();
+    let marks_done = ReaderDone(done.clone());
+    let start_unconfirmed = Arc::new(AtomicBool::new(true));
+    let start_unconfirmed_r = start_unconfirmed.clone();
+    // Taken before the thread, so that a thread that cannot be started marks
+    // the reader finished too (its closure is dropped unrun).
+    let finishes = window_observation.reader_started();
     std::thread::Builder::new()
         .name("mpv-ipc-reader".into())
         .spawn(move || {
+            // Dropped last, on every way out of this thread, after the last
+            // event read has been applied (`ReaderFinishes`).
+            let _finishes = finishes;
+            let _marks_done = marks_done;
             let mut stream = None;
             for _ in 0..50 {
                 if stop_flag.load(Ordering::Relaxed) {
-                    done_r.store(true, Ordering::Relaxed);
                     return;
                 }
                 match ipc_connect(&socket_path) {
@@ -1311,22 +1176,17 @@ fn spawn_position_reader(
                         stream = Some(s);
                         break;
                     }
+                    Err(_) if player_exit.confirmed() => break,
                     Err(_) => std::thread::sleep(Duration::from_millis(100)),
                 }
             }
             let mut stream = match stream {
                 Some(s) => s,
-                None => {
-                    done_r.store(true, Ordering::Relaxed);
-                    return;
-                }
+                None => return,
             };
             let reader_clone = match stream.try_clone() {
                 Ok(s) => s,
-                Err(_) => {
-                    done_r.store(true, Ordering::Relaxed);
-                    return;
-                }
+                Err(_) => return,
             };
             let mut reader = BufReader::new(reader_clone);
 
@@ -1343,7 +1203,8 @@ fn spawn_position_reader(
                   {\"command\":[\"observe_property\",3,\"window-maximized\"]}\n\
                   {\"command\":[\"observe_property\",4,\"display-names\"]}\n\
                   {\"command\":[\"observe_property\",5,\"display-width\"]}\n\
-                  {\"command\":[\"observe_property\",6,\"display-height\"]}\n",
+                  {\"command\":[\"observe_property\",6,\"display-height\"]}\n\
+                  {\"command\":[\"observe_property\",7,\"osd-dimensions\"]}\n",
             );
 
             let mut line = String::new();
@@ -1358,18 +1219,31 @@ fn spawn_position_reader(
                     Err(_) => break,
                 }
                 // Only `time-pos` is a position. Every other observed property
-                // above is either non-numeric or a display dimension, and a
-                // dimension read as a position corrupts the resume point.
+                // above is either non-numeric or a display or window
+                // dimension, and a dimension read as a position corrupts the
+                // resume point.
                 if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
                     if let Some(ms) = position_property_change(&v) {
                         last_t_ms_r.store(ms, Ordering::Relaxed);
+                        start_unconfirmed_r.store(false, Ordering::Relaxed);
+                    }
+                    // A very short file can end before a position arrives.
+                    // An observed deliberate quit/stop also needs no warning.
+                    if v["event"] == "file-loaded"
+                        || (v["event"] == "end-file"
+                            && matches!(v["reason"].as_str(), Some("eof" | "quit" | "stop")))
+                    {
+                        start_unconfirmed_r.store(false, Ordering::Relaxed);
                     }
                     window_observation.apply_ipc_event(&v);
                 }
             }
-            done_r.store(true, Ordering::Relaxed);
         })?;
-    Ok((last_t_ms, done))
+    Ok(PositionReader {
+        last_t_ms,
+        done,
+        start_unconfirmed,
+    })
 }
 
 /// Called when Automatic decides this play needs a lower tier. Carries the
@@ -1389,10 +1263,15 @@ pub type StepDownNotify = Arc<dyn Fn(u64, crate::automatic::StepDownReason) + Se
 /// in.
 /// Show one short OSD line on this player, then stop. Its own connection and
 /// its own thread so a slow or refused write cannot delay the trackers.
+/// `on_shown` runs once, and only when the line was really handed to the
+/// player: not when the play was replaced during the wait, and not when the
+/// player could not be reached.
 fn spawn_osd_notice(
     socket_path: String,
     stop_flag: Arc<AtomicBool>,
     notice: String,
+    delay: Duration,
+    on_shown: Option<NoticeShown>,
 ) -> std::io::Result<()> {
     std::thread::Builder::new()
         .name("mpv-osd-notice".into())
@@ -1411,17 +1290,20 @@ fn spawn_osd_notice(
                 }
             }
             let Some(mut stream) = stream else { return };
-            // Let the picture arrive first — a notice drawn over a black frame
-            // during load explains nothing.
-            std::thread::sleep(Duration::from_millis(1500));
+            std::thread::sleep(delay);
             if stop_flag.load(Ordering::Relaxed) {
                 return;
             }
             // JSON-encoded so a title or unit can never break the command.
             let text = serde_json::Value::String(notice);
-            let _ = stream.write_all(
+            let sent = stream.write_all(
                 format!("{{\"command\":[\"show-text\",{text},2000]}}\n").as_bytes(),
             );
+            if sent.is_ok() {
+                if let Some(on_shown) = on_shown {
+                    on_shown();
+                }
+            }
         })?;
     Ok(())
 }
@@ -1562,6 +1444,99 @@ fn wait_tick(stop_flag: &AtomicBool, done: &AtomicBool) -> bool {
     !(stop_flag.load(Ordering::Relaxed) || done.load(Ordering::Relaxed))
 }
 
+enum ReportRetry {
+    ConnectOnly,
+    Replayable,
+}
+
+/// The only error data a report may expose to diagnostics. Do not retain the
+/// reqwest error: even without its URL, its reason phrase or source can contain
+/// arbitrary server text, including credentials.
+#[derive(Debug)]
+enum ReportError {
+    HttpStatus(u16),
+    Timeout,
+    Connect,
+    Builder,
+    Redirect,
+    Body,
+    Decode,
+    Request,
+    Other,
+}
+
+impl From<reqwest::Error> for ReportError {
+    fn from(error: reqwest::Error) -> Self {
+        if let Some(status) = error.status() {
+            Self::HttpStatus(status.as_u16())
+        } else if error.is_timeout() {
+            Self::Timeout
+        } else if error.is_connect() {
+            Self::Connect
+        } else if error.is_builder() {
+            Self::Builder
+        } else if error.is_redirect() {
+            Self::Redirect
+        } else if error.is_body() {
+            Self::Body
+        } else if error.is_decode() {
+            Self::Decode
+        } else if error.is_request() {
+            Self::Request
+        } else {
+            Self::Other
+        }
+    }
+}
+
+impl std::fmt::Display for ReportError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::HttpStatus(status) => write!(f, "HTTP status {status}"),
+            Self::Timeout => f.write_str("timeout"),
+            Self::Connect => f.write_str("connection error"),
+            Self::Builder => f.write_str("request construction error"),
+            Self::Redirect => f.write_str("redirect error"),
+            Self::Body => f.write_str("body error"),
+            Self::Decode => f.write_str("decode error"),
+            Self::Request => f.write_str("request error"),
+            Self::Other => f.write_str("transport error"),
+        }
+    }
+}
+
+/// The current-thread runtime is idle between reports, so a pooled connection
+/// can close without reqwest noticing until send. Only replayable reports may
+/// retry a failure that could have happened after the server accepted them.
+fn send_report_with_retry<T>(
+    client: &reqwest::Client,
+    retry: ReportRetry,
+    mut send: impl FnMut(&reqwest::Client) -> Result<T, reqwest::Error>,
+) -> Result<T, ReportError> {
+    let result = match send(client) {
+        // Connect errors precede delivery. Other transport errors are ambiguous;
+        // never retry timeouts or HTTP status errors under either policy.
+        Err(e)
+            if !e.is_timeout()
+                && !e.is_status()
+                && (e.is_connect()
+                    || (matches!(retry, ReportRetry::Replayable)
+                        && (e.is_request() || e.is_body() || e.is_decode()))) =>
+        {
+            // A clone shares the old pool. A new client cannot reuse a dead
+            // connection from it, and retains the tracker's ten-second limit.
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(10))
+                .build()
+                .and_then(|fresh| send(&fresh))
+        }
+        result => result,
+    };
+    // Classify only after retrying, so diagnostics cannot expose any part of
+    // the raw error and the retry decision still has the original error kind.
+    result.map_err(ReportError::from)
+}
+
 /// Plex: report position on a timer, then post the authoritative final position
 /// when mpv exits (this is what makes resume work). The caller guarantees a
 /// non-empty `info.server_base` (see the match guards in [`play`]).
@@ -1571,10 +1546,16 @@ fn start_tracking_plex(
     start_ms: u64,
     stop_flag: Arc<AtomicBool>,
     window_observation: WindowStateObservation,
+    player_exit: PlayerExit,
     on_end: Option<EndNotify>,
 ) -> std::io::Result<()> {
-    let (last_t_ms, done) =
-        spawn_position_reader(socket_path, start_ms, stop_flag.clone(), window_observation)?;
+    let reading = spawn_position_reader(
+        socket_path,
+        start_ms,
+        stop_flag.clone(),
+        window_observation,
+        player_exit,
+    )?;
 
     std::thread::Builder::new()
         .name("mpv-tracker-plex".into())
@@ -1602,19 +1583,23 @@ fn start_tracking_plex(
                     Err(_) => return,
                 };
 
-                while wait_tick(&stop_flag, &done) {
-                    let t = last_t_ms.load(Ordering::Relaxed);
-                    if let Err(e) = rt.block_on(crate::plex_api::update_timeline(
-                        &client,
-                        &info.server_base,
-                        &info.token,
-                        &info.client_identifier,
-                        &info.rating_key,
-                        &info.key,
-                        "playing",
-                        t,
-                        info.duration_ms,
-                    )) {
+                while wait_tick(&stop_flag, &reading.done) {
+                    let t = reading.last_t_ms.load(Ordering::Relaxed);
+                    if let Err(e) =
+                        send_report_with_retry(&client, ReportRetry::Replayable, |client| {
+                            rt.block_on(crate::plex_api::update_timeline(
+                                client,
+                                &info.server_base,
+                                &info.token,
+                                &info.client_identifier,
+                                &info.rating_key,
+                                &info.key,
+                                "playing",
+                                t,
+                                info.duration_ms,
+                            ))
+                        })
+                    {
                         eprintln!("plex: timeline update failed: {}", e);
                     }
                 }
@@ -1622,33 +1607,43 @@ fn start_tracking_plex(
                 // Authoritative final position. Skip if we never read a real position
                 // (mpv failed to start / exited immediately) so we don't clobber an
                 // existing resume point with 0.
-                let t = last_t_ms.load(Ordering::Relaxed);
+                let t = reading.last_t_ms.load(Ordering::Relaxed);
                 if t > 0 {
-                    let _ = rt.block_on(crate::plex_api::update_timeline(
-                        &client,
-                        &info.server_base,
-                        &info.token,
-                        &info.client_identifier,
-                        &info.rating_key,
-                        &info.key,
-                        "stopped",
-                        t,
-                        info.duration_ms,
-                    ));
-                    if let Err(e) = rt.block_on(crate::plex_api::update_progress(
-                        &client,
-                        &info.server_base,
-                        &info.token,
-                        &info.client_identifier,
-                        &info.rating_key,
-                        t,
-                    )) {
+                    if let Err(e) =
+                        send_report_with_retry(&client, ReportRetry::Replayable, |client| {
+                            rt.block_on(crate::plex_api::update_timeline(
+                                client,
+                                &info.server_base,
+                                &info.token,
+                                &info.client_identifier,
+                                &info.rating_key,
+                                &info.key,
+                                "stopped",
+                                t,
+                                info.duration_ms,
+                            ))
+                        })
+                    {
+                        eprintln!("plex: final timeline update failed: {}", e);
+                    }
+                    if let Err(e) =
+                        send_report_with_retry(&client, ReportRetry::Replayable, |client| {
+                            rt.block_on(crate::plex_api::update_progress(
+                                client,
+                                &info.server_base,
+                                &info.token,
+                                &info.client_identifier,
+                                &info.rating_key,
+                                t,
+                            ))
+                        })
+                    {
                         eprintln!("plex: final progress update failed: {}", e);
                     }
                 }
             })();
             if let Some(on_end) = on_end {
-                on_end(last_t_ms.load(Ordering::Relaxed));
+                on_end(reading.end(&stop_flag));
             }
         })?;
     Ok(())
@@ -1664,10 +1659,16 @@ fn start_tracking_jellyfin(
     start_ms: u64,
     stop_flag: Arc<AtomicBool>,
     window_observation: WindowStateObservation,
+    player_exit: PlayerExit,
     on_end: Option<EndNotify>,
 ) -> std::io::Result<()> {
-    let (last_t_ms, done) =
-        spawn_position_reader(socket_path, start_ms, stop_flag.clone(), window_observation)?;
+    let reading = spawn_position_reader(
+        socket_path,
+        start_ms,
+        stop_flag.clone(),
+        window_observation,
+        player_exit,
+    )?;
 
     std::thread::Builder::new()
         .name("mpv-tracker-jellyfin".into())
@@ -1713,32 +1714,41 @@ fn start_tracking_jellyfin(
                     if let Some(ev) = event {
                         body["EventName"] = serde_json::Value::String(ev.to_string());
                     }
-                    let mut rb = client.post(&url).json(&body);
-                    for (k, v) in &track.headers {
-                        rb = rb.header(k, v);
-                    }
-                    if let Err(e) =
+                    let retry = if endpoint.is_empty() {
+                        // Start increments play count and emits an event on
+                        // every call, even with the same PlaySessionId. Its
+                        // client is already fresh; only a connect failure is
+                        // proof that the server has not accepted the start.
+                        ReportRetry::ConnectOnly
+                    } else {
+                        ReportRetry::Replayable
+                    };
+                    if let Err(e) = send_report_with_retry(&client, retry, |client| {
+                        let mut rb = client.post(&url).json(&body);
+                        for (k, v) in &track.headers {
+                            rb = rb.header(k, v);
+                        }
                         rt.block_on(async { rb.send().await.and_then(|r| r.error_for_status()) })
-                    {
+                    }) {
                         eprintln!("jellyfin: progress update failed: {}", e);
                     }
                 };
 
-                post("", last_t_ms.load(Ordering::Relaxed), None); // Start
-                while wait_tick(&stop_flag, &done) {
+                post("", reading.last_t_ms.load(Ordering::Relaxed), None); // Start
+                while wait_tick(&stop_flag, &reading.done) {
                     post(
                         "/Progress",
-                        last_t_ms.load(Ordering::Relaxed),
+                        reading.last_t_ms.load(Ordering::Relaxed),
                         Some("TimeUpdate"),
                     );
                 }
                 // Always post Stopped — including at position 0 — since we posted Start.
                 // Otherwise a fast mpv exit (before any IPC position arrives) would leave
                 // a stale "now playing" session on the server.
-                post("/Stopped", last_t_ms.load(Ordering::Relaxed), None);
+                post("/Stopped", reading.last_t_ms.load(Ordering::Relaxed), None);
             })();
             if let Some(on_end) = on_end {
-                on_end(last_t_ms.load(Ordering::Relaxed));
+                on_end(reading.end(&stop_flag));
             }
         })?;
     Ok(())
@@ -1753,125 +1763,1474 @@ fn spawn_end_watcher(
     socket_path: String,
     stop_flag: Arc<AtomicBool>,
     window_observation: WindowStateObservation,
+    player_exit: PlayerExit,
     on_end: Option<EndNotify>,
 ) -> std::io::Result<()> {
     // Reuse the shared position reader: its `done` flag doubles as the EOF
     // signal (set when mpv exits / the socket drops).
-    let (last_t_ms, done) =
-        spawn_position_reader(socket_path, 0, stop_flag.clone(), window_observation)?;
+    let reading = spawn_position_reader(
+        socket_path,
+        0,
+        stop_flag.clone(),
+        window_observation,
+        player_exit,
+    )?;
     let Some(on_end) = on_end else {
         return Ok(());
     };
     std::thread::Builder::new()
         .name("mpv-end-watcher".into())
         .spawn(move || {
-            while !done.load(Ordering::Relaxed) && !stop_flag.load(Ordering::Relaxed) {
+            while !reading.done.load(Ordering::Relaxed) && !stop_flag.load(Ordering::Relaxed) {
                 std::thread::sleep(Duration::from_millis(100));
             }
             // Fire even when the session was replaced or mpv exited before a
             // position arrived (position 0): the session is over either way,
             // and a spurious refresh is harmless.
-            on_end(last_t_ms.load(Ordering::Relaxed));
+            on_end(reading.end(&stop_flag));
         })?;
     Ok(())
 }
+
+/// What the command layer's tests use of this module's test stand-ins.
+#[cfg(test)]
+pub(crate) use tests::{embedded_spec, with_test_watchdog};
+#[cfg(all(test, unix))]
+pub(crate) use tests::{mpv_is, stand_in_for_mpv, FailingLauncher};
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn base_command_args(cfg: crate::config::AppConfig) -> Vec<String> {
-        base_mpv_command("mpv", &cfg)
-            .get_args()
-            .map(|arg| arg.to_string_lossy().into_owned())
-            .collect()
+    async fn assert_jellyfin_start_is_not_replayed(first_response: &'static [u8]) {
+        use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            tokio::time::timeout(Duration::from_secs(5), async {
+                let mut starts = 0;
+                let mut stops = 0;
+                loop {
+                    let (mut stream, _) = listener.accept().await.unwrap();
+                    let mut reader = tokio::io::BufReader::new(&mut stream);
+                    let mut request = String::new();
+                    reader.read_line(&mut request).await.unwrap();
+                    let mut length = None;
+                    loop {
+                        let mut line = String::new();
+                        assert_ne!(reader.read_line(&mut line).await.unwrap(), 0);
+                        if line == "\r\n" {
+                            break;
+                        }
+                        if let Some(value) =
+                            line.to_ascii_lowercase().strip_prefix("content-length:")
+                        {
+                            length = Some(value.trim().parse::<usize>().unwrap());
+                        }
+                    }
+                    let mut body = vec![0; length.expect("report has a body")];
+                    reader.read_exact(&mut body).await.unwrap();
+                    let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+                    assert!(body["ItemId"] == "item-1");
+                    assert!(body["MediaSourceId"] == "source-1");
+                    assert!(body["PlaySessionId"] == "session-1");
+                    assert!(body["PositionTicks"] == 0);
+
+                    // The server has consumed the complete start before losing
+                    // its response. Repeating it would count a second play.
+                    if request.starts_with("POST /Sessions/Playing HTTP/") {
+                        starts += 1;
+                        if starts == 1 {
+                            stream.write_all(first_response).await.unwrap();
+                            continue;
+                        }
+                    } else {
+                        assert!(request.starts_with("POST /Sessions/Playing/Stopped HTTP/"));
+                        stops += 1;
+                        if stops == 1 {
+                            // The final report must retain its retry, even
+                            // after an ambiguous start and at position zero.
+                            stream
+                                .write_all(b"HTTP/1.1 204 No Content\r\n")
+                                .await
+                                .unwrap();
+                            continue;
+                        }
+                    }
+                    stream
+                        .write_all(b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n")
+                        .await
+                        .unwrap();
+                    if stops > 0 {
+                        return (starts, stops);
+                    }
+                }
+            })
+            .await
+            .expect("tracker sends its start and final reports")
+        });
+
+        let (finished, mut completion) = tokio::sync::mpsc::unbounded_channel();
+        start_tracking_jellyfin(
+            String::new(),
+            JellyfinTrack {
+                base_url,
+                item_id: "item-1".into(),
+                media_source_id: "source-1".into(),
+                play_session_id: Some("session-1".into()),
+                headers: Vec::new(),
+            },
+            0,
+            // End immediately: no player or display is needed, and the real
+            // tracker still sends Start followed by Stopped.
+            Arc::new(AtomicBool::new(true)),
+            WindowStateObservation::default(),
+            PlayerExit::default(),
+            Some(Arc::new(move |end| finished.send(end).unwrap())),
+        )
+        .unwrap();
+        let (starts, stops) = server.await.unwrap();
+        tokio::time::timeout(Duration::from_secs(5), completion.recv())
+            .await
+            .expect("tracker finishes after reporting")
+            .expect("tracker sends its completion");
+        assert_eq!(starts, 1, "an accepted start must never be replayed");
+        assert_eq!(stops, 2, "the final report still retries once");
+    }
+
+    #[tokio::test]
+    async fn jellyfin_start_is_not_replayed_after_an_incomplete_response() {
+        assert_jellyfin_start_is_not_replayed(b"HTTP/1.1 204 No Content\r\n").await;
+    }
+
+    #[tokio::test]
+    async fn jellyfin_start_is_not_replayed_after_a_lost_response() {
+        assert_jellyfin_start_is_not_replayed(b"").await;
     }
 
     #[test]
-    fn base_mpv_command_preserves_render_defaults_without_managed_sync_overrides() {
-        let args = base_command_args(crate::config::AppConfig::default());
+    fn reports_retry_after_a_pooled_connection_closes() {
+        use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 
-        for expected in [
-            "--no-config",
-            "--no-ytdl",
-            "--vo=gpu-next,gpu",
-            "--profile=gpu-hq",
-            "--hwdec=auto",
-            "--hwdec-codecs=all",
-            "--target-colorspace-hint=yes",
-            "--hdr-compute-peak=yes",
-        ] {
-            assert!(args.iter().any(|arg| arg == expected), "missing {expected}");
+        async fn receive_report(stream: &mut tokio::net::TcpStream) -> String {
+            let mut reader = tokio::io::BufReader::new(stream);
+            let mut length = None;
+            loop {
+                let mut line = String::new();
+                assert_ne!(reader.read_line(&mut line).await.unwrap(), 0);
+                if line == "\r\n" {
+                    break;
+                }
+                if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                    length = Some(value.trim().parse::<usize>().unwrap());
+                }
+            }
+            let mut body = vec![0; length.expect("report has a body")];
+            reader.read_exact(&mut body).await.unwrap();
+            String::from_utf8(body).unwrap()
         }
-        #[cfg(target_os = "windows")]
-        assert!(args.iter().any(|arg| arg == "--gpu-api=d3d11"));
-        #[cfg(not(target_os = "windows"))]
-        assert!(args.iter().any(|arg| arg == "--gpu-api=vulkan"));
-        assert!(
-            args.iter()
-                .all(|arg| !arg.starts_with("--audio-delay") && !arg.starts_with("--audio-device")),
-            "Vela must not guess AirPlay delay or pin an output device: {args:?}"
-        );
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/Sessions/Playing", listener.local_addr().unwrap());
+        listener.set_nonblocking(true).unwrap();
+        let (close, close_requested) = tokio::sync::oneshot::channel();
+        let (closed, connection_closed) = std::sync::mpsc::channel();
+        let server = std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            rt.block_on(async {
+                let listener = tokio::net::TcpListener::from_std(listener).unwrap();
+                tokio::time::timeout(Duration::from_secs(5), async {
+                    let (mut first, _) = listener.accept().await.unwrap();
+                    let first_report = receive_report(&mut first).await;
+                    first
+                        .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: keep-alive\r\n\r\n")
+                        .await
+                        .unwrap();
+                    // Close only after block_on returned, with the connection
+                    // pooled and the client's runtime no longer polling it.
+                    close_requested.await.unwrap();
+                    first.shutdown().await.unwrap();
+                    drop(first);
+                    closed.send(()).unwrap();
+
+                    let (mut second, _) = listener.accept().await.unwrap();
+                    let second_report = receive_report(&mut second).await;
+                    second
+                        .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                        .await
+                        .unwrap();
+                    [first_report, second_report]
+                })
+                .await
+                .expect("both reports arrive")
+            })
+        });
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .no_proxy()
+            .build()
+            .unwrap();
+        let send = |client: &reqwest::Client, body: &'static str| {
+            rt.block_on(async {
+                client.post(&url).body(body).send().await?.error_for_status()
+            })
+        };
+        send_report_with_retry(&client, ReportRetry::ConnectOnly, |client| {
+            send(client, "start")
+        })
+        .unwrap();
+        close.send(()).unwrap();
+        connection_closed.recv_timeout(Duration::from_secs(5)).unwrap();
+        let mut attempts = 0;
+        send_report_with_retry(&client, ReportRetry::Replayable, |client| {
+            attempts += 1;
+            send(client, "stopped")
+        })
+        .unwrap();
+        assert_eq!(attempts, 2, "the stale connection required exactly one retry");
+        assert_eq!(server.join().unwrap(), ["start", "stopped"]);
     }
 
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn macos_base_mpv_command_prefers_avfoundation_before_advanced_overrides() {
-        let cfg = crate::config::AppConfig {
-            mpv_extra_args: Some("# expert override\n--volume=80\n--ao=coreaudio".into()),
-            ..Default::default()
-        };
-        let args = base_command_args(cfg);
-        let preferred = args
-            .iter()
-            .position(|arg| arg == "--ao=avfoundation,coreaudio")
-            .expect("macOS default must prefer AVFoundation with CoreAudio fallback");
-        let override_position = args
-            .iter()
-            .position(|arg| arg == "--ao=coreaudio")
-            .expect("Advanced AO override must be retained");
+    #[derive(Clone, Copy)]
+    enum ReportProbe {
+        PlexTimeline(&'static str),
+        PlexProgress,
+        Jellyfin(&'static str),
+    }
 
+    fn report_status_diagnostic_is_safe(
+        probe: ReportProbe,
+        status: u16,
+        retry_first: bool,
+    ) -> bool {
+        use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        listener.set_nonblocking(true).unwrap();
+        let server = std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            rt.block_on(async {
+                let listener = tokio::net::TcpListener::from_std(listener).unwrap();
+                tokio::time::timeout(Duration::from_secs(5), async {
+                    for attempt in 0..=usize::from(retry_first) {
+                        let (mut stream, _) = listener.accept().await.unwrap();
+                        let mut reader = tokio::io::BufReader::new(&mut stream);
+                        let mut length = 0;
+                        loop {
+                            let mut line = String::new();
+                            assert_ne!(reader.read_line(&mut line).await.unwrap(), 0);
+                            if line == "\r\n" {
+                                break;
+                            }
+                            if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                                length = value.trim().parse::<usize>().unwrap();
+                            }
+                        }
+                        reader.read_exact(&mut vec![0; length]).await.unwrap();
+                        if retry_first && attempt == 0 {
+                            // Fail ambiguously first, so the diagnostic also
+                            // covers a status error returned by the fresh client.
+                            stream.write_all(b"HTTP/1.1 204 No Content\r\n").await.unwrap();
+                        } else {
+                            let response = format!(
+                                "HTTP/1.1 {status} server-only-text http://server/report?token=synthetic-secret\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                            );
+                            stream.write_all(response.as_bytes()).await.unwrap();
+                        }
+                    }
+                })
+                .await
+                .expect("report reaches the server");
+            });
+        });
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .no_proxy()
+            .build()
+            .unwrap();
+        let retry = match probe {
+            ReportProbe::Jellyfin("") => ReportRetry::ConnectOnly,
+            _ => ReportRetry::Replayable,
+        };
+        let mut attempts = 0;
+        let result = send_report_with_retry(&client, retry, |client| {
+            attempts += 1;
+            rt.block_on(async {
+                match probe {
+                    ReportProbe::PlexTimeline(state) => {
+                        crate::plex_api::update_timeline(
+                            client,
+                            &base,
+                            "synthetic-token",
+                            "client-1",
+                            "42",
+                            "/library/metadata/42",
+                            state,
+                            1234,
+                            5000,
+                        )
+                        .await
+                    }
+                    ReportProbe::PlexProgress => {
+                        crate::plex_api::update_progress(
+                            client,
+                            &base,
+                            "synthetic-token",
+                            "client-1",
+                            "42",
+                            1234,
+                        )
+                        .await
+                    }
+                    ReportProbe::Jellyfin(endpoint) => client
+                        .post(format!("{base}/Sessions/Playing{endpoint}"))
+                        .json(&serde_json::json!({ "ItemId": "item-1" }))
+                        .send()
+                        .await?
+                        .error_for_status()
+                        .map(|_| ()),
+                }
+            })
+        });
+        server.join().unwrap();
         assert_eq!(
-            args.iter()
-                .filter(|arg| *arg == "--ao=avfoundation,coreaudio")
-                .count(),
-            1,
-            "Vela's AO preference must be appended exactly once"
+            attempts,
+            1 + usize::from(retry_first),
+            "HTTP status errors must not retry"
         );
-        assert!(
-            preferred < override_position,
-            "Advanced options must remain last-option-wins: {args:?}"
-        );
-    }
-
-    #[test]
-    fn own_mpv_config_owns_audio_output_selection() {
-        let cfg = crate::config::AppConfig {
-            mpv_use_own_config: Some(true),
-            mpv_extra_args: Some("--ao=coreaudio".into()),
-            ..Default::default()
+        let error = result.expect_err("server rejected the report");
+        // Keep the unsafe diagnostic in memory: a failing assertion must not
+        // itself print a server's text, URL, or credential into the test log.
+        let display = error.to_string();
+        let debug = format!("{error:?}");
+        let has_untrusted_text = |text: &str| {
+            text.contains("server-only-text")
+                || text.contains("synthetic-secret")
+                || text.contains("://")
         };
-        let args = base_command_args(cfg);
-
-        assert!(!args.iter().any(|arg| arg == "--no-config"));
+        if has_untrusted_text(&display) {
+            return false;
+        }
         assert!(
-            !args.iter().any(|arg| arg == "--ao=avfoundation,coreaudio"),
-            "own-config mode must not override ao from mpv.conf"
+            !has_untrusted_text(&debug),
+            "debug formatting must also be safe"
         );
         assert!(
-            args.iter().any(|arg| arg == "--ao=coreaudio"),
-            "Advanced options remain authoritative in own-config mode"
+            display == format!("HTTP status {status}"),
+            "diagnostic preserves the numeric status"
+        );
+        true
+    }
+
+    #[test]
+    fn plex_report_diagnostics_exclude_server_text() {
+        let mut unsafe_diagnostics = 0;
+        for probe in [
+            ReportProbe::PlexTimeline("playing"),
+            ReportProbe::PlexTimeline("stopped"),
+            ReportProbe::PlexProgress,
+        ] {
+            for status in [400, 503] {
+                for retry_first in [false, true] {
+                    unsafe_diagnostics += usize::from(!report_status_diagnostic_is_safe(
+                        probe,
+                        status,
+                        retry_first,
+                    ));
+                }
+            }
+        }
+        assert_eq!(
+            unsafe_diagnostics, 0,
+            "Plex report errors must expose only a category and numeric status"
         );
     }
 
-    #[cfg(not(target_os = "macos"))]
     #[test]
-    fn non_macos_base_command_does_not_set_an_audio_output() {
-        let args = base_command_args(crate::config::AppConfig::default());
-        assert!(
-            args.iter().all(|arg| !arg.starts_with("--ao=")),
-            "the AVFoundation policy is macOS-only: {args:?}"
+    fn jellyfin_report_diagnostics_exclude_server_text() {
+        let mut unsafe_diagnostics = 0;
+        for endpoint in ["", "/Progress", "/Stopped"] {
+            for status in [400, 503] {
+                for retry_first in [false, true] {
+                    if endpoint.is_empty() && retry_first {
+                        continue; // Start must not replay an ambiguous failure.
+                    }
+                    unsafe_diagnostics += usize::from(!report_status_diagnostic_is_safe(
+                        ReportProbe::Jellyfin(endpoint),
+                        status,
+                        retry_first,
+                    ));
+                }
+            }
+        }
+        assert_eq!(
+            unsafe_diagnostics, 0,
+            "Jellyfin/Emby report errors must expose only a category and numeric status"
         );
+    }
+
+    // Review finding sel-4. Handed an embedded play and nothing to start it
+    // with, `play` must refuse, and refuse before it has done anything:
+    // without the refusal an embedded play would be started as an external
+    // one, with the options of neither.
+    #[test]
+    fn play_refuses_a_player_it_cannot_start_and_starts_nothing() {
+        let spec = embedded_spec();
+        let slot = Arc::new(Mutex::new(None));
+        let ended = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let on_end: EndNotify = {
+            let ended = ended.clone();
+            Arc::new(move |_position_ms| {
+                ended.fetch_add(1, Ordering::SeqCst);
+            })
+        };
+        let result = play(
+            &spec,
+            ProgressTarget::None,
+            Players {
+                slot: &slot,
+                shutting_down: &Arc::new(AtomicBool::new(false)),
+                embedded: None,
+            },
+            &Arc::new(crate::commands::PlaybackAdvance::default()),
+            "refused-session".to_string(),
+            Some(on_end),
+            None,
+        );
+        // If the refusal is ever lost, this test has just started a real
+        // player on a machine that has one. Stop it before judging anything.
+        let started = slot.lock().unwrap_or_else(|e| e.into_inner()).take();
+        let started_a_player = started.is_some();
+        if let Some(mut player) = started {
+            let _ = player.kill();
+        }
+        if let Ok(started) = &result {
+            started.stop.store(true, Ordering::Relaxed);
+        }
+        assert_eq!(result.err().as_deref(), Some(NO_EMBEDDED_PLAYER));
+        assert!(!started_a_player, "a refused play must not start a player");
+        assert_eq!(
+            ended.load(Ordering::SeqCst),
+            0,
+            "a play that never started has no end to report"
+        );
+    }
+
+    /// A play for the embedded player with nothing optional.
+    pub(crate) fn embedded_spec() -> PlaySpec {
+        PlaySpec {
+            player: crate::player::PlayerKind::Embedded,
+            url: "https://media.invalid/never-played".to_string(),
+            title: String::new(),
+            http_headers: Vec::new(),
+            start_seconds: 0.0,
+            autocrop_script: None,
+            autocrop_shim: None,
+            crop_script: None,
+            inherited_window_state: PlaybackWindowState::default(),
+            screen_name: None,
+            window_observation: WindowStateObservation::default(),
+            markers_script: None,
+            markers: Vec::new(),
+            intro_policy: crate::config::SkipPolicy::Off,
+            credits_policy: crate::config::SkipPolicy::Off,
+            commercial_policy: crate::config::SkipPolicy::Off,
+            step_down: None,
+            duration: None,
+            osd_notice: None,
+            on_notice_shown: None,
+            if_embedded_cannot_start: EmbeddedFallback::default(),
+            steps_taken: 0,
+        }
+    }
+
+    /// Stands in for the embedded launcher: writes down what it is asked, in
+    /// order, and hands back a handle to something that really runs.
+    #[cfg(unix)]
+    struct RecordingLauncher {
+        asked: Arc<Mutex<Vec<String>>>,
+    }
+
+    #[cfg(unix)]
+    impl crate::player::EmbeddedLauncher for RecordingLauncher {
+        fn prepare(&self, session_id: &str) -> Result<crate::player::EmbeddedStart, String> {
+            let asked = self.asked.clone();
+            asked
+                .lock()
+                .unwrap()
+                .push(format!("prepare {session_id}"));
+            Ok(Box::new(move |plan, _own_config, ipc_path: &str| {
+                let mut asked = asked.lock().unwrap();
+                asked.push(format!("start {ipc_path}"));
+                asked.extend(plan.args.iter().map(|arg| arg.to_cli()));
+                asked.push(format!("url {}", plan.url));
+                let stand_in = std::process::Command::new("sleep")
+                    .arg("30")
+                    .spawn()
+                    .map_err(|e| e.to_string())?;
+                Ok(crate::player::PlayerHandle::External(
+                    crate::player::external::ManagedChild::for_test(stand_in),
+                ))
+            }))
+        }
+    }
+
+    // The wiring the unit tests of the embedded launch cannot see: that `play`
+    // hands an embedded play to the embedded launcher, complete, and to
+    // nothing else. It needs no `mpv` program on the machine, which is itself
+    // part of the point.
+    #[cfg(unix)]
+    #[test]
+    fn an_embedded_play_is_started_by_the_embedded_launcher_from_its_described_launch() {
+        let asked = Arc::new(Mutex::new(Vec::new()));
+        let launcher = RecordingLauncher {
+            asked: asked.clone(),
+        };
+        let slot = Arc::new(Mutex::new(None));
+        let result = play(
+            &embedded_spec(),
+            ProgressTarget::None,
+            Players {
+                slot: &slot,
+                shutting_down: &Arc::new(AtomicBool::new(false)),
+                embedded: Some(&launcher),
+            },
+            &Arc::new(crate::commands::PlaybackAdvance::default()),
+            "embedded-session".to_string(),
+            None,
+            None,
+        );
+        // Whatever happened, leave nothing running.
+        let published = slot.lock().unwrap_or_else(|e| e.into_inner()).take();
+        let was_published = published.is_some();
+        if let Some(mut player) = published {
+            let _ = player.kill();
+        }
+        let started = result.unwrap_or_else(|reason| panic!("an embedded play starts through its launcher: {reason}"));
+        started.stop.store(true, Ordering::Relaxed);
+        assert!(was_published, "the launcher's player is the one published");
+        assert_eq!(started.player, crate::player::PlayerKind::Embedded);
+
+        let asked = asked.lock().unwrap().clone();
+        assert_eq!(asked[0], "prepare embedded-session");
+        let ipc_path = asked[1]
+            .strip_prefix("start ")
+            .expect("the launch is started second, after the window was asked")
+            .to_string();
+        let options = &asked[2..asked.len() - 1];
+        // The user's own settings on the machine running this test may add
+        // options of theirs; what Vela asserts after them is fixed.
+        let last = |name: &str| {
+            options
+                .iter()
+                .rev()
+                .find(|option| option.starts_with(&format!("--{name}=")))
+                .cloned()
+        };
+        assert_eq!(last("vo").as_deref(), Some("--vo=libmpv"));
+        assert_eq!(last("force-window").as_deref(), Some("--force-window=no"));
+        assert_eq!(last("idle").as_deref(), Some("--idle=once"));
+        assert_eq!(
+            last("input-ipc-server"),
+            Some(format!("--input-ipc-server={ipc_path}")),
+            "the socket the launch names is the one the trackers are given"
+        );
+        assert!(
+            !options.iter().any(|option| option.starts_with("--title=")
+                || option.starts_with("--gpu-api=")
+                || option.starts_with("--target-colorspace-hint=")),
+            "nothing of the external player's launch: {options:?}"
+        );
+        assert_eq!(
+            asked.last().map(String::as_str),
+            Some("url https://media.invalid/never-played")
+        );
+    }
+
+    // ---- an embedded player that cannot start a play (review finding ec-6;
+    // decision D3: a play is never failed over the embedded player)
+
+    type Never = fn() -> Result<&'static str, NotStarted>;
+    fn could_not(reason: &str) -> Result<&'static str, NotStarted> {
+        Err(NotStarted::CouldNot(reason.to_string()))
+    }
+
+    #[test]
+    fn a_play_given_the_external_player_starts_there() {
+        let started = start_player(None::<Never>, || Ok("mpv"));
+        assert_eq!(started, Ok(("mpv", crate::player::PlayerKind::External)));
+        // And fails with that player's own reason, nothing added.
+        let failed = start_player(None::<Never>, || Err::<&str, _>("mpv was not found.".to_string()));
+        assert_eq!(failed, Err("mpv was not found.".to_string()));
+    }
+
+    #[test]
+    fn a_play_the_embedded_player_starts_never_reaches_the_external_one() {
+        let mut external_asked = false;
+        let started = start_player(Some(|| Ok("embedded")), || {
+            external_asked = true;
+            Ok("mpv")
+        });
+        assert_eq!(started, Ok(("embedded", crate::player::PlayerKind::Embedded)));
+        assert!(!external_asked);
+    }
+
+    #[test]
+    fn a_play_the_embedded_player_cannot_start_runs_in_the_external_one() {
+        let order = std::cell::RefCell::new(Vec::new());
+        let started = start_player(
+            Some(|| {
+                order.borrow_mut().push("embedded");
+                could_not("The embedded player could not start: no window.")
+            }),
+            || {
+                order.borrow_mut().push("external");
+                Ok("mpv")
+            },
+        );
+        assert_eq!(
+            started,
+            Ok(("mpv", crate::player::PlayerKind::External)),
+            "the play is not failed; it is the external player's now"
+        );
+        assert_eq!(
+            *order.borrow(),
+            ["embedded", "external"],
+            "the external player is started only once the embedded one has failed"
+        );
+    }
+
+    #[test]
+    fn a_play_neither_player_can_start_fails_and_says_why_for_both() {
+        let failed = start_player(
+            Some(|| could_not("The embedded player could not start: no window.")),
+            || Err("mpv was not found.".to_string()),
+        );
+        assert_eq!(
+            failed,
+            Err("The embedded player could not start: no window. The external player could not start either: mpv was not found.".to_string())
+        );
+    }
+
+    #[test]
+    fn a_play_that_must_not_start_is_not_started_in_the_other_player_either() {
+        // Vela is exiting. That is not the embedded player failing, and the
+        // external player must not be started in its place.
+        let mut external_asked = false;
+        let ended = start_player(
+            Some(|| Err::<&str, _>(NotStarted::MustNot(SHUTTING_DOWN.to_string()))),
+            || {
+                external_asked = true;
+                Ok("mpv")
+            },
+        );
+        assert_eq!(ended, Err(SHUTTING_DOWN.to_string()), "said plainly, nothing added");
+        assert!(!external_asked);
+    }
+
+    /// Stands in for an embedded launcher whose player will not start.
+    #[cfg(unix)]
+    pub(crate) struct FailingLauncher {
+        pub(crate) asked: Arc<Mutex<Vec<String>>>,
+    }
+
+    #[cfg(unix)]
+    impl crate::player::EmbeddedLauncher for FailingLauncher {
+        fn prepare(&self, session_id: &str) -> Result<crate::player::EmbeddedStart, String> {
+            let asked = self.asked.clone();
+            asked.lock().unwrap().push(format!("prepare {session_id}"));
+            Ok(Box::new(move |plan, _own_config, ipc_path: &str| {
+                asked.lock().unwrap().push(format!("start {ipc_path}"));
+                // As the real launcher does on failure: nothing is left of
+                // what the launch wrote.
+                plan.discard_marker_payload();
+                Err("The embedded player could not start: no window in this test.".to_string())
+            }))
+        }
+    }
+
+    /// Have `play`, on this thread, find `found` when it looks for mpv, for
+    /// as long as the returned guard lives.
+    #[cfg(unix)]
+    pub(crate) fn mpv_is(found: impl Fn() -> Result<String, String> + 'static) -> impl Drop {
+        struct Restore;
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                MPV_FOR_THIS_TEST.with(|find| find.borrow_mut().take());
+            }
+        }
+        MPV_FOR_THIS_TEST.with(|find| *find.borrow_mut() = Some(Box::new(found)));
+        Restore
+    }
+
+    /// A program that stands in for mpv: it writes down the arguments it was
+    /// started with and then stays alive until it is killed. Publish the
+    /// arguments by a rename in the same directory: callers use existence
+    /// as readiness, so the file must not be visible until it is complete.
+    #[cfg(unix)]
+    pub(crate) fn stand_in_for_mpv(name: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("vela-test-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let program = dir.join("mpv-stand-in");
+        let arguments = dir.join("arguments");
+        std::fs::write(
+            &program,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{arguments}.pending' && mv '{arguments}.pending' '{arguments}'\nexec sleep 30\n",
+                arguments = arguments.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        (program, arguments)
+    }
+
+    // The whole path through `play`, with stand-ins at both ends: an embedded
+    // launcher that fails, and a program in place of mpv.
+    #[cfg(unix)]
+    #[test]
+    fn a_play_the_embedded_player_cannot_start_is_started_in_the_external_one_by_play() {
+        let asked = Arc::new(Mutex::new(Vec::new()));
+        let launcher = FailingLauncher {
+            asked: asked.clone(),
+        };
+        let (program, arguments) = stand_in_for_mpv("fallback-starts");
+        let found = program.to_string_lossy().into_owned();
+        let _mpv = mpv_is(move || Ok(found.clone()));
+        let slot = Arc::new(Mutex::new(None));
+        let result = play(
+            &embedded_spec(),
+            ProgressTarget::None,
+            Players {
+                slot: &slot,
+                shutting_down: &Arc::new(AtomicBool::new(false)),
+                embedded: Some(&launcher),
+            },
+            &Arc::new(crate::commands::PlaybackAdvance::default()),
+            "fallback-session".to_string(),
+            None,
+            None,
+        );
+        // The stand-in writes its arguments as it starts.
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !arguments.exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let started_with = std::fs::read_to_string(&arguments).unwrap_or_default();
+        // Whatever happened, leave nothing running.
+        let published = slot.lock().unwrap_or_else(|e| e.into_inner()).take();
+        let published_external = matches!(published, Some(crate::player::PlayerHandle::External(_)));
+        if let Some(mut player) = published {
+            let _ = player.kill();
+        }
+        let _ = std::fs::remove_dir_all(program.parent().unwrap());
+        let started = result.unwrap_or_else(|reason| panic!("the play is not failed: {reason}"));
+        started.stop.store(true, Ordering::Relaxed);
+
+        assert_eq!(started.player, crate::player::PlayerKind::External);
+        assert!(published_external, "the external player is the one published");
+        let asked = asked.lock().unwrap().clone();
+        assert_eq!(asked[0], "prepare fallback-session");
+        let embedded_socket = asked[1]
+            .strip_prefix("start ")
+            .expect("the embedded player was tried first")
+            .to_string();
+        assert_eq!(asked.len(), 2);
+        // The external launch is the external player's own, not the embedded
+        // one's handed on: its lifecycle option, its own socket, no library
+        // output.
+        let arguments: Vec<&str> = started_with.lines().collect();
+        let last = |name: &str| {
+            arguments
+                .iter()
+                .rev()
+                .find(|argument| argument.starts_with(&format!("--{name}=")))
+                .copied()
+        };
+        assert_eq!(last("idle"), Some("--idle=no"), "arguments: {arguments:?}");
+        assert!(!arguments.contains(&"--vo=libmpv"));
+        let socket = last("input-ipc-server")
+            .and_then(|argument| argument.strip_prefix("--input-ipc-server="))
+            .expect("the external player is given a socket");
+        assert_ne!(socket, embedded_socket, "a socket of its own");
+        assert_eq!(
+            &arguments[arguments.len() - 2..],
+            ["--", "https://media.invalid/never-played"]
+        );
+    }
+
+    /// A notifier of player states that counts them.
+    #[cfg(unix)]
+    fn counting_states() -> (
+        Arc<Mutex<Vec<crate::player::report::PlayerState>>>,
+        crate::player::report::StateNotify,
+    ) {
+        let states = Arc::new(Mutex::new(Vec::new()));
+        let notify: crate::player::report::StateNotify = {
+            let states = states.clone();
+            Arc::new(move |state: &crate::player::report::PlayerState| {
+                states.lock().unwrap().push(state.clone())
+            })
+        };
+        (states, notify)
+    }
+
+    /// Stands in for an embedded launcher whose player listens on the socket
+    /// the launch names, as mpv does.
+    #[cfg(target_os = "linux")]
+    struct ListeningLauncher {
+        listener: Arc<Mutex<Option<(std::os::unix::net::UnixListener, String)>>>,
+    }
+
+    #[cfg(target_os = "linux")]
+    impl crate::player::EmbeddedLauncher for ListeningLauncher {
+        fn prepare(&self, _session_id: &str) -> Result<crate::player::EmbeddedStart, String> {
+            let listener = self.listener.clone();
+            Ok(Box::new(move |_plan, _own_config, ipc_path: &str| {
+                let bound = std::os::unix::net::UnixListener::bind(ipc_path).map_err(|e| e.to_string())?;
+                *listener.lock().unwrap() = Some((bound, ipc_path.to_string()));
+                let stand_in = std::process::Command::new("sleep")
+                    .arg("30")
+                    .spawn()
+                    .map_err(|e| e.to_string())?;
+                Ok(crate::player::PlayerHandle::External(
+                    crate::player::external::ManagedChild::for_test(stand_in),
+                ))
+            }))
+        }
+    }
+
+    // The player view's state reaches the page from an embedded play: `play`
+    // starts the reporter on the play's own socket, with the play's session.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn an_embedded_play_reports_its_state_to_its_view() {
+        use std::io::{BufRead, Write};
+        let listener = Arc::new(Mutex::new(None));
+        let launcher = ListeningLauncher {
+            listener: listener.clone(),
+        };
+        let (states, notify) = counting_states();
+        let slot = Arc::new(Mutex::new(None));
+        let mut spec = embedded_spec();
+        spec.duration = Some(Duration::from_secs(1200));
+        let result = play(
+            &spec,
+            ProgressTarget::None,
+            Players {
+                slot: &slot,
+                shutting_down: &Arc::new(AtomicBool::new(false)),
+                embedded: Some(&launcher),
+            },
+            &Arc::new(crate::commands::PlaybackAdvance::default()),
+            "state-session".to_string(),
+            None,
+            Some(notify),
+        );
+        if let Some(mut player) = slot.lock().unwrap_or_else(|e| e.into_inner()).take() {
+            let _ = player.kill();
+        }
+        let started = result.unwrap_or_else(|reason| panic!("the play starts: {reason}"));
+        let (listener, path) = listener.lock().unwrap().take().expect("the launch was started");
+        listener.set_nonblocking(true).unwrap();
+        // Several of the play's threads connect; the reporter is the one
+        // that asks for the crop script's state.
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let mut reporter = None;
+        while reporter.is_none() && std::time::Instant::now() < deadline {
+            let Ok((stream, _)) = listener.accept() else {
+                std::thread::sleep(Duration::from_millis(10));
+                continue;
+            };
+            stream.set_nonblocking(false).unwrap();
+            stream.set_read_timeout(Some(Duration::from_millis(500))).unwrap();
+            // The other threads ask for other things, or nothing.
+            let mut asked = String::new();
+            let mut reader = std::io::BufReader::new(&stream);
+            while !asked.contains("user-data/vela-crop/state") {
+                match reader.read_line(&mut asked) {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => {}
+                }
+            }
+            if asked.contains("user-data/vela-crop/state") {
+                reporter = Some(stream);
+            }
+        }
+        let mut reporter = reporter.expect("the reporter connected to the play's socket");
+        reporter
+            .write_all(b"{\"event\":\"property-change\",\"id\":3,\"name\":\"pause\",\"data\":false}\n")
+            .unwrap();
+        while states.lock().unwrap().is_empty() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        started.stop.store(true, Ordering::Relaxed);
+        let _ = std::fs::remove_file(&path);
+        let first = states.lock().unwrap().first().cloned().expect("a state was reported");
+        assert_eq!(first.session_id, "state-session");
+        assert_eq!(first.paused, Some(false));
+        assert_eq!(first.duration, Some(1200.0), "the item's own duration until mpv has one");
+    }
+
+    // A play given the embedded player that runs in the external one has no
+    // view: nothing reports its state, though the notifier was handed in.
+    #[cfg(unix)]
+    #[test]
+    fn a_play_that_fell_back_reports_no_state() {
+        let launcher = FailingLauncher {
+            asked: Arc::new(Mutex::new(Vec::new())),
+        };
+        let (program, arguments) = stand_in_for_mpv("fallback-no-state");
+        let found = program.to_string_lossy().into_owned();
+        let _mpv = mpv_is(move || Ok(found.clone()));
+        let (states, notify) = counting_states();
+        let slot = Arc::new(Mutex::new(None));
+        let result = play(
+            &embedded_spec(),
+            ProgressTarget::None,
+            Players {
+                slot: &slot,
+                shutting_down: &Arc::new(AtomicBool::new(false)),
+                embedded: Some(&launcher),
+            },
+            &Arc::new(crate::commands::PlaybackAdvance::default()),
+            "fallback-state-session".to_string(),
+            None,
+            Some(notify),
+        );
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !arguments.exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let started_with = std::fs::read_to_string(&arguments).unwrap_or_default();
+        // Listen on the external player's socket, as mpv would, while the
+        // play's threads are still trying to connect.
+        let socket = started_with
+            .lines()
+            .rev()
+            .find_map(|argument| argument.strip_prefix("--input-ipc-server="))
+            .expect("the external player is given a socket")
+            .to_string();
+        let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let mut asked_for_state = false;
+        let watch_until = std::time::Instant::now() + Duration::from_millis(1500);
+        while std::time::Instant::now() < watch_until {
+            match listener.accept() {
+                Ok((stream, _)) => {
+                    use std::io::Read;
+                    stream.set_nonblocking(false).unwrap();
+                    stream.set_read_timeout(Some(Duration::from_millis(300))).unwrap();
+                    let mut asked = vec![0u8; 4096];
+                    let read = (&stream).read(&mut asked).unwrap_or(0);
+                    asked_for_state |= String::from_utf8_lossy(&asked[..read]).contains("vela-crop/state");
+                }
+                Err(_) => std::thread::sleep(Duration::from_millis(10)),
+            }
+        }
+        if let Some(mut player) = slot.lock().unwrap_or_else(|e| e.into_inner()).take() {
+            let _ = player.kill();
+        }
+        let _ = std::fs::remove_file(&socket);
+        let _ = std::fs::remove_dir_all(program.parent().unwrap());
+        let started = result.unwrap_or_else(|reason| panic!("the play is not failed: {reason}"));
+        started.stop.store(true, Ordering::Relaxed);
+        assert_eq!(started.player, crate::player::PlayerKind::External);
+        assert!(!asked_for_state, "no reporter connected to the external player");
+        assert!(states.lock().unwrap().is_empty());
+    }
+
+    /// An end notifier that writes down whether `advance` knew of a clean end
+    /// of file for `session` when it ran.
+    #[cfg(target_os = "linux")]
+    fn noting_clean_end(
+        advance: &Arc<crate::commands::PlaybackAdvance>,
+        session: &'static str,
+    ) -> (Arc<Mutex<Option<bool>>>, EndNotify) {
+        let seen = Arc::new(Mutex::new(None));
+        let notify: EndNotify = {
+            let seen = seen.clone();
+            let advance = advance.clone();
+            Arc::new(move |_position_ms| {
+                *seen.lock().unwrap() = Some(advance.saw_eof(session));
+            })
+        };
+        (seen, notify)
+    }
+
+    /// Plays mpv's side of a play's end on `listener`: the position reader
+    /// loses the player first, and the EOF watcher is sent the clean
+    /// `end-file` only 400 ms later, as when the watcher's thread is slow to
+    /// read it. Returns what the end notifier knew (`noting_clean_end`).
+    #[cfg(target_os = "linux")]
+    fn end_with_a_late_clean_end_of_file(
+        listener: std::os::unix::net::UnixListener,
+        seen: &Arc<Mutex<Option<bool>>>,
+    ) -> Option<bool> {
+        use std::io::{Read, Write};
+        listener.set_nonblocking(true).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let (mut watcher, mut reader) = (None, None);
+        while (watcher.is_none() || reader.is_none()) && std::time::Instant::now() < deadline {
+            let Ok((stream, _)) = listener.accept() else {
+                std::thread::sleep(Duration::from_millis(10));
+                continue;
+            };
+            stream.set_nonblocking(false).unwrap();
+            stream.set_read_timeout(Some(Duration::from_millis(300))).unwrap();
+            // The position reader asks for properties at once; the EOF
+            // watcher only listens.
+            let mut asked = [0u8; 256];
+            match (&stream).read(&mut asked) {
+                Ok(read) if read > 0 => reader = Some(stream),
+                _ => watcher = Some(stream),
+            }
+        }
+        let mut watcher = watcher.expect("the EOF watcher connected");
+        drop(reader.expect("the position reader connected"));
+        std::thread::sleep(Duration::from_millis(400));
+        let _ = watcher.write_all(b"{\"event\":\"end-file\",\"reason\":\"eof\"}\n");
+        while seen.lock().unwrap().is_none() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let known = *seen.lock().unwrap();
+        known
+    }
+
+    // pc-2: an embedded play's end is reported once the EOF watcher has
+    // read what mpv said, so a clean end read late is still known as clean
+    // (the page keeps a run's fullscreen across a clean end, and leaves it
+    // at any other).
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn an_embedded_play_reports_its_end_once_a_clean_end_of_file_has_been_read() {
+        let listener = Arc::new(Mutex::new(None));
+        let launcher = ListeningLauncher {
+            listener: listener.clone(),
+        };
+        let advance = Arc::new(crate::commands::PlaybackAdvance::default());
+        let (seen, on_end) = noting_clean_end(&advance, "late-eof-session");
+        let slot = Arc::new(Mutex::new(None));
+        let result = play(
+            &embedded_spec(),
+            ProgressTarget::None,
+            Players {
+                slot: &slot,
+                shutting_down: &Arc::new(AtomicBool::new(false)),
+                embedded: Some(&launcher),
+            },
+            &advance,
+            "late-eof-session".to_string(),
+            Some(on_end),
+            None,
+        );
+        if let Some(mut player) = slot.lock().unwrap_or_else(|e| e.into_inner()).take() {
+            let _ = player.kill();
+        }
+        let started = result.unwrap_or_else(|reason| panic!("the play starts: {reason}"));
+        let (bound, path) = listener.lock().unwrap().take().expect("the launch was started");
+        let known = end_with_a_late_clean_end_of_file(bound, &seen);
+        started.stop.store(true, Ordering::Relaxed);
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(known, Some(true), "the end was reported, and as clean");
+    }
+
+    // pc-2: a play in the external player is told of its end as before, at
+    // once, without waiting for the EOF watcher.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn an_external_play_reports_its_end_without_waiting_for_the_eof_watcher() {
+        let (program, arguments) = stand_in_for_mpv("external-end-not-delayed");
+        let found = program.to_string_lossy().into_owned();
+        let _mpv = mpv_is(move || Ok(found.clone()));
+        let advance = Arc::new(crate::commands::PlaybackAdvance::default());
+        let (seen, on_end) = noting_clean_end(&advance, "external-end-session");
+        let mut spec = embedded_spec();
+        spec.player = crate::player::PlayerKind::External;
+        let slot = Arc::new(Mutex::new(None));
+        let result = play(
+            &spec,
+            ProgressTarget::None,
+            Players {
+                slot: &slot,
+                shutting_down: &Arc::new(AtomicBool::new(false)),
+                embedded: None,
+            },
+            &advance,
+            "external-end-session".to_string(),
+            Some(on_end),
+            None,
+        );
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !arguments.exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let started_with = std::fs::read_to_string(&arguments).unwrap_or_default();
+        let socket = started_with
+            .lines()
+            .rev()
+            .find_map(|argument| argument.strip_prefix("--input-ipc-server="))
+            .expect("the external player is given a socket")
+            .to_string();
+        let bound = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        let known = end_with_a_late_clean_end_of_file(bound, &seen);
+        if let Some(mut player) = slot.lock().unwrap_or_else(|e| e.into_inner()).take() {
+            let _ = player.kill();
+        }
+        let _ = std::fs::remove_file(&socket);
+        let _ = std::fs::remove_dir_all(program.parent().unwrap());
+        let started = result.unwrap_or_else(|reason| panic!("the play starts: {reason}"));
+        started.stop.store(true, Ordering::Relaxed);
+        assert_eq!(started.player, crate::player::PlayerKind::External);
+        assert_eq!(known, Some(false), "the end was reported before the late end of file was read");
+    }
+
+    /// An end notifier that writes down that it ran, behind an EOF watcher
+    /// started on `socket` for a play no one stops.
+    #[cfg(target_os = "linux")]
+    fn end_behind_an_eof_watcher(socket: &std::path::Path, session: &str) -> (Arc<AtomicBool>, EndNotify) {
+        let (watching, wait) = eof_watch();
+        spawn_eof_watcher(
+            socket.to_string_lossy().into_owned(),
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(crate::commands::PlaybackAdvance::default()),
+            session.to_string(),
+            watching,
+        )
+        .unwrap();
+        let reported = Arc::new(AtomicBool::new(false));
+        let notify: EndNotify = {
+            let reported = reported.clone();
+            Arc::new(move |_position_ms| reported.store(true, Ordering::Relaxed))
+        };
+        (reported, after_eof_watcher(notify, wait))
+    }
+
+    // pc-2: an EOF watcher still trying to connect when the play's end is
+    // known gives up, so the end is reported at once, not after the wait.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn an_end_is_not_held_by_an_eof_watcher_that_never_connected() {
+        let socket = std::env::temp_dir().join(format!("vela-test-no-mpv-{}.sock", std::process::id()));
+        let _ = std::fs::remove_file(&socket);
+        let (reported, on_end) = end_behind_an_eof_watcher(&socket, "never-connected");
+        let started = std::time::Instant::now();
+        on_end(PlaybackEnd::default());
+        let took = started.elapsed();
+        assert!(reported.load(Ordering::Relaxed), "the end was reported");
+        assert!(took < Duration::from_millis(500), "the end was held {took:?}");
+    }
+
+    // pc-2: the wait for an EOF watcher that does not stop is bounded, far
+    // below what the page would notice as a window kept fullscreen.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn an_end_waits_at_most_a_second_for_an_eof_watcher_that_does_not_stop() {
+        let socket = std::env::temp_dir().join(format!("vela-test-silent-mpv-{}.sock", std::process::id()));
+        let _ = std::fs::remove_file(&socket);
+        let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        let (reported, on_end) = end_behind_an_eof_watcher(&socket, "silent");
+        // Connected, and told nothing: the watcher reads on.
+        let (silent, _) = listener.accept().unwrap();
+        let started = std::time::Instant::now();
+        on_end(PlaybackEnd::default());
+        let took = started.elapsed();
+        drop(silent);
+        let _ = std::fs::remove_file(&socket);
+        assert!(reported.load(Ordering::Relaxed), "the end was reported");
+        assert!(took < Duration::from_millis(1500), "the end was held {took:?}");
+    }
+
+    // The lock on the player slot is the one the exit handler waits for on
+    // the window's thread. Looking for mpv runs programs and waits for them.
+    #[cfg(unix)]
+    #[test]
+    fn looking_for_mpv_after_a_failed_embedded_start_does_not_hold_the_player_slot() {
+        let asked = Arc::new(Mutex::new(Vec::new()));
+        let launcher = FailingLauncher {
+            asked: asked.clone(),
+        };
+        let slot = Arc::new(Mutex::new(None));
+        let slot_was_free = Arc::new(Mutex::new(None));
+        let _mpv = mpv_is({
+            let (slot, slot_was_free) = (slot.clone(), slot_was_free.clone());
+            move || {
+                *slot_was_free.lock().unwrap() = Some(slot.try_lock().is_ok());
+                Err("no mpv in this test".to_string())
+            }
+        });
+        let result = play(
+            &embedded_spec(),
+            ProgressTarget::None,
+            Players {
+                slot: &slot,
+                shutting_down: &Arc::new(AtomicBool::new(false)),
+                embedded: Some(&launcher),
+            },
+            &Arc::new(crate::commands::PlaybackAdvance::default()),
+            "looking-session".to_string(),
+            None,
+            None,
+        );
+        assert_eq!(
+            result.err().as_deref(),
+            Some("The embedded player could not start: no window in this test. The external player could not start either: no mpv in this test")
+        );
+        assert_eq!(
+            *slot_was_free.lock().unwrap(),
+            Some(true),
+            "mpv was looked for, and the player slot was not locked meanwhile"
+        );
+        assert!(slot.lock().unwrap().is_none(), "nothing was published");
+        assert_eq!(asked.lock().unwrap().len(), 2, "the embedded player was tried first");
+    }
+
+    // Vela begins to exit while mpv is being looked for. The exit handler has
+    // swept the slot by the time the search is over; a player started now
+    // would be one nobody stops.
+    #[cfg(unix)]
+    #[test]
+    fn a_fallback_is_not_started_once_vela_has_begun_to_exit_during_the_search() {
+        let launcher = FailingLauncher {
+            asked: Arc::new(Mutex::new(Vec::new())),
+        };
+        let (program, arguments) = stand_in_for_mpv("fallback-during-exit");
+        let shutting_down = Arc::new(AtomicBool::new(false));
+        let _mpv = mpv_is({
+            let (shutting_down, found) = (shutting_down.clone(), program.to_string_lossy().into_owned());
+            move || {
+                shutting_down.store(true, Ordering::SeqCst);
+                Ok(found.clone())
+            }
+        });
+        let slot = Arc::new(Mutex::new(None));
+        let result = play(
+            &embedded_spec(),
+            ProgressTarget::None,
+            Players {
+                slot: &slot,
+                shutting_down: &shutting_down,
+                embedded: Some(&launcher),
+            },
+            &Arc::new(crate::commands::PlaybackAdvance::default()),
+            "exit-session".to_string(),
+            None,
+            None,
+        );
+        std::thread::sleep(Duration::from_millis(200));
+        let was_started = arguments.exists();
+        let published = slot.lock().unwrap_or_else(|e| e.into_inner()).take();
+        let was_published = published.is_some();
+        if let Some(mut player) = published {
+            let _ = player.kill();
+        }
+        let _ = std::fs::remove_dir_all(program.parent().unwrap());
+        if let Ok(started) = &result {
+            started.stop.store(true, Ordering::Relaxed);
+        }
+        assert_eq!(
+            result.err().as_deref(),
+            Some("The embedded player could not start: no window in this test. The external player could not start either: Vela is shutting down.")
+        );
+        assert!(!was_started, "no player was started");
+        assert!(!was_published);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_second_launch_of_a_play_gets_a_socket_of_its_own() {
+        // The embedded player that failed may still own the first.
+        let first = crate::player::launch::new_ipc_path().unwrap();
+        for _ in 0..10 {
+            assert_ne!(another_ipc_path(&first).unwrap(), first);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_embedded_play_is_not_started_once_vela_is_shutting_down() {
+        let asked = Arc::new(Mutex::new(Vec::new()));
+        let launcher = RecordingLauncher {
+            asked: asked.clone(),
+        };
+        let slot = Arc::new(Mutex::new(None));
+        let result = play(
+            &embedded_spec(),
+            ProgressTarget::None,
+            Players {
+                slot: &slot,
+                shutting_down: &Arc::new(AtomicBool::new(true)),
+                embedded: Some(&launcher),
+            },
+            &Arc::new(crate::commands::PlaybackAdvance::default()),
+            "late-session".to_string(),
+            None,
+            None,
+        );
+        let published = slot.lock().unwrap_or_else(|e| e.into_inner()).take();
+        let was_published = published.is_some();
+        if let Some(mut player) = published {
+            let _ = player.kill();
+        }
+        assert_eq!(result.err().as_deref(), Some("Vela is shutting down."));
+        assert!(!was_published);
+        assert_eq!(
+            asked.lock().unwrap().clone(),
+            ["prepare late-session"],
+            "the window may have been asked; nothing was started"
+        );
+    }
+
+    // Review finding sel-3: "the player started" is not "the user was told".
+    #[cfg(unix)]
+    fn notice_listener(name: &str) -> (std::os::unix::net::UnixListener, String) {
+        let dir = crate::player::launch::private_runtime_dir().expect("the private directory");
+        let path = dir.join(format!("{name}-{}.sock", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let listener = std::os::unix::net::UnixListener::bind(&path).expect("a socket to listen on");
+        (listener, path.to_string_lossy().into_owned())
+    }
+
+    #[cfg(unix)]
+    fn counting() -> (Arc<std::sync::atomic::AtomicUsize>, Option<NoticeShown>) {
+        let count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = count.clone();
+        let shown: NoticeShown = Arc::new(move || {
+            counter.fetch_add(1, Ordering::SeqCst);
+        });
+        (count, Some(shown))
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_notice_that_reaches_the_player_is_reported_shown_once() {
+        use std::io::{BufRead, BufReader, Read};
+        let (listener, socket) = notice_listener("notice-shown");
+        let (count, on_shown) = counting();
+        spawn_osd_notice(
+            socket.clone(),
+            Arc::new(AtomicBool::new(false)),
+            "A \"quoted\" line".to_string(),
+            Duration::from_millis(30),
+            on_shown,
+        )
+        .expect("the notice thread starts");
+        let (stream, _) = listener.accept().expect("the notice thread connects");
+        let mut reader = BufReader::new(stream);
+        let mut line = String::new();
+        reader.read_line(&mut line).expect("the command arrives");
+        assert_eq!(
+            line,
+            "{\"command\":[\"show-text\",\"A \\\"quoted\\\" line\",2000]}\n"
+        );
+        // The thread reports and then ends, closing its side.
+        let mut rest = String::new();
+        reader.read_to_string(&mut rest).expect("the thread ends");
+        assert_eq!(rest, "", "one command and nothing else");
+        assert_eq!(count.load(Ordering::SeqCst), 1, "reported exactly once");
+        let _ = std::fs::remove_file(&socket);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_notice_dropped_because_the_play_was_replaced_is_not_reported_shown() {
+        use std::io::Read;
+        let (listener, socket) = notice_listener("notice-dropped");
+        let (count, on_shown) = counting();
+        let replaced = Arc::new(AtomicBool::new(false));
+        spawn_osd_notice(
+            socket.clone(),
+            replaced.clone(),
+            "A line".to_string(),
+            Duration::from_millis(200),
+            on_shown,
+        )
+        .expect("the notice thread starts");
+        // Connected, and now waiting for the picture. The play is replaced.
+        let (mut stream, _) = listener.accept().expect("the notice thread connects");
+        replaced.store(true, Ordering::Relaxed);
+        let mut received = String::new();
+        stream
+            .read_to_string(&mut received)
+            .expect("the thread ends and closes its side");
+        assert_eq!(received, "", "nothing was sent to the player");
+        assert_eq!(count.load(Ordering::SeqCst), 0, "and nothing was reported");
+        let _ = std::fs::remove_file(&socket);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_notice_the_player_did_not_take_is_not_reported_shown() {
+        let (listener, socket) = notice_listener("notice-refused");
+        let (count, on_shown) = counting();
+        let (closed, when_closed) = std::sync::mpsc::channel();
+        // A player that goes away during the wait: it accepts the connection
+        // and closes it at once.
+        let player = std::thread::spawn(move || {
+            drop(listener.accept().expect("the notice thread connects"));
+            drop(listener);
+            let _ = closed.send(());
+        });
+        spawn_osd_notice(
+            socket.clone(),
+            Arc::new(AtomicBool::new(false)),
+            "A line".to_string(),
+            Duration::from_millis(150),
+            on_shown,
+        )
+        .expect("the notice thread starts");
+        when_closed
+            .recv_timeout(Duration::from_secs(10))
+            .expect("the player closes its side");
+        player.join().expect("the stand-in player ends");
+        // Well past the wait: the write has been tried, and failed.
+        std::thread::sleep(Duration::from_millis(500));
+        assert_eq!(count.load(Ordering::SeqCst), 0, "a failed write tells nobody");
+        let _ = std::fs::remove_file(&socket);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_notice_for_a_player_that_cannot_be_reached_is_not_reported_shown() {
+        let dir = crate::player::launch::private_runtime_dir().expect("the private directory");
+        let nowhere = dir.join(format!("notice-nowhere-{}.sock", std::process::id()));
+        let _ = std::fs::remove_file(&nowhere);
+        let (count, on_shown) = counting();
+        // Stop the connection attempts after the first few instead of
+        // waiting out all fifty.
+        let gave_up = Arc::new(AtomicBool::new(false));
+        spawn_osd_notice(
+            nowhere.to_string_lossy().into_owned(),
+            gave_up.clone(),
+            "A line".to_string(),
+            Duration::from_millis(1),
+            on_shown,
+        )
+        .expect("the notice thread starts");
+        std::thread::sleep(Duration::from_millis(250));
+        gave_up.store(true, Ordering::Relaxed);
+        std::thread::sleep(Duration::from_millis(250));
+        assert_eq!(count.load(Ordering::SeqCst), 0);
     }
 
     fn event(name: &str, data: serde_json::Value) -> serde_json::Value {
@@ -1887,17 +3246,20 @@ mod tests {
         use std::io::Write as _;
         use std::os::unix::net::UnixListener;
 
-        let dir = private_runtime_dir().expect("runtime dir");
+        let dir = crate::player::launch::private_runtime_dir().expect("runtime dir");
         let socket = dir.join(format!("ipc-test-{}.sock", events.len()));
         let _ = std::fs::remove_file(&socket);
         let listener = UnixListener::bind(&socket).expect("bind");
 
         let stop = Arc::new(AtomicBool::new(false));
-        let (last_t_ms, done) = spawn_position_reader(
+        let PositionReader {
+            last_t_ms, done, ..
+        } = spawn_position_reader(
             socket.to_string_lossy().to_string(),
             0,
             stop.clone(),
             WindowStateObservation::default(),
+            PlayerExit::default(),
         )
         .expect("reader");
 
@@ -1920,6 +3282,916 @@ mod tests {
         last_t_ms.load(Ordering::Relaxed)
     }
 
+    /// The real reader asks mpv for the window size and hands what mpv
+    /// reports to the window rule: a size reported before the player closes
+    /// is the windowed size of that play, and is not a position.
+    #[cfg(unix)]
+    #[test]
+    fn the_reader_subscribes_to_the_window_size_and_records_it() {
+        use std::io::Write as _;
+        use std::os::unix::net::UnixListener;
+
+        let dir = crate::player::launch::private_runtime_dir().expect("runtime dir");
+        let socket = dir.join(format!("ipc-size-{}.sock", std::process::id()));
+        let _ = std::fs::remove_file(&socket);
+        let listener = UnixListener::bind(&socket).expect("bind");
+
+        let observation = WindowStateObservation::default();
+        let stop = Arc::new(AtomicBool::new(false));
+        let PositionReader {
+            last_t_ms, done, ..
+        } = spawn_position_reader(
+            socket.to_string_lossy().to_string(),
+            0,
+            stop.clone(),
+            observation.clone(),
+            PlayerExit::default(),
+        )
+        .expect("reader");
+
+        let (mut mpv, _) = listener.accept().expect("accept");
+        mpv.set_read_timeout(Some(Duration::from_secs(5)))
+            .expect("read timeout");
+        let mut requests = BufReader::new(mpv.try_clone().expect("clone"));
+        let mut observed = Vec::new();
+        while !observed.iter().any(|name| name == "osd-dimensions") {
+            let mut line = String::new();
+            requests
+                .read_line(&mut line)
+                .expect("the reader asks for osd-dimensions");
+            let request: serde_json::Value = serde_json::from_str(&line).expect("a command");
+            assert_eq!(request["command"][0], "observe_property");
+            observed.push(request["command"][2].as_str().expect("a name").to_string());
+        }
+
+        // As mpv sends them: a window, then a size that is not usable (the
+        // window going away), which must leave the size before it.
+        for value in [
+            event(
+                "osd-dimensions",
+                serde_json::json!({ "w": 1024, "h": 576, "par": 1.0, "aspect": 1.777778,
+                                    "mt": 0, "mb": 0, "ml": 0, "mr": 0 }),
+            ),
+            event("time-pos", serde_json::json!(3.0)),
+            event(
+                "osd-dimensions",
+                serde_json::json!({ "w": 1024, "h": 0, "par": 0.0, "aspect": 0.0,
+                                    "mt": 0, "mb": 0, "ml": 0, "mr": 0 }),
+            ),
+        ] {
+            writeln!(mpv, "{value}").expect("write");
+        }
+        mpv.flush().expect("flush");
+        drop(requests);
+        drop(mpv);
+        for _ in 0..200 {
+            if done.load(Ordering::Relaxed) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        stop.store(true, Ordering::Relaxed);
+        let _ = std::fs::remove_file(&socket);
+        assert!(done.load(Ordering::Relaxed), "the reader finished");
+        assert_eq!(observation.snapshot().windowed_size, Some((1024, 576)));
+        assert_eq!(last_t_ms.load(Ordering::Relaxed), 3000);
+    }
+
+    // Review finding pw-8: Vela's exit waits for the last external play's
+    // reader to finish. The reader says so through the observation, on
+    // every way out of its thread.
+
+    /// Keep a broken blocking wait from hanging the test runner. Do not use
+    /// a scoped thread or join on timeout: either would wait for the very
+    /// operation the watchdog found stuck. Preserve panics from the worker.
+    #[track_caller]
+    pub(crate) fn with_test_watchdog<T: Send + 'static>(
+        limit: Duration,
+        description: &str,
+        work: impl FnOnce() -> T + Send + 'static,
+    ) -> T {
+        let (done, finished) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(work));
+            let _ = done.send(result);
+        });
+        match finished.recv_timeout(limit) {
+            Ok(Ok(value)) => value,
+            Ok(Err(panic)) => std::panic::resume_unwind(panic),
+            Err(error) => panic!("{description} did not return within {limit:?}: {error}"),
+        }
+    }
+
+    /// These unit waits return immediately or after 100 ms. Five seconds is
+    /// only a watchdog, well outside their existing one/two-second checks.
+    /// Measure inside the worker so thread startup and result delivery do
+    /// not count against those checks. The caller keeps the reader's guard,
+    /// so a timeout unwinds it and wakes a reader wait that is still stuck.
+    #[track_caller]
+    fn reader_wait_in_test(
+        observation: &WindowStateObservation,
+        limit: Duration,
+    ) -> (ReaderWait, Duration) {
+        let observation = observation.clone();
+        with_test_watchdog(
+            Duration::from_secs(5),
+            "wait_for_reader (finish or give up)",
+            move || {
+                let started = Instant::now();
+                let result = observation.wait_for_reader(limit);
+                (result, started.elapsed())
+            },
+        )
+    }
+
+    #[test]
+    fn an_observation_with_no_reader_is_not_waited_for() {
+        let observation = WindowStateObservation::default();
+        let (result, waited) = reader_wait_in_test(&observation, Duration::from_secs(10));
+        assert_eq!(result, ReaderWait::NoReader);
+        assert!(waited < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn a_running_reader_is_waited_for_only_so_long() {
+        let observation = WindowStateObservation::default();
+        let reading = observation.reader_started();
+        let limit = Duration::from_millis(100);
+        let (result, waited) = reader_wait_in_test(&observation, limit);
+        assert_eq!(result, ReaderWait::GaveUp);
+        assert!(
+            waited >= limit && waited < Duration::from_secs(2),
+            "waited {waited:?}"
+        );
+        drop(reading);
+        assert_eq!(
+            reader_wait_in_test(&observation, limit).0,
+            ReaderWait::AlreadyFinished
+        );
+    }
+
+    #[test]
+    fn a_reader_given_up_on_is_not_waited_for_again() {
+        // Vela's exit handler runs twice in one exit; a reader the first
+        // wait gave up on must not cost the exit a second limit.
+        let observation = WindowStateObservation::default();
+        let reading = observation.reader_started();
+        assert_eq!(
+            reader_wait_in_test(&observation, Duration::from_millis(100)).0,
+            ReaderWait::GaveUp
+        );
+        let (result, waited) = reader_wait_in_test(&observation, Duration::from_secs(10));
+        assert_eq!(result, ReaderWait::GaveUp);
+        assert!(
+            waited < Duration::from_secs(1),
+            "waited {waited:?} for a reader given up on"
+        );
+        // It still says when it finishes.
+        drop(reading);
+        assert_eq!(
+            reader_wait_in_test(&observation, Duration::from_secs(10)).0,
+            ReaderWait::AlreadyFinished
+        );
+    }
+
+    #[test]
+    fn a_reader_that_finishes_during_the_wait_ends_it() {
+        with_test_watchdog(Duration::from_secs(10), "a finishing reader's wait", || {
+            let observation = WindowStateObservation::default();
+            let reading = observation.reader_started();
+            let reader = std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(100));
+                drop(reading);
+            });
+            let started = Instant::now();
+            assert_eq!(
+                observation.wait_for_reader(Duration::from_secs(10)),
+                ReaderWait::FinishedWithin
+            );
+            assert!(started.elapsed() < Duration::from_secs(5));
+            reader.join().unwrap();
+        });
+    }
+
+    #[test]
+    fn a_reader_that_panics_is_finished() {
+        with_test_watchdog(Duration::from_secs(5), "a panicked reader's wait", || {
+            let observation = WindowStateObservation::default();
+            let reading = observation.reader_started();
+            let reader = std::thread::spawn(move || {
+                let _reading = reading;
+                panic!("a reader that panics");
+            });
+            assert!(reader.join().is_err());
+            assert_eq!(
+                observation.wait_for_reader(Duration::from_secs(10)),
+                ReaderWait::AlreadyFinished
+            );
+        });
+    }
+
+    #[cfg(unix)]
+    fn ended_player() -> crate::player::PlayerHandle {
+        let mut child = std::process::Command::new("sh")
+            .args(["-c", "exit 0"])
+            .spawn()
+            .expect("stand-in player");
+        assert!(child.wait().unwrap().success());
+        crate::player::PlayerHandle::External(crate::player::external::ManagedChild::for_test(
+            child,
+        ))
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn another_players_exit_does_not_confirm_this_plays_exit() {
+        let original = ended_player();
+        let serial = original.serial();
+        let slot = Arc::new(Mutex::new(Some(original)));
+        let exit = PlayerExit {
+            slot: slot.clone(),
+            serial,
+        };
+        assert!(exit.confirmed(), "the matching ended player is evidence");
+
+        let mut replacement = ended_player();
+        assert_ne!(replacement.serial(), serial);
+        assert!(replacement.has_ended().unwrap());
+        *slot.lock().unwrap() = Some(replacement);
+        assert!(
+            !exit.confirmed(),
+            "another player's exit is no evidence for this play"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_busy_player_slot_does_not_confirm_an_exit() {
+        let player = ended_player();
+        let serial = player.serial();
+        let slot = Arc::new(Mutex::new(Some(player)));
+        let exit = PlayerExit {
+            slot: slot.clone(),
+            serial,
+        };
+        let held = slot.lock().unwrap();
+        assert!(
+            !exit.confirmed(),
+            "a busy player slot is no evidence of exit"
+        );
+        drop(held);
+        assert!(
+            exit.confirmed(),
+            "the same player is confirmed once the slot is available"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_exit_query_error_does_not_confirm_an_exit() {
+        let child = std::process::Command::new("sh")
+            .args(["-c", "exit 0"])
+            .spawn()
+            .expect("stand-in player");
+        let pid = child.id() as libc::pid_t;
+        // Reap only this child, outside Child's cached status. Its real
+        // try_wait now returns ECHILD; no global signal disposition changes.
+        loop {
+            // SAFETY: pid names our child, and a null status pointer is allowed.
+            let result = unsafe { libc::waitpid(pid, std::ptr::null_mut(), 0) };
+            if result == pid {
+                break;
+            }
+            assert_eq!(
+                std::io::Error::last_os_error().raw_os_error(),
+                Some(libc::EINTR)
+            );
+        }
+        let mut player = crate::player::PlayerHandle::External(
+            crate::player::external::ManagedChild::for_test(child),
+        );
+        assert_eq!(
+            player.has_ended().unwrap_err().raw_os_error(),
+            Some(libc::ECHILD)
+        );
+        let serial = player.serial();
+        let exit = PlayerExit {
+            slot: Arc::new(Mutex::new(Some(player))),
+            serial,
+        };
+        assert!(
+            !exit.confirmed(),
+            "an exit-query error is no evidence of exit"
+        );
+    }
+
+    #[test]
+    fn reader_done_is_published_when_its_thread_panics() {
+        let done = Arc::new(AtomicBool::new(false));
+        let guard = ReaderDone(done.clone());
+        let reader = std::thread::spawn(move || {
+            let _guard = guard;
+            panic!("unwind the real ReaderDone guard");
+        });
+        assert!(reader.join().is_err());
+        assert!(
+            done.load(Ordering::Acquire),
+            "ReaderDone must publish done during unwinding"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stopping_before_connect_publishes_reader_done() {
+        let observation = WindowStateObservation::default();
+        // Set before spawning: this deterministically takes the connect
+        // loop's stop return, without racing a sleep or a socket connection.
+        let stop = Arc::new(AtomicBool::new(true));
+        let reading = spawn_position_reader(
+            nowhere("done-before-connect"),
+            0,
+            stop,
+            observation.clone(),
+            PlayerExit::default(),
+        )
+        .unwrap();
+        assert!(reader_finished(&observation, Duration::from_secs(10)));
+        assert!(
+            reading.done.load(Ordering::Acquire),
+            "stopping before connect must publish done"
+        );
+    }
+
+    #[test]
+    fn a_reader_stopped_by_vela_did_not_fail_to_start() {
+        let reading = PositionReader {
+            last_t_ms: Arc::new(AtomicU64::new(1234)),
+            done: Arc::new(AtomicBool::new(true)),
+            start_unconfirmed: Arc::new(AtomicBool::new(true)),
+        };
+        let stop = AtomicBool::new(false);
+        assert!(
+            reading.end(&stop).failed_to_start,
+            "an unconfirmed, unstopped end is a failure"
+        );
+        stop.store(true, Ordering::Relaxed);
+        assert!(
+            !reading.end(&stop).failed_to_start,
+            "Vela stopping a play is not a failed start"
+        );
+        assert_eq!(reading.end(&stop).position_ms, 1234);
+    }
+
+    #[test]
+    fn a_reader_that_confirmed_start_did_not_fail_to_start() {
+        let reading = PositionReader {
+            last_t_ms: Arc::new(AtomicU64::new(1234)),
+            done: Arc::new(AtomicBool::new(true)),
+            start_unconfirmed: Arc::new(AtomicBool::new(true)),
+        };
+        let stop = AtomicBool::new(false);
+        assert!(reading.end(&stop).failed_to_start);
+        reading.start_unconfirmed.store(false, Ordering::Relaxed);
+        assert!(
+            !reading.end(&stop).failed_to_start,
+            "a confirmed start cannot be a failed start"
+        );
+    }
+
+    /// Feed exactly one event, then EOF, through the real reader. Waiting
+    /// for ReaderFinishes synchronizes all event handling and ReaderDone;
+    /// ten seconds is only a deadlock watchdog, never evidence of a start.
+    #[cfg(unix)]
+    fn end_after_startup_event(name: &str, event: serde_json::Value) -> PlaybackEnd {
+        let path = nowhere(name);
+        let listener = std::os::unix::net::UnixListener::bind(&path).expect("listen for reader");
+        let observation = WindowStateObservation::default();
+        let stop = Arc::new(AtomicBool::new(false));
+        let reading = spawn_position_reader(
+            path.clone(),
+            0,
+            stop.clone(),
+            observation.clone(),
+            PlayerExit::default(),
+        )
+        .unwrap();
+        let mut mpv = accept_reader(&listener);
+        writeln!(mpv, "{event}").unwrap();
+        drop(mpv);
+        let finished = reader_finished(&observation, Duration::from_secs(10));
+        std::fs::remove_file(path).unwrap();
+        assert!(finished, "the reader consumed the event and EOF");
+        assert!(reading.done.load(Ordering::Acquire));
+        reading.end(&stop)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_time_pos_event_confirms_start_in_the_real_reader() {
+        let end =
+            end_after_startup_event("start-position", event("time-pos", serde_json::json!(0.0)));
+        assert_eq!(
+            end.position_ms, 0,
+            "even the initial zero position confirms start"
+        );
+        assert!(!end.failed_to_start, "time-pos must confirm start");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_file_loaded_event_confirms_start_in_the_real_reader() {
+        let end =
+            end_after_startup_event("start-loaded", serde_json::json!({"event": "file-loaded"}));
+        assert!(!end.failed_to_start, "file-loaded alone must confirm start");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_eof_event_confirms_start_in_the_real_reader() {
+        let end = end_after_startup_event(
+            "start-eof",
+            serde_json::json!({"event": "end-file", "reason": "eof"}),
+        );
+        assert!(
+            !end.failed_to_start,
+            "end-file eof alone must confirm start"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_quit_event_confirms_start_in_the_real_reader() {
+        let end = end_after_startup_event(
+            "start-quit",
+            serde_json::json!({"event": "end-file", "reason": "quit"}),
+        );
+        assert!(
+            !end.failed_to_start,
+            "end-file quit alone must confirm start"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_stop_event_confirms_start_in_the_real_reader() {
+        let end = end_after_startup_event(
+            "start-stop",
+            serde_json::json!({"event": "end-file", "reason": "stop"}),
+        );
+        assert!(
+            !end.failed_to_start,
+            "end-file stop alone must confirm start"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_error_event_does_not_confirm_start_in_the_real_reader() {
+        let end = end_after_startup_event(
+            "start-error",
+            serde_json::json!({"event": "end-file", "reason": "error"}),
+        );
+        assert!(
+            end.failed_to_start,
+            "end-file error is not evidence of start"
+        );
+    }
+
+    /// A socket path nothing listens on.
+    #[cfg(unix)]
+    fn nowhere(name: &str) -> String {
+        let dir = crate::player::launch::private_runtime_dir().expect("runtime dir");
+        let path = dir.join(format!("{name}-{}.sock", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        path.to_string_lossy().into_owned()
+    }
+
+    /// Whether the real reader says it finished: after the wait, the
+    /// observation reports it, never `NoReader` (it was started) and never
+    /// `GaveUp`.
+    fn reader_finished(observation: &WindowStateObservation, limit: Duration) -> bool {
+        let observation = observation.clone();
+        matches!(
+            with_test_watchdog(
+                limit + Duration::from_secs(5),
+                "the real reader's wait",
+                move || { observation.wait_for_reader(limit) }
+            ),
+            ReaderWait::AlreadyFinished | ReaderWait::FinishedWithin
+        )
+    }
+
+    /// Whether the reader is running, looked at without a wait (a wait that
+    /// gives up marks the reader given up on, `ReaderPhase::WaitedOut`).
+    #[cfg(unix)]
+    fn reader_running(observation: &WindowStateObservation) -> bool {
+        *observation.reader.phase.lock().unwrap() == ReaderPhase::Reading
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_play_ending_before_its_socket_exists_finishes_without_the_connect_timeout() {
+        struct NoSocketLauncher;
+        impl crate::player::EmbeddedLauncher for NoSocketLauncher {
+            fn prepare(&self, session_id: &str) -> Result<crate::player::EmbeddedStart, String> {
+                let session_id = session_id.to_string();
+                Ok(Box::new(move |_, _, _| {
+                    Ok(crate::player::PlayerHandle::Embedded(
+                        crate::player::embedded::Session::for_test_live(&session_id),
+                    ))
+                }))
+            }
+        }
+
+        // Exercise play's wiring, using the real process handle and the real
+        // embedded thread handle, but neither a display nor a media server.
+        let (program, _) = stand_in_for_mpv("exit-before-socket");
+        let found = program.to_string_lossy().into_owned();
+        let _mpv = mpv_is(move || Ok(found.clone()));
+        for kind in [
+            crate::player::PlayerKind::External,
+            crate::player::PlayerKind::Embedded,
+        ] {
+            let mut spec = embedded_spec();
+            spec.player = kind;
+            let slot = Arc::new(Mutex::new(None));
+            let (ended, end) = std::sync::mpsc::channel();
+            let started = play(
+                &spec,
+                ProgressTarget::None,
+                Players {
+                    slot: &slot,
+                    shutting_down: &Arc::new(AtomicBool::new(false)),
+                    embedded: Some(&NoSocketLauncher),
+                },
+                &Arc::new(crate::commands::PlaybackAdvance::default()),
+                "exit-before-socket".into(),
+                Some(Arc::new(move |end: PlaybackEnd| {
+                    let _ = ended.send((end.position_ms, end.failed_to_start));
+                })),
+                None,
+            )
+            .expect("play starts");
+
+            // Refused connections while the player is starting are not an end.
+            assert!(end.recv_timeout(Duration::from_millis(250)).is_err());
+            assert!(reader_running(&spec.window_observation));
+            slot.lock().unwrap().as_mut().unwrap().kill().unwrap();
+            let finished = end.recv_timeout(Duration::from_secs(1));
+            // Clean up even when the regression is injected.
+            started.stop.store(true, Ordering::Relaxed);
+            assert!(reader_finished(
+                &spec.window_observation,
+                Duration::from_secs(2)
+            ));
+            let mut player = slot.lock().unwrap().take().unwrap();
+            assert!(player.has_ended().unwrap());
+            // No position, and nothing seen of a start: the end says so.
+            assert_eq!(
+                finished,
+                Ok((0, true)),
+                "{kind:?}: a confirmed exit must not wait five seconds"
+            );
+        }
+        std::fs::remove_dir_all(program.parent().unwrap()).unwrap();
+    }
+
+    /// Exercise play's actual launch and tracker dispatch. A loopback HTTP
+    /// server acknowledges reports; the player never creates its IPC socket.
+    /// A three-second bound distinguishes the repaired end from fifty 100 ms
+    /// retries. Unlike the socket-event tests this needs a real deadline:
+    /// both versions eventually end, and the production waits use std threads.
+    #[cfg(unix)]
+    fn early_exit_through_play(
+        name: &str,
+        fallback: bool,
+        target: impl FnOnce(String) -> ProgressTarget,
+    ) -> Vec<String> {
+        use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        listener.set_nonblocking(true).unwrap();
+        let (shutdown, stop_server) = tokio::sync::oneshot::channel();
+        let server = std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            rt.block_on(async {
+                let listener = tokio::net::TcpListener::from_std(listener).unwrap();
+                let mut stop_server = stop_server;
+                let mut requests = Vec::new();
+                loop {
+                    let stream = tokio::select! {
+                        _ = &mut stop_server => break,
+                        accepted = listener.accept() => accepted.unwrap().0,
+                    };
+                    // Watchdog only: the end callback comes after these replies.
+                    let request = tokio::time::timeout(Duration::from_secs(10), async {
+                        let mut reader = tokio::io::BufReader::new(stream);
+                        let mut request = String::new();
+                        assert_ne!(reader.read_line(&mut request).await.unwrap(), 0);
+                        let mut length = 0;
+                        loop {
+                            let mut line = String::new();
+                            assert_ne!(reader.read_line(&mut line).await.unwrap(), 0);
+                            if line == "\r\n" {
+                                break;
+                            }
+                            if let Some(value) =
+                                line.to_ascii_lowercase().strip_prefix("content-length:")
+                            {
+                                length = value.trim().parse::<usize>().unwrap();
+                            }
+                        }
+                        reader.read_exact(&mut vec![0; length]).await.unwrap();
+                        reader.get_mut().write_all(
+                            b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                        ).await.unwrap();
+                        request
+                    })
+                    .await
+                    .expect("the local report request completes");
+                    requests.push(request);
+                }
+                requests
+            })
+        });
+
+        let (program, _) = stand_in_for_mpv(name);
+        let found = program.to_string_lossy().into_owned();
+        let _mpv = mpv_is(move || Ok(found.clone()));
+        let launcher = FailingLauncher {
+            asked: Arc::new(Mutex::new(Vec::new())),
+        };
+        let mut spec = embedded_spec();
+        spec.player = if fallback {
+            crate::player::PlayerKind::Embedded
+        } else {
+            crate::player::PlayerKind::External
+        };
+        spec.start_seconds = 1.25;
+        let progress = target(base);
+        let expected_position = if matches!(&progress, ProgressTarget::None) {
+            0
+        } else {
+            1250
+        };
+        let slot = Arc::new(Mutex::new(None));
+        let (ended, end) = std::sync::mpsc::channel();
+        let began = Instant::now();
+        let started = play(
+            &spec,
+            progress,
+            Players {
+                slot: &slot,
+                shutting_down: &Arc::new(AtomicBool::new(false)),
+                embedded: Some(&launcher),
+            },
+            &Arc::new(crate::commands::PlaybackAdvance::default()),
+            name.to_string(),
+            Some(Arc::new(move |end: PlaybackEnd| {
+                let _ = ended.send((end.position_ms, end.failed_to_start));
+            })),
+            None,
+        )
+        .expect("play starts");
+        slot.lock().unwrap().as_mut().unwrap().kill().unwrap();
+        // Bound the whole launch as well as the receive: a delayed test
+        // cannot accidentally pass after the old five-second retry timeout.
+        let limit = Duration::from_secs(3);
+        let finished = end.recv_timeout(limit.saturating_sub(began.elapsed()));
+        let elapsed = began.elapsed();
+        // Clean up before asserting, including with a wrong serial/default
+        // PlayerExit injected. Stop wakes the tracker within its 100 ms tick.
+        started.stop.store(true, Ordering::Relaxed);
+        let reader_stopped = reader_finished(&spec.window_observation, Duration::from_secs(10));
+        if finished.is_err() {
+            end.recv_timeout(Duration::from_secs(10))
+                .expect("cancelled tracker stops");
+        }
+        let _ = shutdown.send(());
+        let requests = server.join().unwrap();
+        let mut player = slot.lock().unwrap().take().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !player.has_ended().unwrap() {
+            assert!(Instant::now() < deadline, "killed stand-in is reaped");
+            std::thread::yield_now();
+        }
+        std::fs::remove_dir_all(program.parent().unwrap()).unwrap();
+
+        assert!(reader_stopped);
+        assert_eq!(started.player, crate::player::PlayerKind::External);
+        assert_eq!(
+            launcher.asked.lock().unwrap().len(),
+            if fallback { 2 } else { 0 }
+        );
+        assert_eq!(
+            finished,
+            Ok((expected_position, true)),
+            "{name}: this launch's exit must reach the end callback before the connect timeout"
+        );
+        assert!(
+            elapsed < limit,
+            "the end must precede the five-second connection timeout"
+        );
+        requests
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn plex_tracking_receives_this_launchs_player_exit() {
+        let requests = early_exit_through_play("plex-exit", false, |base| {
+            ProgressTarget::Plex(TrackInfo {
+                server_base: base,
+                token: "test-token".into(),
+                client_identifier: "test-client".into(),
+                rating_key: "1".into(),
+                key: "/library/metadata/1".into(),
+                duration_ms: 60_000,
+            })
+        });
+        assert_eq!(
+            requests.len(),
+            2,
+            "the real Plex tracker sends both final reports"
+        );
+        assert!(
+            requests[0].starts_with("GET /:/timeline?") && requests[0].contains("state=stopped")
+        );
+        assert!(requests[1].starts_with("GET /:/progress?"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn jellyfin_tracking_receives_this_launchs_player_exit() {
+        let requests = early_exit_through_play("jellyfin-exit", false, |base| {
+            ProgressTarget::Jellyfin(JellyfinTrack {
+                base_url: base,
+                item_id: "item".into(),
+                media_source_id: "media".into(),
+                play_session_id: None,
+                headers: Vec::new(),
+            })
+        });
+        assert_eq!(
+            requests,
+            [
+                "POST /Sessions/Playing HTTP/1.1\r\n",
+                "POST /Sessions/Playing/Stopped HTTP/1.1\r\n",
+            ],
+            "the real Jellyfin tracker sends Start and Stopped before notifying"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_fallback_play_tracks_the_external_players_serial() {
+        let requests = early_exit_through_play("fallback-exit", true, |_| ProgressTarget::None);
+        assert!(requests.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_real_reader_is_finished_when_told_to_stop_before_it_connects() {
+        let observation = WindowStateObservation::default();
+        let stop = Arc::new(AtomicBool::new(false));
+        spawn_position_reader(
+            nowhere("reader-stop"),
+            0,
+            stop.clone(),
+            observation.clone(),
+            PlayerExit::default(),
+        )
+        .expect("reader");
+        std::thread::sleep(Duration::from_millis(250));
+        assert!(reader_running(&observation), "still trying to connect");
+        stop.store(true, Ordering::Relaxed);
+        assert!(reader_finished(&observation, Duration::from_secs(2)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_real_reader_is_finished_when_it_gives_up_connecting() {
+        let observation = WindowStateObservation::default();
+        let stop = Arc::new(AtomicBool::new(false));
+        spawn_position_reader(
+            nowhere("reader-never"),
+            0,
+            stop.clone(),
+            observation.clone(),
+            PlayerExit::default(),
+        )
+        .expect("reader");
+        // Fifty tries, 100 ms apart.
+        assert!(reader_finished(&observation, Duration::from_secs(10)));
+        stop.store(true, Ordering::Relaxed);
+    }
+
+    /// A listening socket for the real reader, or `None` where the sandbox
+    /// refuses listening (the test then says so and checks nothing).
+    #[cfg(unix)]
+    fn listen(name: &str) -> Option<(std::os::unix::net::UnixListener, String)> {
+        let path = nowhere(name);
+        match std::os::unix::net::UnixListener::bind(&path) {
+            Ok(listener) => Some((listener, path)),
+            Err(error) => {
+                eprintln!("skipped: cannot listen on a Unix socket here: {error}");
+                None
+            }
+        }
+    }
+
+    /// Accept the reader and read its subscriptions, so that it is in its
+    /// reading loop.
+    #[cfg(unix)]
+    fn accept_reader(
+        listener: &std::os::unix::net::UnixListener,
+    ) -> std::os::unix::net::UnixStream {
+        let (mpv, _) = listener.accept().expect("accept");
+        mpv.set_read_timeout(Some(Duration::from_secs(5))).expect("read timeout");
+        let mut requests = BufReader::new(mpv.try_clone().expect("clone"));
+        let mut line = String::new();
+        while !line.contains("osd-dimensions") {
+            line.clear();
+            requests.read_line(&mut line).expect("a subscription");
+        }
+        mpv
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_real_reader_is_finished_at_the_end_of_its_connection_after_what_it_read() {
+        with_test_watchdog(
+            Duration::from_secs(10),
+            "the disconnected reader's wait",
+            || {
+                use std::io::Write as _;
+                let Some((listener, path)) = listen("reader-end") else {
+                    return;
+                };
+                let observation = WindowStateObservation::opened_at(PlaybackWindowState {
+                    fullscreen: Some(false),
+                    ..Default::default()
+                });
+                let stop = Arc::new(AtomicBool::new(false));
+                spawn_position_reader(
+                    path.clone(),
+                    0,
+                    stop.clone(),
+                    observation.clone(),
+                    PlayerExit::default(),
+                )
+                .expect("reader");
+                let mut mpv = accept_reader(&listener);
+                assert!(reader_running(&observation), "still reading");
+                // mpv sends the change and goes, a moment after the wait has begun.
+                let player = std::thread::spawn(move || {
+                    std::thread::sleep(Duration::from_millis(100));
+                    writeln!(mpv, "{}", event("fullscreen", serde_json::json!(true))).expect("write");
+                    drop(mpv);
+                });
+                assert_eq!(
+                    observation.wait_for_reader(Duration::from_secs(5)),
+                    ReaderWait::FinishedWithin
+                );
+                assert_eq!(
+                    observation.snapshot().fullscreen,
+                    Some(true),
+                    "the reader is finished only after applying what it read"
+                );
+                player.join().unwrap();
+                let _ = std::fs::remove_file(&path);
+            },
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_real_reader_is_finished_when_told_to_stop_while_connected() {
+        use std::io::Write as _;
+        let Some((listener, path)) = listen("reader-stop-connected") else { return };
+        let observation = WindowStateObservation::default();
+        let stop = Arc::new(AtomicBool::new(false));
+        spawn_position_reader(
+            path.clone(),
+            0,
+            stop.clone(),
+            observation.clone(),
+            PlayerExit::default(),
+        )
+        .expect("reader");
+        let mut mpv = accept_reader(&listener);
+        stop.store(true, Ordering::Relaxed);
+        // One line wakes the reader from its read; the connection stays open,
+        // so it can only stop on the flag.
+        writeln!(mpv, "{}", event("time-pos", serde_json::json!(1.0))).expect("write");
+        assert!(reader_finished(&observation, Duration::from_secs(5)));
+        drop(mpv);
+        let _ = std::fs::remove_file(&path);
+    }
+
     /// The end-to-end shape of the bug: mpv announces the display before it
     /// announces a position, and the play dies there. The tracker only skips
     /// its write when the position is still zero, so this must stay zero.
@@ -1929,6 +4201,7 @@ mod tests {
         let reported = position_reported_after(&[
             event("display-width", serde_json::json!(3840)),
             event("display-height", serde_json::json!(2160)),
+            event("osd-dimensions", serde_json::json!({ "w": 1280, "h": 720 })),
             event("fullscreen", serde_json::json!(true)),
         ]);
         assert_eq!(
@@ -2014,19 +4287,15 @@ mod tests {
         );
     }
 
-    fn tmp(name: &str) -> std::path::PathBuf {
-        std::env::temp_dir().join(format!("vela-test-{}-{name}", std::process::id()))
-    }
-
     #[test]
-    fn window_property_parser_accepts_only_named_boolean_change_events() {
+    fn window_property_parser_accepts_only_named_typed_change_events() {
         assert_eq!(
             window_property_change(&serde_json::json!({
                 "event": "property-change",
                 "name": "fullscreen",
                 "data": true
             })),
-            Some((WindowProperty::Fullscreen, true))
+            Some(WindowChange::Flag(WindowProperty::Fullscreen, true))
         );
         assert_eq!(
             window_property_change(&serde_json::json!({
@@ -2034,10 +4303,70 @@ mod tests {
                 "name": "window-maximized",
                 "data": false
             })),
-            Some((WindowProperty::Maximized, false))
+            Some(WindowChange::Flag(WindowProperty::Maximized, false))
+        );
+        // The size is one report holding both halves, as mpv 0.41 sends it.
+        assert_eq!(
+            window_property_change(&serde_json::json!({
+                "event": "property-change",
+                "id": 7,
+                "name": "osd-dimensions",
+                "data": { "w": 1280, "h": 720, "par": 1.0, "aspect": 1.777778,
+                          "mt": 0, "mb": 0, "ml": 0, "mr": 0 }
+            })),
+            Some(WindowChange::Size(1280, 720))
+        );
+        // No video output: parsed as it is, and refused by the bounds.
+        assert_eq!(
+            window_property_change(&serde_json::json!({
+                "event": "property-change",
+                "name": "osd-dimensions",
+                "data": { "w": 0, "h": 0, "par": 0.0, "aspect": 0.0 }
+            })),
+            Some(WindowChange::Size(0, 0))
         );
 
+        let dimensions = |data: serde_json::Value| {
+            serde_json::json!({
+                "event": "property-change",
+                "name": "osd-dimensions",
+                "data": data
+            })
+        };
         for rejected in [
+            serde_json::json!({ "request_id": 7, "data": { "w": 1280, "h": 720 } }),
+            // Half a size is never a size (review finding pw-3): the two
+            // separate properties are not read at all.
+            serde_json::json!({
+                "event": "property-change",
+                "name": "osd-width",
+                "data": 1280
+            }),
+            serde_json::json!({
+                "event": "property-change",
+                "name": "osd-height",
+                "data": 720
+            }),
+            dimensions(serde_json::json!({ "w": 1280 })),
+            dimensions(serde_json::json!({ "h": 720 })),
+            dimensions(serde_json::json!({ "w": "1280", "h": 720 })),
+            dimensions(serde_json::json!({ "w": 1280, "h": -720 })),
+            dimensions(serde_json::json!({ "w": 1280.5, "h": 720 })),
+            dimensions(serde_json::json!({ "w": 1280, "h": 4_294_967_296_u64 })),
+            dimensions(serde_json::json!({ "w": null, "h": 720 })),
+            dimensions(serde_json::json!([1280, 720])),
+            dimensions(serde_json::json!(1280)),
+            dimensions(serde_json::Value::Null),
+            serde_json::json!({
+                "event": "end-file",
+                "name": "osd-dimensions",
+                "data": { "w": 1280, "h": 720 }
+            }),
+            serde_json::json!({
+                "event": "property-change",
+                "name": "fullscreen",
+                "data": 1
+            }),
             serde_json::json!({ "request_id": 2, "data": true }),
             serde_json::json!({
                 "event": "property-change",
@@ -2060,7 +4389,7 @@ mod tests {
                 "data": true
             }),
         ] {
-            assert_eq!(window_property_change(&rejected), None);
+            assert_eq!(window_property_change(&rejected), None, "{rejected}");
         }
     }
 
@@ -2079,6 +4408,7 @@ mod tests {
             PlaybackWindowState {
                 fullscreen: Some(true),
                 maximized: None,
+                windowed_size: None,
             }
         );
 
@@ -2097,8 +4427,434 @@ mod tests {
             PlaybackWindowState {
                 fullscreen: Some(false),
                 maximized: Some(true),
+                windowed_size: None,
             }
         );
+    }
+
+    #[test]
+    fn a_play_that_reports_nothing_hands_on_its_opening_flags() {
+        for fullscreen in [false, true] {
+            for maximized in [false, true] {
+                let opened = PlaybackWindowState {
+                    fullscreen: Some(fullscreen),
+                    maximized: Some(maximized),
+                    windowed_size: None,
+                };
+                let observation = WindowStateObservation::opened_at(opened);
+                assert_eq!(
+                    observation.snapshot(),
+                    opened,
+                    "a play with no IPC reports must hand on both opening flags"
+                );
+            }
+        }
+    }
+
+    fn assert_report_replaces_only_its_seed(property: WindowProperty) {
+        for seed in [false, true] {
+            let opened = PlaybackWindowState {
+                fullscreen: Some(seed),
+                maximized: Some(seed),
+                windowed_size: None,
+            };
+            let observation = WindowStateObservation::opened_at(opened);
+            let mut expected = opened;
+            let name = match property {
+                WindowProperty::Fullscreen => {
+                    expected.fullscreen = Some(!seed);
+                    "fullscreen"
+                }
+                WindowProperty::Maximized => {
+                    expected.maximized = Some(!seed);
+                    "window-maximized"
+                }
+            };
+            observation.apply_ipc_event(&serde_json::json!({
+                "event": "property-change", "name": name, "data": !seed
+            }));
+            assert_eq!(
+                observation.snapshot(), expected,
+                "{name} must replace its seed immediately without changing the other flag"
+            );
+            observation.apply_ipc_event(&serde_json::json!({
+                "event": "property-change", "name": "time-pos", "data": 12.5
+            }));
+            assert_eq!(
+                observation.snapshot(), expected,
+                "later events and snapshots must not restore the {name} seed"
+            );
+            // The first report does not freeze the property either.
+            observation.apply_ipc_event(&serde_json::json!({
+                "event": "property-change", "name": name, "data": seed
+            }));
+            assert_eq!(observation.snapshot(), opened, "later {name} reports still win");
+        }
+    }
+
+    #[test]
+    fn an_mpv_fullscreen_report_replaces_only_its_seed() {
+        assert_report_replaces_only_its_seed(WindowProperty::Fullscreen);
+    }
+
+    #[test]
+    fn an_mpv_maximized_report_replaces_only_its_seed() {
+        assert_report_replaces_only_its_seed(WindowProperty::Maximized);
+    }
+
+    #[test]
+    fn flags_neither_set_at_opening_nor_reported_stay_unknown() {
+        for (fullscreen, maximized) in [(None, None), (Some(true), None), (None, Some(false))] {
+            let opened = PlaybackWindowState {
+                fullscreen,
+                maximized,
+                windowed_size: None,
+            };
+            let observation = WindowStateObservation::opened_at(opened);
+            observation.apply_ipc_event(&serde_json::json!({
+                "event": "property-change", "name": "time-pos", "data": 12.5
+            }));
+            assert_eq!(
+                observation.snapshot(), opened,
+                "an unrelated report must not invent an unknown opening flag"
+            );
+        }
+    }
+
+    #[test]
+    fn opening_window_state_is_not_a_display_measurement() {
+        let observation = WindowStateObservation::opened_at(PlaybackWindowState {
+            fullscreen: Some(true),
+            maximized: Some(false),
+            windowed_size: Some((800, 450)),
+        });
+        assert_eq!(
+            observation.display_snapshot(),
+            crate::display::ObservedDisplay::default(),
+            "opening a window measures neither its screen nor that screen's dimensions"
+        );
+    }
+
+    // The windowed-size rule, driven with explicit times. `t(ms)` is a fixed
+    // origin plus `ms`, so nothing here waits or reads a clock.
+    mod windowed_size {
+        use super::super::*;
+
+        fn t(ms: u64) -> Instant {
+            static ORIGIN: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+            *ORIGIN.get_or_init(Instant::now) + Duration::from_millis(ms)
+        }
+
+        fn size(tracker: &mut WindowTracker, width: u32, height: u32, at: u64) {
+            tracker.apply(WindowChange::Size(width, height), t(at));
+        }
+
+        fn flag(tracker: &mut WindowTracker, property: WindowProperty, on: bool, at: u64) {
+            tracker.apply(WindowChange::Flag(property, on), t(at));
+        }
+
+        #[test]
+        fn a_reported_size_becomes_the_candidate() {
+            let mut tracker = WindowTracker::default();
+            size(&mut tracker, 1280, 720, 10);
+            assert_eq!(tracker.candidate, Some(((1280, 720), t(10))));
+            assert_eq!(tracker.confirmed, None, "not confirmed yet");
+        }
+
+        // Review finding pw-3. After 800x450, a size that is not usable must
+        // not lend either of its halves to the size carried on: the size
+        // stays the one the window really had.
+        #[test]
+        fn an_unusable_report_after_a_size_leaves_that_size() {
+            for unusable in [
+                // The reviewer's two sequences, as one report each now
+                // carries both halves: width 1024 with a height of 89; and
+                // width 1024 with a height of 0, then width 0.
+                vec![(1024, 89)],
+                vec![(1024, 0), (0, 0)],
+                vec![(0, 0)],
+                vec![(0, 450), (1024, 0)],
+                vec![(159, 450)],
+                vec![(16385, 450), (800, 16385)],
+            ] {
+                // Confirmed, then the unusable reports.
+                let mut tracker = WindowTracker::default();
+                size(&mut tracker, 800, 450, 0);
+                tracker.tick(t(1000));
+                assert_eq!(tracker.confirmed, Some((800, 450)));
+                for (width, height) in &unusable {
+                    size(&mut tracker, *width, *height, 1500);
+                }
+                assert_eq!(tracker.candidate, None, "{unusable:?}");
+                assert_eq!(tracker.snapshot().windowed_size, Some((800, 450)), "{unusable:?}");
+                tracker.tick(t(5000));
+                assert_eq!(tracker.confirmed, Some((800, 450)), "{unusable:?}");
+
+                // A candidate not yet confirmed, then the unusable reports:
+                // the candidate stands, with its own time.
+                let mut tracker = WindowTracker::default();
+                size(&mut tracker, 800, 450, 0);
+                for (width, height) in &unusable {
+                    size(&mut tracker, *width, *height, 100);
+                }
+                assert_eq!(tracker.candidate, Some(((800, 450), t(0))), "{unusable:?}");
+                assert_eq!(tracker.snapshot().windowed_size, Some((800, 450)), "{unusable:?}");
+                tracker.tick(t(1000));
+                assert_eq!(tracker.confirmed, Some((800, 450)), "{unusable:?}");
+            }
+        }
+
+        // From an existing size, a usable and an unusable report in either
+        // order: the usable one is the size, whole.
+        #[test]
+        fn usable_and_unusable_reports_in_either_order() {
+            for (first, second) in [
+                ((1024, 576), (0, 0)),
+                ((0, 0), (1024, 576)),
+                ((1024, 576), (1280, 89)),
+                ((1280, 89), (1024, 576)),
+            ] {
+                let mut tracker = WindowTracker::default();
+                size(&mut tracker, 800, 450, 0);
+                tracker.tick(t(1000));
+                size(&mut tracker, first.0, first.1, 2000);
+                size(&mut tracker, second.0, second.1, 2100);
+                assert_eq!(
+                    tracker.snapshot().windowed_size,
+                    Some((1024, 576)),
+                    "{first:?} then {second:?}"
+                );
+                tracker.tick(t(4000));
+                assert_eq!(tracker.confirmed, Some((1024, 576)), "{first:?} then {second:?}");
+            }
+        }
+
+        #[test]
+        fn a_candidate_is_confirmed_by_a_later_event_a_second_after_it() {
+            let mut tracker = WindowTracker::default();
+            flag(&mut tracker, WindowProperty::Fullscreen, false, 0);
+            size(&mut tracker, 800, 450, 100);
+            tracker.tick(t(1099));
+            assert_eq!(tracker.confirmed, None, "999 ms is not long enough");
+            tracker.tick(t(1100));
+            assert_eq!(tracker.confirmed, Some((800, 450)));
+            assert_eq!(tracker.candidate, None);
+            // Confirmed before the window went fullscreen, so it is kept as
+            // the size to return to.
+            flag(&mut tracker, WindowProperty::Fullscreen, true, 5000);
+            assert_eq!(
+                tracker.snapshot(),
+                PlaybackWindowState {
+                    fullscreen: Some(true),
+                    maximized: None,
+                    windowed_size: Some((800, 450)),
+                }
+            );
+        }
+
+        // mpv reports width and height apart, and may report the same size
+        // again: a repeat keeps the time the candidate first stood.
+        #[test]
+        fn a_repeated_size_keeps_the_candidates_time() {
+            let mut tracker = WindowTracker::default();
+            size(&mut tracker, 800, 450, 0);
+            size(&mut tracker, 800, 450, 900);
+            tracker.tick(t(1000));
+            assert_eq!(tracker.confirmed, Some((800, 450)));
+        }
+
+        #[test]
+        fn a_flag_turning_on_discards_the_unconfirmed_candidate() {
+            // X11 reports the maximized size just before the flag.
+            let mut tracker = WindowTracker::default();
+            size(&mut tracker, 800, 450, 0);
+            tracker.tick(t(2000));
+            assert_eq!(tracker.confirmed, Some((800, 450)));
+            size(&mut tracker, 1920, 1050, 3000);
+            flag(&mut tracker, WindowProperty::Maximized, true, 3050);
+            assert_eq!(tracker.candidate, None);
+            // A second later, still maximized: nothing is confirmed.
+            tracker.tick(t(5000));
+            assert_eq!(tracker.snapshot().windowed_size, Some((800, 450)));
+
+            let mut tracker = WindowTracker::default();
+            size(&mut tracker, 800, 450, 0);
+            flag(&mut tracker, WindowProperty::Fullscreen, true, 20);
+            assert_eq!(tracker.snapshot().windowed_size, None);
+        }
+
+        #[test]
+        fn sizes_reported_while_fullscreen_or_maximized_are_ignored() {
+            for property in [WindowProperty::Fullscreen, WindowProperty::Maximized] {
+                let mut tracker = WindowTracker::default();
+                flag(&mut tracker, property, true, 0);
+                size(&mut tracker, 1920, 1080, 100);
+                assert_eq!(tracker.candidate, None);
+                tracker.tick(t(5000));
+                assert_eq!(tracker.snapshot().windowed_size, None, "{property:?}");
+            }
+        }
+
+        #[test]
+        fn an_unconfirmed_candidate_counts_at_snapshot_unless_a_flag_is_on() {
+            // Resized and quit within the second.
+            let mut tracker = WindowTracker::default();
+            size(&mut tracker, 800, 450, 0);
+            size(&mut tracker, 1024, 576, 1500);
+            assert_eq!(tracker.confirmed, Some((800, 450)));
+            assert_eq!(tracker.snapshot().windowed_size, Some((1024, 576)));
+
+            // The snapshot does not accept a candidate while a flag is on.
+            let mut tracker = WindowTracker::default();
+            size(&mut tracker, 800, 450, 0);
+            tracker.maximized = Some(true);
+            assert_eq!(tracker.snapshot().windowed_size, None);
+        }
+
+        #[test]
+        fn a_size_outside_the_bounds_is_not_recorded() {
+            for (width, height) in [
+                (0, 0),
+                (159, 450),
+                (800, 89),
+                (16385, 450),
+                (800, 16385),
+            ] {
+                let mut tracker = WindowTracker::default();
+                size(&mut tracker, width, height, 0);
+                tracker.tick(t(2000));
+                assert_eq!(
+                    tracker.snapshot().windowed_size,
+                    None,
+                    "{width}x{height}"
+                );
+            }
+            // A report outside the bounds changes nothing already recorded.
+            let mut tracker = WindowTracker::default();
+            size(&mut tracker, 800, 450, 0);
+            size(&mut tracker, 0, 0, 100);
+            assert_eq!(tracker.snapshot().windowed_size, Some((800, 450)));
+            for (width, height) in [(160, 90), (16384, 16384)] {
+                let mut tracker = WindowTracker::default();
+                size(&mut tracker, width, height, 0);
+                assert_eq!(tracker.snapshot().windowed_size, Some((width, height)));
+            }
+        }
+
+        // A play opened at a size, that stays fullscreen and reports only the
+        // screen's size, hands that size on; a windowed size it reports
+        // itself replaces it.
+        #[test]
+        fn a_play_hands_on_the_size_it_was_opened_at_until_it_reports_its_own() {
+            let opened = PlaybackWindowState {
+                windowed_size: Some((800, 450)),
+                ..Default::default()
+            };
+            let observation = WindowStateObservation::opened_at(opened);
+            let event = |name: &str, data: serde_json::Value| {
+                serde_json::json!({ "event": "property-change", "name": name, "data": data })
+            };
+            let dimensions = |w: u32, h: u32| {
+                event("osd-dimensions", serde_json::json!({ "w": w, "h": h }))
+            };
+            observation.apply_ipc_event_at(&event("fullscreen", true.into()), t(0));
+            observation.apply_ipc_event_at(&dimensions(1920, 1080), t(0));
+            observation.apply_ipc_event_at(&event("time-pos", 12.5.into()), t(5000));
+            assert_eq!(
+                observation.snapshot(),
+                PlaybackWindowState {
+                    fullscreen: Some(true),
+                    maximized: None,
+                    windowed_size: Some((800, 450)),
+                }
+            );
+            // A play with no window (it reports 0x0) hands it on too.
+            let observation = WindowStateObservation::opened_at(opened);
+            observation.apply_ipc_event_at(&dimensions(0, 0), t(0));
+            assert_eq!(observation.snapshot().windowed_size, Some((800, 450)));
+            // Its own windowed size wins.
+            observation.apply_ipc_event_at(&dimensions(1024, 576), t(100));
+            assert_eq!(observation.snapshot().windowed_size, Some((1024, 576)));
+            observation.apply_ipc_event_at(&event("time-pos", 13.into()), t(1200));
+            observation.apply_ipc_event_at(&event("fullscreen", true.into()), t(1300));
+            assert_eq!(observation.snapshot().windowed_size, Some((1024, 576)));
+            // Opened with no size, nothing is invented.
+            assert_eq!(
+                WindowStateObservation::opened_at(PlaybackWindowState::default()).snapshot(),
+                PlaybackWindowState::default()
+            );
+        }
+
+        #[test]
+        fn opening_flags_keep_screen_sizes_out_of_the_windowed_size() {
+            for property in [WindowProperty::Fullscreen, WindowProperty::Maximized] {
+                let mut opened = PlaybackWindowState {
+                    windowed_size: Some((800, 450)),
+                    ..Default::default()
+                };
+                let name = match property {
+                    WindowProperty::Fullscreen => {
+                        opened.fullscreen = Some(true);
+                        "fullscreen"
+                    }
+                    WindowProperty::Maximized => {
+                        opened.maximized = Some(true);
+                        "window-maximized"
+                    }
+                };
+                let observation = WindowStateObservation::opened_at(opened);
+                observation.apply_ipc_event_at(&serde_json::json!({
+                    "event": "property-change", "name": "osd-dimensions",
+                    "data": { "w": 1920, "h": 1080 }
+                }), t(0));
+                observation.apply_ipc_event_at(&serde_json::json!({
+                    "event": "property-change", "name": "time-pos", "data": 12.5
+                }), t(2000));
+                observation.apply_ipc_event_at(&serde_json::json!({
+                    "event": "property-change", "name": name, "data": false
+                }), t(2100));
+                assert_eq!(
+                    observation.snapshot().windowed_size, Some((800, 450)),
+                    "a size reported before {name} leaves its opening state is not windowed"
+                );
+                observation.apply_ipc_event_at(&serde_json::json!({
+                    "event": "property-change", "name": "osd-dimensions",
+                    "data": { "w": 1024, "h": 576 }
+                }), t(2200));
+                assert_eq!(observation.snapshot().windowed_size, Some((1024, 576)));
+            }
+        }
+
+        // Through the IPC event path the reader uses: the observation feeds
+        // every event to the rule, the ones that are not the window's too.
+        #[test]
+        fn the_observation_confirms_on_any_later_event() {
+            let observation = WindowStateObservation::default();
+            let event = |name: &str, data: serde_json::Value| {
+                serde_json::json!({ "event": "property-change", "name": name, "data": data })
+            };
+            let dimensions = |w: u32, h: u32| {
+                event("osd-dimensions", serde_json::json!({ "w": w, "h": h }))
+            };
+            observation.apply_ipc_event_at(&dimensions(800, 450), t(0));
+            observation.apply_ipc_event_at(&event("time-pos", 12.5.into()), t(1000));
+            assert_eq!(
+                observation.state.lock().expect("tracker").confirmed,
+                Some((800, 450)),
+                "a time-pos event a second later confirms the size"
+            );
+            // The maximized size, then the flag: the confirmed size stays.
+            observation.apply_ipc_event_at(&dimensions(1920, 1050), t(2000));
+            observation.apply_ipc_event_at(&event("window-maximized", true.into()), t(2010));
+            assert_eq!(
+                observation.snapshot(),
+                PlaybackWindowState {
+                    fullscreen: None,
+                    maximized: Some(true),
+                    windowed_size: Some((800, 450)),
+                }
+            );
+        }
     }
 
     #[test]
@@ -2191,35 +4947,6 @@ mod tests {
     }
 
     #[test]
-    fn inherited_window_args_emit_known_values_in_override_order() {
-        assert!(window_state_args(PlaybackWindowState::default()).is_empty());
-        assert_eq!(
-            window_state_args(PlaybackWindowState {
-                fullscreen: Some(true),
-                maximized: None,
-            }),
-            vec!["--fullscreen=yes"]
-        );
-        assert_eq!(
-            window_state_args(PlaybackWindowState {
-                fullscreen: Some(false),
-                maximized: Some(true),
-            }),
-            vec!["--window-maximized=yes", "--fullscreen=no"]
-        );
-    }
-
-    #[test]
-    fn screen_name_uses_the_backend_name_option_and_ignores_empty_values() {
-        assert_eq!(
-            screen_name_arg(Some("XG27UQDMS (16843009)")),
-            Some("--screen-name=XG27UQDMS (16843009)".to_string())
-        );
-        assert_eq!(screen_name_arg(Some("  ")), None);
-        assert_eq!(screen_name_arg(None), None);
-    }
-
-    #[test]
     fn playback_window_observation_handles_are_isolated_per_launch() {
         let old = WindowStateObservation::default();
         let successor = WindowStateObservation::default();
@@ -2243,287 +4970,5 @@ mod tests {
             "data": true
         }));
         assert_eq!(successor.snapshot().maximized, None);
-    }
-
-    #[test]
-    fn autocrop_off_injects_nothing() {
-        assert!(
-            autocrop_args("off", Some("/x/autocrop.lua"), Some("/x/vela-autocrop.lua")).is_empty()
-        );
-        // Unknown/garbage mode is treated as off.
-        assert!(
-            autocrop_args("wat", Some("/x/autocrop.lua"), Some("/x/vela-autocrop.lua")).is_empty()
-        );
-    }
-
-    #[test]
-    fn autocrop_manual_loads_script_with_auto_disabled() {
-        // Manual ignores the shim even when resolved: Shift+C is the trigger.
-        let args = autocrop_args(
-            "manual",
-            Some("/x/autocrop.lua"),
-            Some("/x/vela-autocrop.lua"),
-        );
-        assert_eq!(
-            args,
-            vec![
-                "--script=/x/autocrop.lua".to_string(),
-                "--script-opts-append=autocrop-auto=no".to_string(),
-            ],
-            "manual must load the stock script AND disable its auto-crop, shim excluded"
-        );
-    }
-
-    #[test]
-    fn autocrop_auto_disables_stock_trigger_and_loads_shim() {
-        // The stock auto trigger skips its settle delay on --start resumes and
-        // races hwdec init (plan autocrop-resume); auto mode therefore hands
-        // the trigger to the Vela shim.
-        let args = autocrop_args(
-            "auto",
-            Some("/x/autocrop.lua"),
-            Some("/x/vela-autocrop.lua"),
-        );
-        assert_eq!(
-            args,
-            vec![
-                "--script=/x/autocrop.lua".to_string(),
-                "--script-opts-append=autocrop-auto=no".to_string(),
-                "--script=/x/vela-autocrop.lua".to_string(),
-            ],
-            "auto must load the stock script with auto OFF and the shim as trigger"
-        );
-    }
-
-    #[test]
-    fn autocrop_auto_without_shim_degrades_to_stock_trigger() {
-        // Missing shim (e.g. a package that only installed autocrop.lua):
-        // keep the stock auto behavior — fresh plays crop, resume stays broken —
-        // instead of losing autocrop entirely.
-        let args = autocrop_args("auto", Some("/x/autocrop.lua"), None);
-        assert_eq!(args, vec!["--script=/x/autocrop.lua".to_string()]);
-        assert!(
-            !args.iter().any(|a| a.contains("autocrop-auto=no")),
-            "degraded auto must keep the stock crop-on-start trigger"
-        );
-    }
-
-    #[test]
-    fn autocrop_without_resolved_script_injects_nothing() {
-        // Even when enabled, an unresolved stock script yields no args (play()
-        // also existence-checks; here the path is simply absent). A shim alone
-        // is useless — it triggers a script that isn't loaded.
-        assert!(autocrop_args("manual", None, None).is_empty());
-        assert!(autocrop_args("auto", None, Some("/x/vela-autocrop.lua")).is_empty());
-    }
-
-    fn marker(kind: crate::source::MarkerKind) -> crate::source::MediaMarker {
-        crate::source::MediaMarker {
-            kind,
-            start_ms: 1_000,
-            end_ms: 2_000,
-        }
-    }
-
-    // Injection polarity. Each of these alone must produce nothing: injecting a
-    // `--script=` for a missing file makes mpv refuse to start, and a script
-    // with no payload or no enabled policy has nothing to act on.
-    #[test]
-    fn marker_args_inject_nothing_without_script_payload_or_an_enabled_policy() {
-        use crate::config::SkipPolicy::{Autoskip, Button, Off};
-        assert!(
-            markers_args(None, Button, Button, Button, true).is_empty(),
-            "no resolved script"
-        );
-        assert!(
-            markers_args(Some("/x/vela-markers.lua"), Button, Autoskip, Button, false).is_empty(),
-            "no payload was written"
-        );
-        assert!(
-            markers_args(Some("/x/vela-markers.lua"), Off, Off, Off, true).is_empty(),
-            "every policy is off"
-        );
-    }
-
-    // The script reads these exact dashed option names; mpv would otherwise
-    // derive an underscored prefix and silently ignore them.
-    #[test]
-    fn marker_args_carry_the_script_and_all_three_policies() {
-        use crate::config::SkipPolicy::{Autoskip, Button, Off};
-        let args = markers_args(Some("/x/vela-markers.lua"), Button, Autoskip, Off, true);
-        assert_eq!(
-            args,
-            vec![
-                "--script=/x/vela-markers.lua".to_string(),
-                "--script-opts-append=vela-markers-intro-policy=button".to_string(),
-                "--script-opts-append=vela-markers-credits-policy=autoskip".to_string(),
-                "--script-opts-append=vela-markers-commercial-policy=off".to_string(),
-            ]
-        );
-        assert!(
-            !args.iter().any(|arg| arg.contains("PAYLOAD") || arg.contains(".json")),
-            "the payload path must never reach the argument list"
-        );
-    }
-
-    // A payload is written owner-only, and its absence is a normal outcome the
-    // caller degrades on rather than an error it propagates.
-    #[test]
-    fn marker_payload_is_written_owner_only_and_absent_for_no_markers() {
-        use crate::source::MarkerKind;
-        assert!(
-            try_write_marker_payload(&[]).is_none(),
-            "no markers means no payload at all"
-        );
-        let path = try_write_marker_payload(&[marker(MarkerKind::Intro)])
-            .expect("a payload is written for real markers");
-        let body = std::fs::read_to_string(&path).expect("payload is readable");
-        assert!(body.contains("\"kind\":\"intro\""), "body: {body}");
-        assert!(body.contains("\"start_ms\":1000"), "body: {body}");
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
-            assert_eq!(mode, 0o600, "payload must be owner-only from creation");
-        }
-        let _ = std::fs::remove_file(&path);
-    }
-
-    #[test]
-    fn header_include_writes_quoted_fields_owner_only() {
-        let path = tmp("headers-ok.conf");
-        let headers = vec![("X-Plex-Token".to_string(), "abc123".to_string())];
-        let first_guard = write_header_include_at(&path, &headers).expect("write include");
-        let content = std::fs::read_to_string(&path).expect("read back");
-        assert_eq!(content, "http-header-fields=\"X-Plex-Token: abc123\"\n");
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mode = std::fs::metadata(&path)
-                .expect("stat include")
-                .permissions()
-                .mode();
-            assert_eq!(mode & 0o777, 0o600, "auth include must be owner-only");
-        }
-        drop(first_guard);
-        assert!(
-            !path.exists(),
-            "the first include is removed with its guard"
-        );
-        // The explicit-path test helper can reuse a path after its prior guard
-        // has been dropped. Production paths are always unique per launch.
-        let headers = vec![("X-Plex-Token".to_string(), "second".to_string())];
-        let second_guard = write_header_include_at(&path, &headers).expect("rewrite include");
-        let content = std::fs::read_to_string(&path).expect("read back after overwrite");
-        assert_eq!(content, "http-header-fields=\"X-Plex-Token: second\"\n");
-        drop(second_guard);
-        assert!(
-            !path.exists(),
-            "the second include is removed with its guard"
-        );
-    }
-
-    #[test]
-    fn header_include_guard_removes_only_its_exact_file() {
-        let first = tmp("headers-cleanup-first.conf");
-        let second = tmp("headers-cleanup-second.conf");
-        let headers = vec![("X-Plex-Token".to_string(), "synthetic".to_string())];
-        let first_guard = write_header_include_at(&first, &headers).unwrap();
-        let second_guard = write_header_include_at(&second, &headers).unwrap();
-        drop(first_guard);
-        assert!(!first.exists(), "reaped launch include must be removed");
-        assert!(
-            second.exists(),
-            "one launch must not remove another's include"
-        );
-        drop(second_guard);
-    }
-
-    #[test]
-    fn partial_header_include_write_removes_the_credential_file() {
-        let path = tmp("headers-partial.conf");
-        let token = "synthetic-partial-token";
-        let headers = vec![("X-Plex-Token".to_string(), token.to_string())];
-        let error = write_header_include_at_with(&path, &headers, |file, content| {
-            file.write_all(&content[..content.len() / 2])?;
-            Err(std::io::Error::other("synthetic interrupted write"))
-        })
-        .expect_err("partial writes must fail");
-        assert!(
-            !error.contains(token),
-            "the error must not expose the token"
-        );
-        assert!(
-            !path.exists(),
-            "a failed partial write must not leave credential bytes behind"
-        );
-    }
-
-    #[test]
-    fn consumed_include_is_removed_before_a_replacement_launch() {
-        let path = tmp("headers-replaced.conf");
-        let headers = vec![("X-Plex-Token".to_string(), "synthetic".to_string())];
-        let include = write_header_include_at(&path, &headers).unwrap();
-        let child = Command::new(std::env::current_exe().unwrap())
-            .arg("--help")
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-            .unwrap();
-        let mut managed = ManagedChild::new(child, Some(include));
-
-        managed.remove_consumed_header_include().unwrap();
-        assert!(
-            !path.exists(),
-            "the old include must be gone before replacement playback"
-        );
-        let _ = managed.kill();
-        let _ = managed.child.wait();
-    }
-
-    #[test]
-    fn process_query_result_reaps_only_a_confirmed_exit() {
-        assert!(retain_child_after_try_wait(&Ok(None)));
-        assert!(retain_child_after_try_wait(&Err(std::io::Error::other(
-            "synthetic process-query error"
-        ))));
-        #[cfg(unix)]
-        let exited = {
-            use std::os::unix::process::ExitStatusExt;
-            std::process::ExitStatus::from_raw(0)
-        };
-        #[cfg(windows)]
-        let exited = {
-            use std::os::windows::process::ExitStatusExt;
-            std::process::ExitStatus::from_raw(0)
-        };
-        assert!(!retain_child_after_try_wait(&Ok(Some(exited))));
-    }
-
-    #[test]
-    fn header_include_fails_closed_on_conf_escaping_input() {
-        let path = tmp("headers-bad.conf");
-        for bad in [
-            "with\"quote",
-            "with,comma",
-            "with#hash",
-            "with\nnewline",
-            "with\rreturn",
-        ] {
-            let headers = vec![("X-Plex-Token".to_string(), bad.to_string())];
-            let err = write_header_include_at(&path, &headers).expect_err("must fail closed");
-            assert!(
-                !err.contains("with"),
-                "error text must not echo the header value"
-            );
-        }
-        for bad_name in ["", "X Token", "X:Token", "Tok\nen"] {
-            let headers = vec![(bad_name.to_string(), "value".to_string())];
-            write_header_include_at(&path, &headers).expect_err("bad name must fail");
-        }
-        assert!(
-            !path.exists(),
-            "nothing may be written when validation fails"
-        );
     }
 }

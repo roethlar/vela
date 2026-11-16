@@ -4,10 +4,13 @@
   import Icon from "$lib/Icon.svelte";
   import { friendlyError } from "$lib/errors";
   import { imageReveal } from "$lib/imageReveal";
+  import ServerName from "$lib/ServerName.svelte";
+  import { serverLabel } from "$lib/serverPlaylists";
   import type { Item, PlayCommandResult, ServerPlaylist } from "$lib/types";
 
   let {
     playlist,
+    sourceKind,
     refreshVersion = 0,
     posterSrc,
     onBack,
@@ -15,6 +18,7 @@
     onPlaybackResult,
   }: {
     playlist: ServerPlaylist;
+    sourceKind: string;
     refreshVersion?: number;
     posterSrc: (poster: string) => string;
     onBack: () => void;
@@ -110,7 +114,7 @@
     <div>
       <p class="eyebrow">Read-only server playlist</p>
       <h1>{playlist.title}</h1>
-      <p class="muted">{playlist.sourceName}</p>
+      <p class="muted"><ServerName name={playlist.sourceName} kind={sourceKind} /></p>
     </div>
     {#if items.length > 0}
       <button class="primary" disabled={loading || playing} onclick={() => play(0, false)}>
@@ -131,7 +135,7 @@
     <EmptyState
       icon="playlist"
       heading="This server playlist is empty"
-      hint={`Add videos on ${playlist.sourceName}, then reopen it here.`}
+      hint={`Add videos on ${serverLabel(playlist.sourceName, sourceKind)}, then reopen it here.`}
     />
   {:else if items.length > 0}
     <ol class="entries" aria-label="Server playlist items">

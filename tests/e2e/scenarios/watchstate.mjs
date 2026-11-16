@@ -7,13 +7,15 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { MpvIpc, mpvSocketSnapshot, waitForNewMpvSocket } from '../mpv.mjs';
-import { pollUntil, makeClips, mockSource, seedConfig } from '../helpers.mjs';
+import { pollUntil, makeClips, mockSource, seedConfig, stopPlayAsUser, velaConnected, runPlayer } from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
+import { shown } from '../proof.mjs';
 
 let mock;
 
 export default {
   name: 'watchstate',
+  rows: ['2', '3'],
 
   async seed({ configRoot }) {
     const mediaDir = makeClips(configRoot, ['stream.mp4']);
@@ -75,9 +77,16 @@ export default {
         () => mpv.getProp('time-pos').then((t) => t > 0.5).catch(() => false),
         'stream playback to progress',
       );
+      // playback::play: this client + position/window reader + EOF watcher;
+      // Original quality, no notice or health sampler.
+      // Embedded adds player::report::spawn_reporter for the view's state.
+      await velaConnected(socketPath, runPlayer === 'embedded' ? 4 : 3);
       await mpv.setProp('time-pos', 6);
       await new Promise((r) => setTimeout(r, 1500)); // let the tracker observe ≥6s
-      mpv.quit();
+      // The user stops the play: mpv's quit in the external player, the
+      // player view's Close in the embedded one (stopPlayAsUser), so the
+      // check-ins below follow the stop each player's user really makes.
+      await stopPlayAsUser(driver, mpv, socketPath, 'the Mock Movie play');
     } finally {
       mpv.close();
     }
@@ -117,5 +126,7 @@ export default {
     const pct = Number(/(\d+)% watched/.exec(labelAfter)?.[1]);
     assert.ok(pct >= 30 && pct <= 80, `expected a mid-clip percentage, got ${pct}%`);
     await screenshot('01-progress');
+    // The end of its proof of its rows in this player (proof.mjs).
+    shown('2', '3');
   },
 };

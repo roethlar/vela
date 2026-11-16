@@ -6,8 +6,19 @@
   import Settings from "$lib/Settings.svelte";
   import Icon from "$lib/Icon.svelte";
   import ItemDetail from "$lib/ItemDetail.svelte";
+  import PlayerView from "$lib/PlayerView.svelte";
+  import {
+    endLeavesPlayerFullscreen,
+    nextPlayerSession,
+    showingPlayEnded,
+    type PlaybackEnd,
+  } from "$lib/playerView";
+  import { fullscreenRequests, setPlayerFullscreen } from "$lib/playerControls";
   import PlaylistsView from "$lib/PlaylistsView.svelte";
   import ServerPlaylistView from "$lib/ServerPlaylistView.svelte";
+  import ServerLogo from "$lib/ServerLogo.svelte";
+  import ServerName from "$lib/ServerName.svelte";
+  import { flattenServerPlaylists, serverLabel } from "$lib/serverPlaylists";
   import SeasonDetail from "$lib/SeasonDetail.svelte";
   import { friendlyError } from "$lib/errors";
   import { imageReveal } from "$lib/imageReveal";
@@ -33,7 +44,104 @@
   let unlistenContinuePlaying: (() => void) | undefined;
   let unlistenSourceChoice: (() => void) | undefined;
   let unlistenDurableFault: (() => void) | undefined;
+  let unlistenPlayerOpened: (() => void) | undefined;
+  let unlistenPlayerClosed: (() => void) | undefined;
+  // The playback session whose picture is showing inside this window, when a
+  // play runs in the window instead of in a player window of its own.
+  let playerSession = $state<string | null>(null);
+  // Whether a report of an end has named that session: its play has ended,
+  // and its view is only waiting to close (`showingPlayEnded`).
+  let playerSessionEnded = false;
+  let unlistenWindowFullscreen: (() => void) | undefined;
+
+  // Fullscreen for the player. `windowFullscreen` is what the window really
+  // is, from the `window-fullscreen` event; `playerAskedFullscreen` is whether
+  // Vela asked for it on the player's behalf. Both live here, outside the
+  // view, because they outlast it: between two plays of a run the window
+  // stays fullscreen. Vela leaves fullscreen only where it asked for it, so a
+  // window the user made fullscreen themselves is left alone.
+  let windowFullscreen = $state(false);
+  let playerAskedFullscreen = false;
+  let playerFullscreenBackstop: ReturnType<typeof setTimeout> | undefined;
+  // How long a play may take to start (the backend's `START_LIMIT` for the
+  // in-window player), plus a margin: the backstop against a lost
+  // event, never the way fullscreen is normally left.
+  const PLAYER_FULLSCREEN_BACKSTOP_MS = 20_000 + 30_000;
+  const requestPlayerFullscreen = fullscreenRequests(setPlayerFullscreen);
+
+  function askPlayerFullscreen(on: boolean) {
+    const sessionId = playerSession;
+    if (on && sessionId === null) return;
+    playerAskedFullscreen = on;
+    if (!on) clearPlayerFullscreenBackstop();
+    // One request at a time, in order; the claim then becomes what the
+    // backend holds (a refused request gives it up).
+    requestPlayerFullscreen(sessionId ?? "", on, (held) => {
+      playerAskedFullscreen = held;
+    });
+  }
+
+  function leavePlayerFullscreen() {
+    clearPlayerFullscreenBackstop();
+    if (!playerAskedFullscreen) return;
+    askPlayerFullscreen(false);
+  }
+
+  function clearPlayerFullscreenBackstop() {
+    if (playerFullscreenBackstop) clearTimeout(playerFullscreenBackstop);
+    playerFullscreenBackstop = undefined;
+  }
+
+  // After `player-opened` or `player-closed` (`previous` is the view that
+  // showed before): with no view left, the run may still go on; the backstop
+  // leaves fullscreen if nothing ever says so.
+  function playerViewChanged(previous: string | null) {
+    playerSessionEnded = showingPlayEnded(previous, playerSessionEnded, playerSession);
+    if (playerSession !== null) {
+      clearPlayerFullscreenBackstop();
+    } else if (playerAskedFullscreen && !playerFullscreenBackstop) {
+      playerFullscreenBackstop = setTimeout(() => {
+        playerFullscreenBackstop = undefined;
+        if (playerSession === null) leavePlayerFullscreen();
+      }, PLAYER_FULLSCREEN_BACKSTOP_MS);
+    }
+  }
+
+  // Whether the page itself is still deciding or starting a successor.
+  function continuationPending(): boolean {
+    return continuationsRunning > 0 || continuationSession !== null || sourceChoiceRequest !== null;
+  }
+
+  // A play ended. A report that says the run is over leaves, unless another
+  // play's view shows; the dispatcher's report of a clean end says whether a
+  // successor is coming, and with none and nothing pending here the run is
+  // over (the rule is in $lib/playerView).
+  async function playbackEnded(event: { payload: PlaybackEnd }): Promise<void> {
+    const end = event.payload ?? {};
+    playerSessionEnded = showingPlayEnded(playerSession, playerSessionEnded, playerSession, end);
+    if (
+      endLeavesPlayerFullscreen(end, {
+        showing: playerSession,
+        showingEnded: playerSessionEnded,
+        continuationPending: continuationPending(),
+      })
+    ) {
+      leavePlayerFullscreen();
+    }
+    await refreshWatchState();
+    if (end.failedToStart === true) {
+      // Sent only for an https stream whose certificate the player checks.
+      const said = "The player ended before playback could be confirmed. For HTTPS streams, check the server's certificate and Settings → Player → mpv player → Skip server certificate checks. If your server uses a private authority, name its certificate file to mpv with tls-ca-file in Advanced options or your own mpv configuration.";
+      if (detailView) detailStatus = said;
+      else setError(said);
+    }
+  }
+
   onDestroy(() => {
+    unlistenPlayerOpened?.();
+    unlistenPlayerClosed?.();
+    unlistenWindowFullscreen?.();
+    clearPlayerFullscreenBackstop();
     if (copyTimer) clearTimeout(copyTimer);
     if (pollTimer) clearTimeout(pollTimer);
     unlistenPlaybackEnded?.();
@@ -123,6 +231,9 @@
   // Add-to-Playlist mutation changes what it should render.
   let playlistVersion = $state(0);
   let serverPlaylistGroups = $state<ServerPlaylistGroup[]>([]);
+  // What the sidebar lists: a server with nothing available contributes
+  // nothing, and an empty list hides the whole section.
+  const serverPlaylistEntries = $derived(flattenServerPlaylists(serverPlaylistGroups));
   let selectedServerPlaylist = $state<ServerPlaylist | null>(null);
   let serverPlaylistVersion = $state(0);
   let serverPlaylistGen = 0;
@@ -194,6 +305,9 @@
 
   function sourceNameOf(id: string): string {
     return sources.find((s) => s.id === id)?.name ?? "";
+  }
+  function sourceKindOf(id: string): string {
+    return sources.find((s) => s.id === id)?.kind ?? "";
   }
   let crumbs = $state<Crumb[]>([]);
   let items = $state<Item[]>([]);
@@ -435,7 +549,37 @@
       await tick();
       durableHeading?.focus();
     }).then((un) => (unlistenDurableFault = un));
-    listen("playback-ended", refreshWatchState).then((un) => (unlistenPlaybackEnded = un));
+    listen<PlaybackEnd>("playback-ended", playbackEnded).then((un) => (unlistenPlaybackEnded = un));
+    // The in-window player's own lifecycle, each event naming its session
+    // (the rule for them is in $lib/playerView). `playback-ended` is not used
+    // for this; it is about the play, not its view, and can fire twice.
+    listen<{ sessionId: string }>("player-opened", ({ payload }) => {
+      const previous = playerSession;
+      playerSession = nextPlayerSession(playerSession, {
+        kind: "opened",
+        sessionId: payload.sessionId,
+      });
+      playerViewChanged(previous);
+    }).then((un) => (unlistenPlayerOpened = un));
+    listen<{ sessionId: string }>("player-closed", ({ payload }) => {
+      const previous = playerSession;
+      playerSession = nextPlayerSession(playerSession, {
+        kind: "closed",
+        sessionId: payload.sessionId,
+      });
+      playerViewChanged(previous);
+    }).then((un) => (unlistenPlayerClosed = un));
+    // What the window really is; the user may leave fullscreen with the
+    // compositor's own shortcut, and then Vela no longer holds it.
+    listen<{ on: boolean }>("window-fullscreen", ({ payload }) => {
+      windowFullscreen = payload.on === true;
+      if (!windowFullscreen) {
+        playerAskedFullscreen = false;
+        clearPlayerFullscreenBackstop();
+      }
+    }).then((un) => (unlistenWindowFullscreen = un));
+    // Tells the backend the page has loaded; see `player_window_ready` there.
+    invoke("player_window_ready").catch(() => {});
     listen<PlaybackContinuation>("continue-playing", handlePlaybackContinuation).then(
       (un) => (unlistenContinuePlaying = un),
     );
@@ -940,7 +1084,10 @@
     }
   }
 
+  // The run has no successor: the end of it, and of fullscreen for it, unless
+  // another play's view is showing by now.
   function finishPlaybackRun(sessionId: string) {
+    if (playerSession === null || playerSession === sessionId) leavePlayerFullscreen();
     void invoke("finish_playback_run", { sessionId });
   }
 
@@ -961,8 +1108,19 @@
     resetContinuationRun();
   }
 
+  // How many continuations are being decided right now.
+  let continuationsRunning = 0;
+
   async function handlePlaybackContinuation(event: { payload: PlaybackContinuation }) {
-    const completed = event.payload;
+    continuationsRunning++;
+    try {
+      await continueAfterPlayback(event.payload);
+    } finally {
+      continuationsRunning--;
+    }
+  }
+
+  async function continueAfterPlayback(completed: PlaybackContinuation) {
     if (continuationSession !== completed.sessionId) {
       continuationSeen = new Set();
     }
@@ -1868,6 +2026,8 @@
       myGen === loadGen &&
       hasMore &&
       gridEl &&
+      gridEl.isConnected &&
+      gridEl.clientHeight > 0 &&
       gridEl.scrollHeight <= gridEl.clientHeight
     ) {
       return await loadMore(myGen, onError);
@@ -1877,6 +2037,8 @@
 
   function onScroll(e: Event) {
     const el = e.currentTarget as HTMLElement;
+    // WebKit can deliver a queued scroll after the grid leaves the document.
+    if (!el.isConnected || el.clientHeight === 0) return;
     if (el.scrollHeight - el.scrollTop - el.clientHeight < 600) loadMore();
   }
 
@@ -2687,6 +2849,8 @@
         hasMore &&
         !loadingMore &&
         gridEl &&
+        gridEl.isConnected &&
+        gridEl.clientHeight > 0 &&
         gridEl.scrollHeight <= gridEl.clientHeight
       ) {
         loadMore();
@@ -3036,10 +3200,12 @@
         {/if}
         {#if activeType && mode === "browse" && item.sourceId}
           <!-- Merged entries: name the source, or the count when several back it. -->
+          {@const cardSourceId = item.backing?.[0]?.sourceId ?? item.sourceId}
           <span class="y srctag"
-            >· {(item.backing?.length ?? 0) > 1
-              ? `${item.backing!.length} sources`
-              : sourceNameOf(item.backing?.[0]?.sourceId ?? item.sourceId)}</span
+            >· {#if (item.backing?.length ?? 0) > 1}{item.backing!.length} sources{:else}<ServerName
+                name={sourceNameOf(cardSourceId)}
+                kind={sourceKindOf(cardSourceId)}
+              />{/if}</span
           >
         {/if}
       </div>
@@ -3116,7 +3282,7 @@
           <span class="y">{center.year}</span>
         {/if}
         {#if activeSource === null && sources.length > 1 && center.sourceId}
-          <span class="y srctag">· {sourceNameOf(center.sourceId)}</span>
+          <span class="y srctag">· <ServerName name={sourceNameOf(center.sourceId)} kind={sourceKindOf(center.sourceId)} /></span>
         {/if}
       </div>
     </section>
@@ -3192,38 +3358,33 @@
                 </button>
               {/each}
             {/if}
-            {#if serverPlaylistGroups.length > 0}
+            {#if serverPlaylistEntries.length > 0}
               <div class="sidegroup">Server Playlists</div>
-              {#each serverPlaylistGroups as group (group.sourceId)}
-                <div class="serverplaylistgroup" data-source-id={group.sourceId} data-playlist-state={group.available ? "available" : "unavailable"}>
-                  <div class="serversourcename">
-                    <span>{group.sourceName}</span>
-                    {#if group.sourceKind === "emby"}<small>Experimental</small>{/if}
-                  </div>
-                  {#if !group.available}
-                    <span class="serverplayliststate">Unavailable</span>
-                  {:else if group.playlists.length === 0}
-                    <span class="serverplayliststate">No video playlists</span>
-                  {:else}
-                    {#each group.playlists as playlist (playlist.key)}
-                      <button
-                        class="sideitem serverplaylistitem"
-                        class:active={selectedServerPlaylist?.key === playlist.key}
-                        aria-label={`Open ${playlist.title} from ${group.sourceName}`}
-                        onclick={() => openServerPlaylist(playlist)}
-                      >
-                        {playlist.title}
-                      </button>
-                    {/each}
-                  {/if}
-                </div>
+              {#each serverPlaylistEntries as entry (`${entry.sourceId}:${entry.playlist.key}`)}
+                <button
+                  class="sideitem sourceitem serverplaylistitem"
+                  class:active={selectedServerPlaylist?.key === entry.playlist.key &&
+                    selectedServerPlaylist?.sourceId === entry.sourceId}
+                  data-source-id={entry.sourceId}
+                  aria-label={`Open ${entry.playlist.title} from ${serverLabel(entry.sourceName, entry.sourceKind)}`}
+                  onclick={() => openServerPlaylist(entry.playlist)}
+                >
+                  <ServerLogo kind={entry.sourceKind} size={15} /><span class="sourcename">{entry.playlist.title}</span>
+                </button>
               {/each}
             {/if}
             {#if sources.length > 1}
               <div class="sidegroup">Sources</div>
               <button class="sideitem" class:active={mode !== "playlists" && activeSource === null} onclick={() => selectSource(null)}>All</button>
               {#each sources as src (src.id)}
-                <button class="sideitem" class:active={mode !== "playlists" && activeSource === src.id} onclick={() => selectSource(src.id)}>{src.name}</button>
+                <button
+                  class="sideitem sourceitem"
+                  class:active={mode !== "playlists" && activeSource === src.id}
+                  aria-label={serverLabel(src.name, src.kind)}
+                  onclick={() => selectSource(src.id)}
+                >
+                  <ServerLogo kind={src.kind} size={15} /><span class="sourcename">{src.name}</span>
+                </button>
               {/each}
             {/if}
           {/if}
@@ -3268,6 +3429,7 @@
   {:else if mode === "playlists" && selectedServerPlaylist}
     <ServerPlaylistView
       playlist={selectedServerPlaylist}
+      sourceKind={sourceKindOf(selectedServerPlaylist.sourceId)}
       refreshVersion={serverPlaylistVersion}
       {posterSrc}
       onBack={openPlaylists}
@@ -3277,6 +3439,7 @@
   {:else if mode === "playlists"}
     <PlaylistsView
       sourceVersion={playlistVersion}
+      {sourceKindOf}
       {posterSrc}
       onManualPlay={invalidateContinuationRun}
       onPlaybackResult={(result) => void handlePlayCommandResult(result)}
@@ -3374,7 +3537,7 @@
         {#each hubs.filter((h) => hubPolicy(h) !== "hero") as hub (hub.sourceId + ":" + hub.hubIdentifier)}
           {@const policy = hubPolicy(hub)}
           <section class="rail">
-            <h2>{hub.title}{#if activeSource === null && sources.length > 1 && hub.sourceName}<span class="srctag"> · {hub.sourceName}</span>{/if}</h2>
+            <h2>{hub.title}{#if activeSource === null && sources.length > 1 && hub.sourceName}<span class="srctag"> · <ServerName name={hub.sourceName} kind={sourceKindOf(hub.sourceId)} /></span>{/if}</h2>
             <div class="row">
               {#each hub.items as item, i (item.ratingKey)}
                 {@render poster(item, i, policy === "landscape" ? "landscape" : "portrait")}
@@ -3522,7 +3685,7 @@
             disabled={sourceChoiceBusy}
             onclick={() => choosePlaybackSource(choice.sourceId)}
           >
-            <span class="choicename">{choice.sourceName}</span>
+            <span class="choicename"><ServerName name={choice.sourceName} kind={sourceKindOf(choice.sourceId)} size={15} /></span>
             <span class="choicefacts">
               {localityLabel(choice.locality)} · {choice.qualityLabel}
             </span>
@@ -3597,14 +3760,14 @@
           {#each mi.backing! as b (b.sourceId + ":" + b.ratingKey)}
             {#if inProgress}
               <button role="menuitem" onclick={() => playFrom(mi, b, "resume")}>
-                Resume on {sourceNameOf(b.sourceId)}
+                Resume on <ServerName name={sourceNameOf(b.sourceId)} kind={sourceKindOf(b.sourceId)} />
               </button>
               <button role="menuitem" onclick={() => playFrom(mi, b, "beginning")}>
-                Start over on {sourceNameOf(b.sourceId)}
+                Start over on <ServerName name={sourceNameOf(b.sourceId)} kind={sourceKindOf(b.sourceId)} />
               </button>
             {:else}
               <button role="menuitem" onclick={() => playFrom(mi, b, "resume")}>
-                {sourceNameOf(b.sourceId)}
+                <ServerName name={sourceNameOf(b.sourceId)} kind={sourceKindOf(b.sourceId)} />
               </button>
             {/if}
             <button
@@ -3613,7 +3776,7 @@
               aria-expanded={qualityMenuFor === backingKey(b)}
               onclick={() => toggleQualityMenu(mi, b)}
             >
-              Quality on {sourceNameOf(b.sourceId)} <Icon name="chevron" size={13} />
+              Quality on <ServerName name={sourceNameOf(b.sourceId)} kind={sourceKindOf(b.sourceId)} /> <Icon name="chevron" size={13} />
             </button>
             {#if qualityMenuFor === backingKey(b)}
               {@render qualitySubmenu(mi, b)}
@@ -3675,6 +3838,17 @@
          the per-section generation in scanSection. -->
     <button role="menuitem" disabled={scanning[sm.key]} onclick={() => scanSection(sm)}>Scan Library</button>
   </div>
+{/if}
+
+{#if playerSession}
+  {#key playerSession}
+    <PlayerView
+      sessionId={playerSession}
+      fullscreen={windowFullscreen}
+      onfullscreen={askPlayerFullscreen}
+      onstop={leavePlayerFullscreen}
+    />
+  {/key}
 {/if}
 
 <style>
@@ -3807,37 +3981,21 @@
     justify-content: space-between;
     gap: 0.4rem;
   }
-  .serverplaylistgroup {
-    margin-bottom: 0.45rem;
-  }
-  .serversourcename {
+  .sourceitem {
     display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 0.4rem;
-    color: var(--text-dim);
-    font-size: 0.76rem;
-    padding: 0.3rem 0.65rem 0.15rem;
+    align-items: center;
+    gap: 0.45rem;
   }
-  .serversourcename span {
+  .sourceitem :global(svg) {
+    flex: none;
+  }
+  .sourcename {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-  .serversourcename small {
-    color: var(--accent);
-    font-size: 0.58rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-  }
-  .serverplayliststate {
-    display: block;
-    color: var(--text-dim);
-    font-size: 0.75rem;
-    padding: 0.22rem 0.65rem 0.4rem 1.15rem;
+    min-width: 0;
   }
   .serverplaylistitem {
-    padding-left: 1.15rem;
     font-size: 0.84rem;
   }
   .refreshbtn {

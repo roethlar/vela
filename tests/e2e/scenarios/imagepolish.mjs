@@ -265,6 +265,8 @@ async function assertEveryRenderedImageTransition(driver, label) {
 
 export default {
   name: 'imagepolish',
+  rows: [],
+  noRows: 'image loading; plays nothing',
 
   async seed({ configRoot }) {
     if (expectReducedMotion) {

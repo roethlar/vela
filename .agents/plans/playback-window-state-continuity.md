@@ -1,5 +1,7 @@
 # Plan: preserve mpv window state across automatic continuation
 
+> Superseded in part, 2026-11-14 (`9815e10`): plays the user starts now inherit the previous player window too, and its size is carried; see `.agents/plans/mpv-window-geometry.md` and `.agents/decisions.md`, 2026-11-14.
+
 Status: **COMPLETE 2026-07-18.** The owner approved carrying actual fullscreen
 and maximized state into exact automatic successors. Manual plays retain their
 configured defaults; window size and position remain untouched. Claude accepted

@@ -78,6 +78,8 @@ async function addTitle(driver, title, playlistName) {
 
 export default {
   name: 'playlistedit',
+  rows: [],
+  noRows: 'the playlist editor; plays nothing',
 
   async seed({ configRoot }) {
     mockA = await startMockJellyfin({

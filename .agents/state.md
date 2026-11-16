@@ -9,63 +9,172 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Now
 
-- GitHub and Gitea histories reconciled, 2026-10-24. GitHub `main` (the
-  2026-10-23 Node, npm and Cargo security work and the SvelteKit plans) and the
-  Gitea copy at `http://magneto:3001/michael/vela.git` (owner work to
-  2026-10-03, head `d67bc4d`: the toolchain range, AVFoundation-first macOS
-  audio for 1.0.61, the signed macOS wrapper, Linux prerequisite checks) had
-  diverged from `1bd738e`. One merge commit joins them, with no history
-  rewrite. Conflicts were resolved by intent: the toolchain per the amended
-  2026-10-03 decision (next bullet); `Cargo.lock` keeps the newer of each
-  crate (the 2026-10-23 versions below supersede Gitea's h2 0.4.16, rustls
-  0.23.45 and rustls-webpki 0.103.15); `package-lock.json` was regenerated with
-  npm 12.0.2 from GitHub's audited lock, so devalue 5.9.4, vite 8.3.5 and
-  source-map-js 1.2.2 all hold. The magneto Gitea is the canonical `origin`;
-  host `q` (q:3000) is retired (`.agents/repo-guidance.md`, Remotes & Sync).
-- JS toolchain is range-checked with a security floor (decision
-  `.agents/decisions.md` 2026-10-03, amended 2026-10-24):
-  `scripts/check-js-toolchain.mjs` accepts any Node in `engines.node`
-  (`>=26.12.1 <27`; the lower bound excludes Node 26 releases before the
-  October 2026 security release) and any npm in `engines.npm` (`>=12`);
-  `packageManager` is gone. CI/release build on a fixed baseline, Node 26.12.1
-  (`.node-version`) / npm 12.0.2 (four `npm install --global` sites). Node
-  only builds and tests Vela; the shipped app runs no Node, so no end user was
-  exposed. The Linux E2E VM's user-local Node 26.5.0 is now below the floor;
-  see the Pending note in `.agents/machines.md`.
-- Node tests are line-ending-agnostic, 2026-10-24. Five tests failed on a
-  Windows `core.autocrlf=true` checkout because their patterns spell line
-  breaks as `\n`. `tests/dependency-policy.test.mjs`,
-  `tests/live-release-safety.test.mjs` and `tests/release-workflow.test.mjs`
-  now normalize CRLF to LF when they read source. No `.gitattributes` rule was
-  added: pinning LF would change the bytes every Windows checkout builds from,
-  CI's included (`scripts/build.ps1`, `.github/scripts/azure-sign.ps1`,
-  `packaging/arch/PKGBUILD` among them), which is code-like and would need a
-  plan. Each of the 14 newline-dependent assertions in those files was
-  red-proved separately in both a CRLF and an LF checkout and restored green.
-  Test-only; nothing shipped changes.
-- Rust lockfile refresh, 2026-10-23. CI on `main` went red after the 2026-08-08
-  green run. The causes were new upstream advisories and a new stable lint, not
-  repo changes. `cargo update -p` moved async-trait 0.1.89 -> 0.1.92, which
-  resolves clippy 1.99's `double_must_use` in its generated code (19 hits at
-  `src/source/mod.rs:844`). It also moved h2 0.4.15 -> 0.4.20 (RUSTSEC-2026-0258),
-  rustls 0.23.42 -> 0.23.46 (RUSTSEC-2026-0348, -0349 and two more), and
-  rustls-webpki 0.103.13 -> 0.103.16, and added syn 3.0.9 for async-trait. Every
-  new version's MSRV is <= 1.71, within the 1.89 floor. Only `Cargo.lock`
-  changed. The Rust gates can't run on the Windows authoring host (no MSVC build
-  tools), so the GitHub CI run on this commit is their verification. The
-  remaining red CI gate on `main` is npm audit, on two low @sveltejs/kit
-  advisories. The SvelteKit removal clears them; it is on an unmerged branch
-  (see the SvelteKit removal bullet below).
-- The npm lockfile got a non-breaking `npm audit fix` on 2026-10-23, with no
-  package.json change. It fixed the high advisories in devalue (5.9.4), vite
-  (8.3.5, with rolldown 1.2.15), and source-map-js (1.2.2).
+- VELA 1.0.65 IS READY TO BE RELEASED, AS FAR AS THE AGENT CAN TAKE IT
+  (2026-11-16). It is NOT tagged and NOT published. The whole account,
+  with what was verified and the owner's steps in order, is
+  `.agents/plans/v1-release-readiness.md`, "Release candidate: Vela
+  1.0.65"; read that before doing anything about the release. In short:
+  - The owner's answers to the list, the same day (`.agents/decisions.md`,
+    last entry): the Apple agreement "should be done"; "no more azure
+    signing. I'm not paying monthly for that", so the release workflow no
+    longer signs the Windows installers (`fc991a8`) and they ship
+    unsigned, as before 1.0.60; "run it"; and the macOS and Windows builds
+    are to be verified by the owner BEFORE any tag. Whether Windows is
+    signed another way is open and the owner's (alternatives were given:
+    SignPath Foundation's free signing for open-source projects, a
+    certificate authority's certificate, staying unsigned).
+  - BLOCKED SINCE 2026-11-16, about 16:20 UTC, AT `npm audit` (Blockers,
+    first entry): the run by hand the owner asked for (43906795908, at
+    `fc991a8`) built nothing. Four SvelteKit advisories published that
+    afternoon make `npm audit --audit-level=moderate` fail, in the release
+    workflow and in CI's Frontend job alike, so every push to `github`
+    shows red until this is settled. The way out is the owner's choice
+    and was put to the owner that day.
+  - The change that took Azure out was written by the agent, so a codex
+    hunt over it is out (the sixth of the final round); its result is not
+    recorded yet.
+  - The owner's word that day: "you have permission to update whatever
+    you need to to get the release ready. then do a final round of
+    reviews with codex, then come to me with actions you cannot do"
+    (`.agents/decisions.md`: the workflows are the agent's to edit under
+    it; tagging and publishing, `sudo`, signing identities and by-eye
+    judgments stay the owner's; the 2026-11-14 rule that set tests aside
+    is superseded).
+  - Done: the Linux packages carry the embedded player's library and
+    each is checked in the release workflow (all four built and passing
+    on GitHub's runners); CI compiles the backend on Windows and for
+    both macOS architectures; the notes are written and headed "Vela
+    1.0.65"; the final review (five codex hunts, fourteen findings, all
+    repaired and closed: `.agents/review/codereview-2026-11-16-release.md`);
+    a mutation check of three window-state repairs and the tests it
+    showed missing; a fault found on the way (an embedded play closed by
+    its user reported a final position about 180 ms early, `3e0a485`).
+  - Verified at `382acc8`, the last commit that changes code or tests: the
+    full check (727 Rust tests, 672 Node tests; `cargo audit` not
+    installed on `continuum`, run by CI); both end-to-end suites in full
+    with the parity verdict PASS (external 48 of 48, embedded 51 of 51,
+    at `8b16a46`, after which only unit-test code changed); the package
+    built from it for `continuum`
+    (`~/dev/vela-agent-keep/pkg/vela-1.0.65-1-x86_64.pkg.tar.zst`), whose
+    own binary passed in both players.
+  - NOT verified by anyone: this version running on macOS or Windows (it
+    is compiled there by CI, nothing more), and everything that takes
+    eyes (the plans' owner checks).
+  - Told to the owner on 2026-11-16, as the list of what only the owner
+    can do; whether and when to release is the owner's. Until the owner
+    says more, nothing is queued for the agent on the release.
+- THE EMBEDDED PLAYER IS OFFERED IN SETTINGS (2026-11-15). The owner
+  ruled that day that what is built is to be usable from the app, and
+  that the owner is Vela's only user (`.agents/decisions.md`; read it
+  before describing anything as held back from users). Settings, Player,
+  "Video player" landed at `3046f83`, its documents at `3505387`, and
+  the certificate setting's documents at `efd6421`. The embedded player
+  plan's log has what was checked, including the packaged app playing
+  embedded from its own library, and where on `continuum` the package
+  built with the library is. Left for the owner: installing that package
+  and the by-eye checks (the plan's "Owner checks outstanding" and "For
+  the owner").
+- ALSO 2026-11-15: `pagefail` IS FIXED (`b066dc0`), and no scenario is
+  allowed to fail any more (`tests/e2e/parity.mjs`, `KNOWN_FAILURES`, is
+  empty). The fix has two halves, both needed and each shown by taking it
+  out: the page no longer loads more for a browse grid that has left the
+  document, and the scenario's scroll helper sends one scroll event, not
+  two (the blocker's entry and what its diagnosis missed are in
+  `docs/history/state-archive.md`, rotated that day). The full run of both suites at `b066dc0`, each building its app, passed everything: external 48 of 48, embedded 50 of 50, parity verdict PASS (the first run with no failure at all; results kept on `continuum` in `~/dev/vela-agent-keep/full-b066dc0-e2e/`).
+  One known intermittent failure remains, `completionhub` in the embedded
+  player (Blockers); wherever the account below calls `pagefail` the one
+  recorded failure, that was true when it was written.
+- ALSO 2026-11-15: SETTINGS SAVE EACH CHANGE AS IT IS MADE (`5fc040f`;
+  plan `.agents/plans/settings-autosave.md`, decision of that day). The
+  Player tab's seven Save buttons are gone; a setting added later gets
+  none. What was checked, and one timeout that could not be repeated, are
+  in the plan's log.
+- ALSO 2026-11-15: THE OWNER IS USING THE EMBEDDED PLAYER and reports
+  what the by-eye checks were for. First report: its Audio and Subtitles
+  lists closed the moment they opened while a video played; fixed at
+  `2a954d0` (they are drawn in the page now; the embedded player plan's
+  log). Second report: a double-click on the picture did not toggle
+  fullscreen; fixed at `e64efb3`. The package on `continuum` is rebuilt
+  after each fix (the plan's "How to try it" names the commit). Expect
+  more such reports; each is fixed as it comes (decision of 2026-11-14
+  on what is obviously broken). 2026-11-16: the embedded player answers
+  the mouse (`013cee3`; the owner asked for "all the mouse actions that
+  make sense for standard video player apps", the set is in the plan's
+  log), and testing it uncovered that a play's final report to the
+  server could be lost to a closed connection, in both players; fixed
+  at `e50aa83`.
+- The embedded player (`.agents/plans/embedded-player.md`, approved
+  2026-11-12) and the player window carried from play to play
+  (`.agents/plans/mpv-window-geometry.md`, landed 2026-11-14 at `9815e10`
+  as Vela 1.0.64, not released) are both on `main`, and every codex
+  review of them is closed (`.agents/review/index.md` has no open
+  finding). Each plan's "Implementation log" says where it stands. Read
+  the embedded plan's "Owner checks outstanding" and "For the owner"
+  before telling the owner anything, and the player-window plan's log
+  for the owner's acceptance steps on real desktops, none of them done.
+  Gaps left on purpose are in the findings' records (`pw-1`: nothing was
+  built or run on macOS or Windows, and no real second screen; `pw-9`,
+  "Not taken"). Going back to an older Vela after using this one can
+  need Settings recovery (the release notes say when). The account of
+  that run, written while it went on, rotated to
+  `docs/history/state-archive.md` on 2026-11-16. Of the test repairs it
+  left parked, `pa-7`'s is being landed (entry above); `pa-5`'s (codex,
+  worktree `cx-pa5r5` on `continuum`) was never reviewed or landed.
+- HOW TO WORK HERE: rules the owner set since 2026-11-12, most of them
+  in `.agents/decisions.md` under their dates; read them there before
+  doing anything. Every slice with repo code gets a `codereview codex`
+  pass, and each commit is pushed (2026-11-12, "plans are approved").
+  Settle implementation and failure-mode details yourself and record
+  them; bring the owner only what changes Vela for its user, briefly,
+  and never put an answered ask again (2026-11-12, 2026-11-15).
+  Licensing is closed: do not raise it. What is obviously broken is
+  fixed without asking (2026-11-14, which also says what is still
+  brought to the owner). Coding tasks may go to codex, called plainly,
+  and a repair codex wrote is closed by the agent's review, since codex
+  cannot review code it wrote (2026-11-14). What is built for the owner
+  is made usable from the app, and the owner is Vela's only user
+  (2026-11-15). On 2026-11-13 the owner switched on multi-agent
+  workflows for the session doing this work; the agent reads that as
+  the approval the 2026-08-20 constraint below asks for before more than
+  one Claude session is started, for that session only. The same day
+  the owner asked that agents started from then on run on Opus 5.5.
+  Reviews of record still go to codex, and no agent is cut short.
+- Windows mpv idle-exit fix, 2026-11-12, `bf1b1c3` (1.0.62; plan
+  `.agents/plans/windows-mpv-idle-exit.md`). On Windows, mpv started by Vela
+  idled at end of file instead of exiting, so Continue Playing, playlist
+  advancement, the final watched-state write and the recents stamp never
+  ran (owner report on 1.0.59; reproduced with a bare mpv probe on
+  netwatch-01). Vela now passes `--idle=no` after every user-controlled
+  option. The plan passed an owner-directed openreview (agy,
+  gemini-4-argon-high: `best_approach`). Local JS and stable-Rust checks
+  and five red-proofs pass; a netwatch-01 probe shows the option wins over
+  a user `--idle=yes`. NOT done: E2E, any Windows build, and the owner's
+  acceptance on the affected install. GitHub CI run 43302281260 at
+  `6dba9bf` passed every job, the MSRV check and `cargo audit` included
+  (a first run failed on an unrelated Rust 1.100 clippy lint, fixed at
+  `9e76606`; codex codereview of the fix: no material issue). Workaround for
+  older releases: add `--idle=no` to the Advanced
+  mpv arguments.
+- Missing-npm build diagnostic, 2026-11-12 (`.agents/plans/build-missing-npm-diagnostic.md`;
+  owner ruled D1 "A" and gave the go). A build host without `npm` used to
+  get a Node stack trace. `scripts/check-js-toolchain.mjs` now reports a
+  missing or out-of-range npm in one line (`e58a17e`), and `scripts/build.sh`
+  names a missing `node` or `npm` before the toolchain check (`b519083`);
+  nothing is installed for the builder. Seven red-proofs, `npm run check`
+  (78 pass) and the manual repro on the CachyOS host pass. GitHub CI run
+  43265242786 at `f2c6449` passed every job
+  (Frontend, Rust, cargo audit). Windows was not exercised. Awaiting owner
+  confirmation.
 - SvelteKit removal, 2026-10-23. The owner approved
   `.agents/plans/remove-sveltekit.md` and ruled G1 "rename"; the decision is
   `.agents/decisions.md` 2026-10-23. Slices 1-4 are implemented on branch
   `remove-sveltekit`, which is NOT merged to `main`. The branch is at
   version 1.0.62, and on 2026-10-24 it merged the reconciled `main`
   (`bc12bc5`, 1.0.61) without a rebase; the plan's 2026-10-24 amendment
-  carries the consequences.
+  carries the consequences. The approved plan text, that amendment, the
+  implementation log and the 2026-10-23 decision entry exist only on the
+  branch; `main` carries the plan's pre-approval draft plus its "Obligation
+  recorded 2026-11-12" section.
   - The frontend is plain Svelte 5 and Vite. Root `index.html` loads
     `src/main.ts`, which mounts `src/App.svelte`. Static files are in
     `public/`, and `$lib` is defined in tsconfig `paths`.
@@ -82,26 +191,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     errors, 0 warnings); `npm run build` (B1-B6 passed); `node --test
     tests/`. The lock differs from `main`'s by exactly the 11 removed Kit
     packages.
-  - Verified on the Mac on 2026-10-24, at `2767cbe` (see the plan's
-    2026-10-24 log):
-    - the toolchain check, `npm ci`, and `npm audit` (0 vulnerabilities);
-    - `npm run check` (77 pass; svelte-check 0 errors, 0 warnings) and
-      `npm run build` (B1-B6);
-    - `cargo +stable check --locked`, and `tauri build --debug`;
-    - the automated half of the desktop smoke: the app boots and stays up
-      under WKWebView;
-    - `tauri dev`: Vite on strict port 1420, and an HMR update reached the
-      webview with no reload or restart.
-  - NOT verified, and blocking the merge:
-    - every VM gate: Slice 0 (the Node re-alignment and the E2E baseline),
-      Slice 1's E2E run with its F1/F2 red-proofs, the full `npm run e2e`, and
-      the webview-mount red-proof. The VM is a suspended UTM guest that SSH
-      can't start while the Mac is locked (`.agents/machines.md`);
-    - the owner's visual checks on the Mac: Geist text, no theme flash, a
-      clean Web Inspector console, and the HMR edit seen on screen;
-    - the Review. Codex, which the 2026-07-26 routing names, is unavailable
-      (owner, 2026-10-24), so the owner must decide whether to wait for codex
-      or choose another route.
+  - What blocks the merge moved to `## Blockers` on 2026-11-12: the list that
+    stood here had been overtaken by the branch's own record.
   - GitHub CI passed on PR #2 (https://github.com/roethlar/vela/pull/2), run
     40059537619 at `367bdf6`. Frontend: `npm ci`, `npm audit` (0
     vulnerabilities), `npm run check` (70 pass; svelte-check 0 errors, 0
@@ -111,8 +202,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     on Node 26.12.1/npm 12.0.2: `npm audit` (0 vulnerabilities), `npm run
     check` (77 pass, 0 skipped; svelte-check 0 errors, 0 warnings), `npm run
     build` (B1-B6 passed), the 1.89 MSRV check, stable check, clippy, 364 Rust
-    tests, and cargo audit. `main` keeps failing npm audit until the branch
-    merges.
+    tests, and cargo audit. (`main`'s npm audit gate is covered by decision
+    `.agents/decisions.md` 2026-11-02; this branch does not clear the
+    deepmerge advisory either, since it keeps vite-plugin-svelte.)
 - 2026-08-20 macOS AirPlay diagnostics selected an AVFoundation-first production
   path, now drafted at `.agents/plans/macos-airplay-sync.md`; implementation is
   not approved. The affected server-backed MKV/E-AC-3 play was physically about
@@ -142,15 +234,6 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   Claude process, or discard any verdict for any reason without explicit owner
   approval. A failed capability/schema check is reported with its verdict
   retained and does not authorize a retry.
-- 2026-08-20 explicit local signed-build path is implemented at
-  `scripts/build-signed-macos.sh`: macOS-only, Keychain-identity based, loads
-  sibling `Certificates` API metadata without reading `.p12` passwords, fails
-  closed on partial/unsafe credentials, delegates compilation to `build.sh`,
-  then independently checks DMG/app Developer ID signatures, staple,
-  Gatekeeper, and both universal architectures. Hermetic guards cover the
-  success and pre-build refusal paths; removing only `spctl` failed its guard
-  for the exact missing assessment, restored green. Real Apple submission and
-  artifact evidence are machine-specific in `.agents/machines.md`.
 - 2026-08-20 macOS 27 local-network failure under investigation: Jellyfin at
   `altiera:8096` is reachable from the host and answers its public endpoint,
   but the installed `/Applications/Vela.app` is unsigned/ad-hoc and fails its
@@ -161,14 +244,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   advertises four IPv6 addresses that refuse 8096 before its working IPv4
   addresses; direct-IP Vela isolation test is still pending. Local signing
   setup details live in `.agents/machines.md`; no product fix is approved yet.
-
-- The 2026-08-05 README refresh split the old monolith: README.md is now
-  end-user-facing with new real-library screenshots (`docs/images/vela-*.png`,
-  server name scrubbed to "Plex"); deep user reference moved to
-  `docs/usage.md`, build/dev/architecture to `docs/development.md`. The
-  2026-07-25 transcoding-statement guards in `tests/transcoding-ui.test.mjs`
-  were repointed from README.md to docs/usage.md with owner approval.
-- Vela 1.0.60 is published as GitHub's Latest release from exact commit
+- Vela 1.0.60 is published as GitHub's Latest release (re-verified as of
+  `aaa01c1`) from exact commit
   `10b968b583a44c4738ece324b5fcbb9d58276235` — the FIRST SIGNED release:
   the macOS universal DMG is Developer ID signed and notarized (spctl
   `Notarized Developer ID`), the Windows MSI + NSIS are Authenticode signed
@@ -181,22 +258,6 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   offers Prefer Best, Prefer Compatible, Prefer Fastest Source, Ask Every Time,
   and per-title Play Version.
 
-- 2026-10-03 build-health pass on an Arch-family x86_64 host:
-  `scripts/build.sh` now checks Linux system packages (pacman/apt/dnf) and
-  offers to install them (`--install-deps`; no terminal => prints the command
-  and stops); the dnf package list is untested (assumption). The E2E driver
-  fetch uses Launchpad's permanent URL after the archive pool 404'd the pinned
-  2.52.3 package. `devalue` 5.9.4 and `rustls` 0.23.45 clear the then-open
-  advisories. On that host the full verification set, E2E 39/39 (driver 2.52.3
-  against system WebKitGTK 2.52.6), and the Arch package build passed. Nothing
-  here was exercised on macOS or Windows; `scripts/build.ps1` has no
-  prerequisite check.
-- Release code signing merged at `b9c6199` (2026-08-07) shipped in 1.0.60.
-  The wiring detail and durable tauri-cli signing facts live in
-  `docs/history/state-archive.md` (2026-08-08 rotation). The merged
-  `ci/release-code-signing` branch still exists locally and on `github`;
-  deleting it is owner-gated.
-
 ## Next
 
 - Complete physical AirPlay sync, route-transition, pause/seek/mute/volume, and
@@ -206,6 +267,43 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   (package the usage description, guard the built app metadata, and surface
   actionable transport causes instead of reqwest's shallow request error).
 
+- `.agents/plans/mpv-window-geometry.md`: landed 2026-11-14 (`## Now`);
+  what is left is the owner's acceptance on real desktops, listed in that
+  file's log, and its review loop.
+- Owner direction 2026-11-12: embedded playback through libmpv, with
+  iOS/iPadOS as a porting goal (`.agents/decisions.md`). The HDR spike ran
+  on 2026-11-12 (`.agents/plans/embedded-libmpv-hdr-spike.md`, Log): on
+  `continuum` (KDE Wayland, AMD/Mesa) HDR survives embedding in a bare
+  window, under GTK3 + WebKitGTK, and inside Tauri 2. Conditions: the
+  library draws with mpv's older renderer (tone-mapping differs from
+  today's above about 265 nits), and Vela must tag the surface itself.
+  The owner confirmed by eye that it is HDR and that its greys do not
+  match external mpv. Measured afterwards: a green cast in that comparison
+  was the agent's missing `profile=gpu-hq`; with Vela's options the greys
+  are neutral but brighter than external mpv across the range in every
+  configuration measured but one; the two renderers tone-map differently
+  and peak detection moves both. On real clips dark scenes match and
+  bright scenes clip more highlight embedded; the owner: "the external
+  looks slightly better on this display." Clicks
+  on HTML drawn over the video reach the page. External mpv stays the
+  shipped default player; the plan in the next bullet adds the embedded
+  one beside it.
+- Owner ruling 2026-11-12: keep both players; the embedded libmpv player
+  is added next to external mpv (`.agents/decisions.md`). Plan APPROVED
+  2026-11-12 and in flight (`## Now`): `.agents/plans/embedded-player.md`.
+  It reuses the existing
+  IPC-based trackers through one launch description and two launchers, and
+  starts with probes. D1 is ruled: external is the default on every
+  desktop OS and embedded is offered as experimental; iOS is embedded
+  only. A codex openreview returned `acceptable_with_changes` with three
+  admitted plan defects; the owner adopted the fixes and the plan is
+  revised, not re-reviewed (`.agents/review/index.md`). D3, D5 and D6 are
+  assumed under the owner's standing instruction, not ruled. D4 is
+  closed: Vela stays MIT and mpv is only ever a separate dynamic library
+  (`.agents/decisions.md`, "Licensing is settled"); do not raise licensing
+  with the owner again. D7 is ruled: Vela ships its own pinned libmpv
+  on every platform, Linux included; the plan gained a library-build
+  slice and two probes for it.
 - Launch marketing drafts are in-repo: GitHub social preview
   `docs/images/social-preview.png` (1280×640) and Reddit copy
   `docs/marketing/reddit-launch-post.md`. Still awaiting owner go to set the
@@ -217,12 +315,129 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - The rare queued watch-edit race remains an owner-accepted, disclosed 1.0
   limitation; its durable technical record is
   `.agents/plans/continue-watching-watch-state.md`.
+
 ## Blockers
 
-- No known product blocker.
-- The unrelated continuation/mpv and `refresh` E2E flakes remain recorded.
-  They reproduced during the 1.0.59 full Linux run in `continueon`,
-  `playverbs`, and `refresh` (36/39); the changed `sortpersist` scenario passed.
+- THE RELEASE GATE `npm audit` FAILS (2026-11-16, first seen about 16:20
+  UTC; it passed at about 15:50 UTC the same day). npm reports
+  `@sveltejs/kit` as HIGH for four advisories published that afternoon:
+  GHSA-pfhg-q3qv-9q6r (a redirect to an untrusted site through enhanced
+  form submission), GHSA-27mw-82g8-phjj (XSS through an untrusted
+  cache-control header in a prerendered page), GHSA-3r8g-jcqq-3p5j (denial
+  of service parsing a remote function's form data) and GHSA-6cf5-gc4q-fm3x
+  (collisions between private `query.batch` functions). Vela has the last
+  2.x release (2.70.4); the fix is in 3.2.0 only. The gate fails closed at
+  moderate and above by the owner's decision of 2026-11-02, which also
+  bans `npm audit fix --force`, overrides and per-advisory suppression, so
+  the agent does not go round it.
+  - Exposure, checked by search: Vela uses none of what the advisories
+    are about. `src/` imports nothing from `$app/*` or `@sveltejs/kit`,
+    has no form actions, no server routes, no remote functions and no
+    prerendered page; its three route files are `+layout.svelte`,
+    `+layout.ts` and `+page.svelte`, built by adapter-static into a static
+    page that Tauri serves from disk.
+  - Way 1, SvelteKit 3.2.0. Tried in a scratch worktree: the install is
+    clean and the audit passes, but the build stops at
+    `config_file_unsupported`, and SvelteKit's migration guide lists more
+    (configuration moves into `vite.config.js`; `$lib` becomes `#lib`
+    with file extensions, in every import; TypeScript 6; Svelte 5.57.1 or
+    newer). A migration of a framework the owner has already decided to
+    remove.
+  - Way 2, land the SvelteKit removal (`.agents/plans/remove-sveltekit.md`,
+    approved 2026-10-23, the last entry of this section). Tried in a
+    scratch worktree: `main` merges into the branch with ten conflicted
+    files, all of them versions and records (none under `src/`); with
+    `main`'s side taken for those and the two packages dropped, the audit
+    passes and the build passes the branch's own check. Still to do
+    there: `npm run check` must list `main`'s test files (it ran 152
+    tests, and its guard for that failed), and three test files still
+    name `+page.svelte`. Then everything the plan asks before a merge,
+    which includes checks only the owner can make.
+  - Way 3, an exception by the owner for these four advisories, on the
+    ground of no exposure. It needs the owner to change the rule of
+    2026-11-02.
+  - Put to the owner on 2026-11-16 with the agent's recommendation (way
+    2). Until the owner rules, nothing can be built by the release
+    workflow.
+- E2E `completionhub` fails now and then in the embedded player. First seen
+  2026-11-15: once in the full embedded run at `3505387` (which therefore
+  failed the parity verdict: 48 of 50), then in 2 of 49 runs of the scenario
+  alone on the same build. A product race, older than the Settings control
+  landed that day (which touches none of this code), and with next to no
+  effect on a real user:
+  - When a play ends, the tracker thread emits `playback-ended` and only
+    then hands the completion to the dispatcher (`src-tauri/src/commands.rs`,
+    the play's end notify: `app.emit("playback-ended", ...)` before
+    `advance.mark_ended(...)`). The dispatcher (`src-tauri/src/lib.rs`)
+    then records the clean completion locally (`admit_clean_completion`:
+    the session leaves recents and its identities are tombstoned), writes
+    "played" to the servers, and emits a second `playback-ended`.
+  - On the first event the page's `loadHome` asks for three things at
+    once: `get_hubs` (the server), and `get_recents` and
+    `get_continue_tombstones` (local, answered at once). When those two
+    are answered before the dispatcher's admission is written, the page
+    merges the server's Continue Watching, which still lists the finished
+    episode, with local state that does not yet hide it.
+  - Evidence, from the scenario made to print what the page showed (not
+    committed): in the failing run, after the first Home response that
+    follows the end, the page showed "Hub Series, S1 · E1 – Completed
+    Episode" where the scenario expects nothing, with the server's
+    "played" request arrived and unanswered; 3.9 s later, after that
+    answer and the second refresh, it showed "S1 · E2 – Follow-up
+    Episode". In every passing run the first look showed nothing.
+  - User-visible effect: the finished item can stay in Continue Watching
+    until the server has recorded it as played and the second refresh
+    lands. With a real server that is a fraction of a second, and the
+    second refresh normally supersedes the first before it is shown. The
+    scenario delays the server's answer by five seconds to look at the
+    state in between.
+  - The external player runs the same code; it has not been seen to fail
+    there.
+  - Not fixed, on purpose: the effect is negligible and the ordering here
+    has a long review history (`tests/clean-eof-refresh-order.test.mjs`).
+    It waits for the release's test pass (decision of 2026-11-14 on
+    tests). Candidate fix: the page reads the two local lists after
+    `get_hubs` has answered, and the two local commands wait, bounded, for
+    a completion that has been handed to the dispatcher and not yet
+    admitted.
+  - Until then: an embedded run that fails the verdict on `completionhub`
+    alone is this race until shown otherwise; run the scenario again by
+    itself before reading it as a regression.
+- The `refresh` E2E flake remains recorded (1.0.59 full Linux run, 36/39,
+  with `continueon` and `playverbs`). A candidate cause, seen 2026-11-15:
+  `refresh.mjs` and `watchposition.mjs` scrolled the grid with the helper
+  `pagefail` had until `b066dc0`, which moved the grid AND sent a synthetic
+  scroll event. That is two events, and the second can ask again for a page
+  whose request has just failed. Both scroll with one event since `ece850b`
+  (2026-11-16; external 4 of 4 and embedded 3 of 3 that day); whether that
+  was the flake is not established. One cause of the continuation flakes
+  is gone since 2026-11-13: scenarios sought in a file the moment mpv named
+  it, and mpv can answer that with "property unavailable" (seen in
+  `continuetv` and `continueon`). The harness now waits until mpv reports a
+  position before any seek (`tests/e2e/mpv.mjs`). Whether that was the
+  whole of the `continueon` and `playverbs` flakes is not established.
+- The SvelteKit removal (`## Now`) cannot merge as it stands. Its merge
+  blockers moved here on 2026-11-12, re-verified at `main` `aaa01c1` against
+  branch head `769d5a8`:
+  - GitHub reports PR #2 as `CONFLICTING` with `main`. `main` is 53 commits
+    past the branch's last merge of it and has used versions 1.0.62 and
+    1.0.63, so the branch must merge `main` again, carry the
+    server-identity edits into `src/App.svelte`, and re-bump
+    (`.agents/plans/remove-sveltekit.md`, "Obligation recorded
+    2026-11-12"). Every verification recorded for the branch predates that
+    merge.
+  - The branch's own state records the Mac's automated gates as passed on
+    2026-10-24 at `2767cbe`: the JS checks, `cargo +stable check --locked`,
+    `tauri build --debug`, the automated half of the desktop smoke, and
+    `tauri dev` with HMR. Still open there: every VM gate (Slice 0,
+    Slice 1's E2E run with its F1/F2 red-proofs, the full `npm run e2e`,
+    the webview-mount red-proof), the owner's visual checks on the Mac, and
+    the Review.
+  - Two things the branch recorded on 2026-10-24 have changed since: it
+    calls codex unavailable, and codex ran reviews on 2026-11-12
+    (`.agents/review/index.md`); its only E2E venue is the suspended VM, and
+    `continuum` has been one since 2026-11-12 (`.agents/machines.md`).
+    Whether the plan's VM gates may run on `continuum` is an owner decision.
 
 ## Verification
 
@@ -243,7 +458,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - `.agents/plans/library-sort-direction.md` (landed at `c0d1412`, 1.0.59)
 - `.agents/plans/v1-release-readiness.md` (published-release evidence)
 - `.agents/plans/remove-sveltekit.md` (approved; implemented on unmerged
-  branch `remove-sveltekit`; merge blockers in its status and log)
+  branch `remove-sveltekit`, which holds its current status and log; merge
+  blockers in `## Blockers`)
 - `.agents/plans/macos-airplay-sync.md` (implemented for 1.0.61; packaged
   physical acceptance pending)
 - `README.md`, `RELEASE_NOTES.md`, `ISSUES.md`

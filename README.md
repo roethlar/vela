@@ -63,10 +63,12 @@ for macOS, Windows, Linux, or Arch.
    custom executable under Settings → Player.
 2. **Download Vela** from
    [GitHub Releases](https://github.com/roethlar/vela/releases/latest) and
-   install it. macOS and Windows releases are signed — Developer ID signed and
-   notarized on macOS, Authenticode signed on Windows — so Gatekeeper and
-   SmartScreen accept them without an approval prompt. Linux and Arch packages
-   are unsigned. `SHA256SUMS` is attached to every release.
+   install it. The macOS release is Developer ID signed and notarized, so
+   Gatekeeper accepts it without an approval prompt. The Windows installers
+   are not signed: Windows SmartScreen shows "Windows protected your PC"
+   before running one; choose "More info", then "Run anyway". Linux and Arch
+   packages are unsigned. `SHA256SUMS` is attached to every release, for
+   checking a download.
 3. **Connect a server.** Open Settings → Servers. Link Plex with its device
    code, or add Jellyfin/Emby with a username and password or an API key.
 4. **Pick a library and play.** Movies play from their detail view; shows
@@ -113,6 +115,9 @@ exactly where credentials can appear locally, are in
 - Emby remains experimental until it receives live-server integration testing.
 - HDR fidelity ultimately depends on mpv, its GPU backend, the display, and the
   operating system's color-management path.
+- Playing inside Vela's own window is experimental: Linux on Wayland only and
+  off by default. See
+  [docs/usage.md](docs/usage.md#playing-in-velas-own-window-experimental).
 
 Known issues and follow-up work are tracked in [ISSUES.md](ISSUES.md).
 
@@ -133,3 +138,10 @@ Vela is licensed under the [MIT License](LICENSE). The bundled upstream
 `autocrop.lua` mpv script is GPL-2.0-or-later; its license and provenance are
 included under
 [`src-tauri/resources/mpv-scripts/`](src-tauri/resources/mpv-scripts/PROVENANCE.md).
+
+The experimental embedded player uses an mpv library that comes with Vela
+rather than the system's. Vela's Linux packages (x86_64) carry it: an LGPL
+build of mpv and of the libraries it needs, as separate shared libraries,
+with each component's licence text. It is built from the sources pinned in
+[`packaging/libmpv/versions.txt`](packaging/libmpv/versions.txt) by
+[`scripts/build-libmpv.sh`](scripts/build-libmpv.sh).

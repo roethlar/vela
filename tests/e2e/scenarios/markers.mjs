@@ -18,6 +18,8 @@ import { spawnSync } from 'node:child_process';
 import { pollUntil, openLibraryGrid, mockSource, seedConfig } from '../helpers.mjs';
 import { MpvIpc, mpvSocketSnapshot, waitForNewMpvSocket } from '../mpv.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
+import { shown } from '../proof.mjs';
+import { skipJumpVerdict } from '../judge.mjs';
 
 const TICKS_PER_MS = 10_000;
 let mock;
@@ -74,6 +76,94 @@ async function launch(driver) {
   return MpvIpc.connect(await waitForNewMpvSocket(before));
 }
 
+// The proof that the script SKIPPED a range (2-12 s), not that the play ran
+// past it (review finding pa-1). The play is paused and put at a known
+// position, 1 s, just ahead of the range (playing into the range is what
+// triggers a skip; a position seen outside it also re-arms a range already
+// skipped once). Then it plays on, and its position must be past the range's
+// end within JUMP_WINDOW_MS. From 1 s, ordinary playback reaches at most
+// about 1 + JUMP_WINDOW_MS / 1000 s in that time, far short of 12 s, so only
+// the script's seek explains it. The crossing must also be one jump from the
+// range's start to its end: a sample seen well inside the range (from
+// rangeStart + IN_RANGE_MARGIN_S on) fails at once, so a skip that lands short
+// of the end and lets playback cover the rest does not pass. The margin
+// allows for the sample that sees the play just past the start, before the
+// script's seek lands. And the play must have been watched across the jump:
+// at most MAX_GAP_MS between the position seen before it and the one past
+// the end, or a skip that landed short could have played the rest unseen.
+// Time is counted from before the play is told to resume, on a clock that
+// cannot go back, and a sample's time is taken when its read has answered,
+// so a slow resume and a slow read both count against the window. Each
+// sample also keeps when its read was asked for: the gap across the jump
+// runs from there, because an answer that waited to be read holds a
+// position older than the time it was read at. The samples either side of
+// the jump are logged.
+// Exported for tests/e2e-judge.test.mjs, which drives it with a stand-in for
+// mpv to see that its verdict is the one it acts on.
+const JUMP_WINDOW_MS = 5000;
+const IN_RANGE_MARGIN_S = 1;
+const MAX_GAP_MS = 500;
+// `clock` is for the unit tests, which run the samples in made-up time:
+// `now()` in milliseconds, never going back, and `sleep(ms)`.
+const REAL_CLOCK = {
+  now: () => performance.now(),
+  sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+};
+export async function proveSkippedPast(mpv, what, rangeStart, rangeEnd, { clock = REAL_CLOCK } = {}) {
+  await pollUntil(
+    () => mpv.getProp('time-pos').catch(() => null).then((t) => t != null),
+    `${what}: the play to have a position`,
+    { timeoutMs: 12000 },
+  );
+  await mpv.setProp('pause', true);
+  await mpv.setProp('time-pos', 1);
+  const start = await pollUntil(
+    async () => {
+      const paused = await mpv.getProp('pause').catch(() => null);
+      const t = await mpv.getProp('time-pos').catch(() => null);
+      if (paused === true && t != null && t >= 0.9 && t < 1.5) return { t };
+      // A skip the play made on its own before the pause can land after this
+      // seek and move it on again: put it back.
+      await mpv.setProp('time-pos', 1).catch(() => {});
+      return null;
+    },
+    `${what}: the paused play at 1 s, ahead of the range`,
+    { timeoutMs: 5000, intervalMs: 100 },
+  );
+  // From before the resume is asked for: its answer may be slow, and the
+  // play runs meanwhile.
+  const resumeAskedAt = clock.now();
+  await mpv.setProp('pause', false);
+  // The judgement is skipJumpVerdict's (judge.mjs), held by unit tests; this
+  // loop only samples, and asks it after each sample.
+  const samples = [];
+  const rule = {
+    startS: start.t,
+    rangeStart,
+    rangeEnd,
+    windowMs: JUMP_WINDOW_MS,
+    marginS: IN_RANGE_MARGIN_S,
+    maxGapMs: MAX_GAP_MS,
+  };
+  for (;;) {
+    // Taken before the read is sent: the position it answers with was true
+    // no earlier than this, however long the answer then waits to be read.
+    const askedMs = Math.floor(clock.now() - resumeAskedAt);
+    const t = await mpv.getProp('time-pos').catch(() => null);
+    samples.push({ t, askedMs, ms: Math.ceil(clock.now() - resumeAskedAt) });
+    const verdict = skipJumpVerdict(samples, rule);
+    if (verdict?.ok === true) {
+      console.log(
+        `${what}: from ${start.t.toFixed(2)} s, last sample before the jump ${verdict.before.toFixed(2)} s, ` +
+          `first after ${verdict.after.toFixed(2)} s, ${verdict.ms} ms after the play resumed`,
+      );
+      return;
+    }
+    if (verdict) throw new Error(`${what}: ${verdict.why}`);
+    await clock.sleep(100);
+  }
+}
+
 async function endSession(mpv) {
   mpv.quit();
   mpv.close();
@@ -86,6 +176,7 @@ async function endSession(mpv) {
 
 export default {
   name: 'markers',
+  rows: ['8a'],
 
   async seed({ configRoot }) {
     configRootPath = configRoot;
@@ -110,8 +201,9 @@ export default {
     await openLibraryGrid(driver, { cardPrefix: 'Marker Movie' });
 
     // Leg 1 — the whole chain: the app must request the ranges, write the
-    // payload, inject the script, and the script must seek. The range ends far
-    // enough ahead that crossing it is only explicable as that seek.
+    // payload, inject the script, and the script must seek. proveSkippedPast
+    // gives the play too little time to cross the range by playing, so
+    // crossing it is only explicable as that seek.
     mock.state.setMediaSegments('m1', [segment('Intro', 2_000, 12_000)]);
     let mpv = await launch(driver);
     try {
@@ -120,11 +212,7 @@ export default {
         'auto-skip: the script loaded with a payload',
         { timeoutMs: 10000 },
       );
-      await pollUntil(
-        () => mpv.getProp('time-pos').catch(() => null).then((t) => (t != null && t >= 12 ? t : null)),
-        'auto-skip: time-pos past the end of the intro range',
-        { timeoutMs: 14000 },
-      );
+      await proveSkippedPast(mpv, 'auto-skip: the intro range', 2, 12);
     } finally {
       await endSession(mpv);
     }
@@ -144,10 +232,11 @@ export default {
     mpv = await launch(driver);
     try {
       await pollUntil(
-        () => mpv.getProp('time-pos').catch(() => null).then((t) => (t != null && t >= 12 ? t : null)),
-        'commercial: time-pos past the end of the commercial range',
-        { timeoutMs: 16000 },
+        () => mpv.getProp('user-data/vela-markers/loaded').catch(() => null),
+        'commercial: the script loaded with a payload',
+        { timeoutMs: 10000 },
       );
+      await proveSkippedPast(mpv, 'commercial: the commercial range', 2, 12);
     } finally {
       await endSession(mpv);
     }
@@ -192,5 +281,7 @@ export default {
       0,
       'policies off: no MediaSegments request may be made',
     );
+    // The end of its proof of its rows in this player (proof.mjs).
+    shown('8a');
   },
 };

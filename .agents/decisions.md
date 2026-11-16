@@ -1856,3 +1856,632 @@ Supersedes:
 
 The 2026-07-15 rules that npm audit fails closed, with no blanket suppression
 and no `npm audit fix --force`, stay in force.
+
+## 2026-11-02 - npm audit fails CI at moderate severity and above
+
+Status: APPROVED (owner, 2026-11-02).
+
+Decision:
+`npm audit` runs as `npm audit --audit-level=moderate` in CI
+(`.github/workflows/ci.yml`), in the release workflow
+(`.github/workflows/release.yml`), and in the local verification set
+(`.agents/repo-guidance.md`, `docs/development.md`). Known npm advisories of
+moderate, high or critical severity still fail closed. Low-severity advisories
+are printed but do not fail the gate. Nothing else changes: no
+`npm audit fix --force`, no `overrides`, no per-advisory suppression, and
+Cargo audit keeps failing on every advisory.
+
+Reason:
+`main` had failed npm audit since 2026-09-18 on one low advisory, deepmerge
+GHSA-gcqx-w48m-w2h4 (CVE-2026-93753), which npm reports four times up the
+chain (deepmerge, @sveltejs/vite-plugin-svelte, @sveltejs/kit,
+@sveltejs/adapter-static). It has no fix: every deepmerge release from 4.2.0
+through the current 4.3.1 is in range and no newer release exists; the newest
+vite-plugin-svelte (7.3.1) still depends on `deepmerge ^4.3.1`; and the
+`remove-sveltekit` branch depends on vite-plugin-svelte too. So neither the
+Kit 3 major bump that `npm audit fix --force` offers nor the SvelteKit removal
+clears it. The forced bump was tried on 2026-11-02: it broke the build
+(SvelteKit 3 rejects `svelte.config.js` with `config_file_unsupported`) and
+left all four findings in place, and was reverted. The CVE was disputed and
+VulnCheck rejected it on 2026-11-02 (deepmerge issues #273 and #285:
+`Object.prototype` is never modified and nothing crosses a privilege
+boundary); the GitHub advisory is not yet withdrawn, so npm still reports it.
+Vela's exposure is nil regardless: vite-plugin-svelte calls deepmerge once at
+build time to merge its defaults with the repo-authored `svelte.config.js` and
+inline plugin options, and no deepmerge code ships in the app. The owner chose
+the moderate threshold over waiting for the withdrawal with a permanently red
+gate on `main`.
+
+Supersedes:
+Narrows the fail-closed npm audit rule of the 2026-07-15 dependency-baseline
+decision from every severity to moderate and above. Its ban on blanket
+suppression and on `npm audit fix --force` downgrades stands. The Cargo rule
+(2026-07-14) is untouched.
+## 2026-11-12 - Server names always carry a kind mark; empty servers take no sidebar space
+
+Status: APPROVED (owner, 2026-11-12). Implemented in 1.0.63
+(`.agents/plans/server-identity-sidebar.md`).
+
+Decision:
+Wherever the UI shows a server's name it also shows which kind of server it
+is: a Plex, Jellyfin or Emby mark in rendered markup, and the kind in words
+(`name (Kind)`) in plain strings such as accessible labels. Owner: "yes,
+anywhere a bare server name is used we need to differentiate."
+
+The marks are Vela's own simplified SVG drawings, not vendor artwork. Owner:
+"logos. if you can approximate them with .svg, good. if not, then we can use
+actual icons. I'll take the risk that this won't get me sued, since we
+already use the plex and emby names in the settings." The owner accepted the
+drawings on 2026-11-12 ("those logos are fine"). Using the vendors' actual
+artwork remains an owner-approved fallback that was not needed.
+
+Server Playlists in the sidebar is one flat list under its heading, with no
+per-server sub-heading. Owner: "if there are no available server playlists,
+show nothing for that server". A server with none, or whose playlist request
+failed, renders nothing, and the heading disappears when no server
+contributes a playlist. A failed playlist request is therefore not visible
+in the sidebar; that is the ruled behaviour, not an oversight.
+
+Emby's "Experimental" label appears on the Emby row of the Settings server
+list and nowhere in the main window. Owner: "experimental doesn't need to be
+in the main UI at all. settings is enough."; asked whether that means adding
+the word in Settings: "yes, if we need it anywhere".
+
+Reason:
+The owner runs a Plex and a Jellyfin server with the same name, and the
+sidebar, menus and tags printed only the name. The nested Server Playlists
+layout spent five sidebar lines on two servers with no playlists.
+
+Supersedes:
+Narrows where the 2026-07-15 "Emby support is labeled experimental" decision
+is displayed (Settings only); the decision itself stands.
+
+## 2026-11-12 - Push policy is always
+
+Status: APPROVED (owner, 2026-11-12). Recorded in `.agents/push-policy.md`.
+
+Decision:
+Owner: "change push policy to always." After a commit lands the agent pushes
+without asking. Force-pushes and other history rewrites still need their own
+explicit go.
+
+Supersedes:
+The earlier "Always ask before pushing."
+
+## 2026-11-12 - Embedded playback through libmpv is the direction; HDR on Wayland is still unproven
+
+Status: OWNER DIRECTION (2026-11-12), not yet a plan. No code is authorized.
+
+Decision:
+While settling window position for the external player, the owner asked why
+video cannot be embedded, noting that an iOS/iPadOS port cannot use an
+external window at all and that embedding "would obviate all of this
+positioning noise". Given the three routes of the 2026-07-14 decision and
+told that loading mpv as a library is the only one that works on every
+platform including Wayland, the owner ruled: "right, so mpv as a library it
+is."
+
+So the intended end state is an in-process libmpv player, and iOS/iPadOS is
+a stated porting goal. Until a plan built on a successful spike is approved,
+the shipped player remains external mpv and nothing may be designed as
+already depending on embedded video.
+
+Agent's reading (not the owner's words):
+- The first step is the spike in
+  `.agents/plans/embedded-libmpv-hdr-spike.md`: does HDR passthrough survive
+  embedding on KDE Wayland. HDR on Wayland is the reason Vela exists, so a No
+  there needs a fresh owner ruling (for example: embedded on iOS, macOS and
+  Windows, external kept on Linux) rather than silently giving up HDR.
+- Window POSITION work for the external player is dropped: Slice 4 of
+  `.agents/plans/mpv-window-geometry.md` is withdrawn and no KWin probe is
+  run. Slices 1-3 of that plan (fullscreen, maximized, screen, size, the
+  three-way setting) are unaffected and still await their own go.
+
+Supersedes:
+The stance of 2026-07-14 "Video stays external; embedding mpv is a spike,
+not a plan" that embedding "is not planned". Its technical findings stand,
+and its required first question (does HDR passthrough survive?) is exactly
+the spike now drafted.
+
+Spike result (2026-11-12, evidence not a ruling): on `continuum` (KDE
+Wayland, AMD/Mesa) HDR survives embedding at all three stages, bare
+window, GTK3 + WebKitGTK, and Tauri 2, with conditions; the main one is
+that libmpv's render API uses the older `vo=gpu` renderer, whose
+tone-mapping differs from today's `gpu-next` above about 265 nits. The
+owner's visual check followed the same day (Log, "Owner's visual check").
+Record: `.agents/plans/embedded-libmpv-hdr-spike.md`, Log. The status above
+is unchanged: external mpv stays the shipped player and no product code is
+authorized until an embedded-player plan is approved.
+
+## 2026-11-12 - Vela keeps both players: embedded libmpv is added, external mpv stays
+
+Status: OWNER RULING (2026-11-12). Plan drafted at
+`.agents/plans/embedded-player.md`; no code is authorized until that plan
+is approved.
+
+Decision:
+The HDR spike (`.agents/plans/embedded-libmpv-hdr-spike.md`) showed that
+embedding works on KDE Wayland but draws with mpv's older renderer, which
+clips more highlight on bright scenes; the owner judged "the external looks
+slightly better on this display". No mpv release or development branch
+offers the newer renderer for embedding. Asked whether both players could
+be kept, and told the cost is that every playback feature must work in
+both, the owner ruled: "well we need to build all of that for the embedded
+player anyway, and embedded is the only option for ios, so we're not losing
+anything by keeping both except for future feature parity. plan for both
+options".
+
+So the embedded player is built next to the external one, and the external
+player is not removed. The owner accepts that future features must be kept
+at parity across the two.
+
+Agent's reading (not the owner's words):
+- "Both" means two selectable players in the same app, not two builds.
+- Which player each platform uses by default, and whether the user can
+  switch, are open owner decisions carried in the plan.
+
+Refines:
+2026-11-12 "Embedded playback through libmpv is the direction". Its
+fallback (embedded elsewhere, external kept on Linux) is now one case of a
+general rule rather than a retreat.
+
+## 2026-11-12 - External mpv is the default player on every desktop OS; embedded is experimental there
+
+Status: OWNER RULING (2026-11-12), decision D1 of
+`.agents/plans/embedded-player.md`. The plan itself is not yet approved.
+
+Decision:
+Asked which player a fresh Linux install should use, the owner ruled for
+every platform: "external by default for all OSes, embedded marked
+experimental/beta/whatever and kept that way until the library matches.
+embedded by default on ios, obviously. no experimental tag in ios."
+
+Agent's reading (not the owner's words):
+- "Until the library matches" means until libmpv's embedding interface can
+  draw with the renderer the external player uses (`gpu-next`), or
+  otherwise produces a matching picture. Lifting the label is a later
+  owner decision, not something an agent infers from an mpv release.
+- An experimental option must be visible to be chosen, so the plan's D2
+  (user-visible control) is treated as implied; the label's exact word is
+  not settled.
+
+## 2026-11-12 - Licensing is settled: Vela stays MIT; mpv is only ever a separate dynamic library, LGPL build when Vela ships it
+
+Status: OWNER RULING (2026-11-12), CLOSED. Decision D4 of
+`.agents/plans/embedded-player.md`, binding on every later platform plan.
+**Do not raise licensing with the owner again.**
+
+Decision:
+The agent went through two wrong answers the same day: "stay MIT and never
+ship the library" (it left iOS open and blocked platforms with no system
+library) and "relicense Vela to the GPL" (the GPL conflicts with App Store
+distribution); the owner rejected each as "not the least friction option".
+The owner's final word: "can you just pick the correct license that means
+I don't need to think about it or care about what's what on any platform?
+if that's lgpl, fine. I don't want to hear about licensing again after
+this decision."
+
+The agent's pick, which is the rule:
+1. Vela's own code stays MIT, on every platform, with no relicensing.
+2. mpv's library is only ever loaded as a separate dynamic library, never
+   statically linked into Vela.
+3. Vela ships the library itself on every platform (see the next entry),
+   always as an LGPL build of mpv and FFmpeg, as separate dynamic
+   libraries, with their licence texts; never a GPL build.
+
+Why this one: MIT code may be combined with an LGPL library that stays a
+separate, replaceable dynamic library, and that is the arrangement apps
+already ship on every desktop OS and in the App Store; it needs no
+per-platform licence and no change to anything Vela has published. This is
+the agent's judgment, not legal advice, and the owner has accepted it as
+final.
+
+How to apply: an agent that meets a licensing question applies rules 1-3
+without asking. Only a concrete case the rules cannot cover is escalated,
+naming the specific blocker. The existing GPL note for the bundled stock
+`autocrop.lua` (loaded by mpv, not linked into Vela) is unaffected.
+
+Supersedes:
+The two same-day entries this replaces (commits `dc19cd2`, `2eb8abd`).
+
+## 2026-11-12 - The embedded player uses a libmpv that Vela ships, on every platform
+
+Status: OWNER RULING (2026-11-12), decision D7 of
+`.agents/plans/embedded-player.md`.
+
+Decision:
+Told the Linux embedded player would load whichever mpv library the
+system had installed, the owner ruled: "no. that means vela will work
+differently on linux machines with different mpv libraries. what do we
+need to do to ship the library with the code on all platforms".
+
+So Vela builds one pinned library set and ships it in every package,
+Linux included; the embedded player never falls back to a system libmpv.
+The external player is unaffected and keeps using the machine's `mpv`.
+
+Agent's reading (not the owner's words):
+- GPU drivers, the compositor's libraries and the audio client library
+  are still the machine's own; only the player library and its decoders
+  are shipped.
+- Vela thereby takes on security updates for the shipped decoders; the
+  plan adds that to the release gates.
+
+## 2026-11-12 - The embedded player and player window-size plans are approved; owner-only checks wait and the embedded setting stays hidden
+
+Status: OWNER RULING (2026-11-12). Approves
+`.agents/plans/embedded-player.md` (all slices) and
+`.agents/plans/mpv-window-geometry.md` (Slices 1-3), in that order.
+
+Decision:
+The owner gave the go as the session's goal, verbatim: "when the sweep
+finishes, continue with the next steps. implement the plan, codereview
+slices with codex. ask any questions upfront. I won't be here after you
+start." Four questions were asked up front; the option texts were written
+by the agent and the choices are the owner's:
+
+- Which plan the go covers: "Both, embedded first".
+- What to do at steps only the owner can do (judging the HDR picture by
+  eye; the last by-eye checks before the Experimental setting appears):
+  "Build on, keep hidden". The agent finishes everything tests can prove
+  and leaves those checks as a list. Until the owner has done them the
+  embedded player gets no Settings control, no version bump and no release
+  note; it can be tried only through the config file.
+- Pushing: "Yes, push each commit", to `origin` and `github`, never
+  forced. (Consistent with `.agents/push-policy.md`.)
+- Whether to install `podman` and `patchelf` on `continuum` for the
+  library build: the owner ran the install.
+
+Agent's reading (not the owner's words):
+- "codereview slices with codex" means one `codereview codex` defect hunt
+  per slice that lands repo code, over that slice's pinned range, with
+  codex called plainly (`.agents/machines.md`).
+- "Keep hidden" binds the embedded player plan. The window-size plan
+  follows its own text for its version bump and release notes; its
+  "owner present" acceptance steps are likewise left as a list.
+- Nothing is tagged or released by the agent under this go.
+
+Updates:
+`.agents/repo-guidance.md` (Mission Detail) no longer says embedding is
+unplanned; it points at the approved plan.
+
+## 2026-11-14 - The player window carries over from every play to the next; a setting decides the first window of a run
+
+Status: OWNER RULINGS of 2026-11-12, recorded here as the work landed
+(`9815e10`, Vela 1.0.64). Decisions D1 to D3 of
+`.agents/plans/mpv-window-geometry.md`.
+
+Decision:
+- **D1, which plays inherit.** Asked whether plays the user starts should
+  open like the previous player window or only automatic successors, the
+  owner answered: "all in current session". Every play in a run of Vela
+  now opens mpv's window as the play before it left it: full screen,
+  maximized, screen, and size.
+- **D2, across restarts.** Offered an on/off setting, the owner answered:
+  "full screen is usually the goal for me, so how about options? remember
+  last, full screen, default? if last is full screen, then restore full
+  screen next time." Asked whether the setting governs the first play of
+  a run or every play: "yes, first run only, follow the setting on a new
+  Vela launch session". Asked which choice a fresh install starts with:
+  "remember last". So Settings has a three-way "Player window" choice that
+  decides only how the first player window of a run opens, and an absent
+  setting means "remember".
+- **D3, window position: withdrawn.** Position needs a separate mechanism
+  per platform and is impossible on Wayland. The owner chose embedded
+  playback as the direction instead (2026-11-12, "Embedded playback through
+  libmpv is the direction"). Dropping position from this work is the
+  agent's reading of that ruling, not the owner's words.
+
+Supersedes: the rule of `.agents/plans/playback-window-state-continuity.md`
+(2026-07-18) that "Manual plays retain their configured defaults; window
+size and position remain untouched". D1 reverses its first half; size is
+now carried; position still is not.
+
+Agent's reading (not the owner's words):
+- "Remember last" covers maximized and the screen as well as full screen
+  and size: they are the same kind of state.
+- A custom `--fullscreen`, `--window-maximized` or `--geometry` in the
+  Advanced options or in `mpv.conf` decides only the first play of a run,
+  and only in the "Default" choice once a window has been saved.
+
+## 2026-11-14 - Coding tasks may go to codex; a repair codex wrote is closed by the working agent's review
+
+Status: APPROVED (owner, 2026-11-14).
+
+Decision:
+The working agent may hand coding tasks to codex and review what codex
+writes. Owner, 2026-11-14: "can you dispatch some coding tasks to codex
+using the gpt-6-astra max model/effort, then review its work? I want to
+see if we can make some progress by splitting effort." Codex is called
+plainly for these, as it is for reviews (decision 2026-07-26); on
+`continuum` a plain call resolves to gpt-6-astra at max effort.
+
+For a finding whose last repair codex wrote, the working agent's review is
+the review that closes it. The owner chose this on 2026-11-14 ("My review
+closes them") over two other ways put to them: a fresh codex session
+verifying the repair, and the owner reading each one personally. That
+review is: reading the diff, the full check, red-proofs of the agent's
+own, and the end-to-end runs codex's sandbox cannot make. The finding's
+record carries it, and the index says "codex wrote it; reviewed by the
+agent".
+
+Everything else stands. Code the working agent or its helper agents wrote
+is reviewed by codex and never by a Claude harness.
+
+Reason:
+What a review is for is that the author and the reviewer are different
+parties. When codex is the author, the working agent is the other party.
+A codex session verifying codex's repair would be the same family checking
+its own work, which is what the decision of 2026-07-26 rules out in the
+other direction. Codex's sandbox also cannot run the end-to-end suite,
+and the working agent can.
+
+Supersedes:
+Nothing. It qualifies "Never review Vela's code with a Claude harness"
+(2026-07-26) for one case only: a repair that codex itself wrote.
+
+## 2026-11-14 - Tests are not a priority until the app is done and a release is in view
+
+Status: APPROVED (owner, 2026-11-14).
+
+Decision:
+Owner, 2026-11-14: "tests are not a priority. once the entire app is done
+and we're looking at a release, then we can start to think about tests."
+It followed "this has been going for a day, and I need to speed it up",
+said when the loop on two codex reviews had spent most of a day on
+findings about tests that could be fooled.
+
+What follows from it. The first point is the owner's own choice of that
+day; the others are the working agent's reading of the words above, for
+the owner to correct:
+
+- The open findings about tests alone are closed as they stand: `pa-4`,
+  `pa-5` and `pa-7` of the embedded-parity review. Codex's last comments
+  on them stay in their records as known limits. Minutes earlier, asked
+  how far to take them, the owner had chosen "Finish what's in flight,
+  then close"; the statement above goes further, so the repairs then
+  being written for `pa-5` and `pa-7` were neither reviewed nor landed.
+- Until the owner says a release is in view: the checks and the
+  end-to-end suite that exist are kept green and are still run before
+  work is called done; a fix to product code gets the test that shows it;
+  and no review round and no repair is spent on a finding, or on a
+  reviewer's comment, that is about tests alone (a guard that could be
+  stronger, a test that could be made to pass wrongly). Such comments are
+  written into the finding's record for the release's test pass.
+- New test machinery and the hardening of the suite itself wait for that
+  pass.
+
+Reason:
+The owner's, in their words above. Codex had reopened the four findings
+about tests three, three, four and two times, each round for a more
+contrived way a test could be fooled, at one to two hours a round, while
+faults in product code waited behind them.
+
+Supersedes:
+For the time being, whatever in `.agents/repo-guidance.md`, "Guard
+discipline", would have a finding about tests alone repaired round after
+round. That section still governs the tests a change to product code
+gets.
+
+## 2026-11-14 - What is obviously broken is fixed without asking the owner
+
+Status: APPROVED (owner, 2026-11-14).
+
+Decision:
+Owner, 2026-11-14, asked whether a five-second hang should be fixed
+(`pw-9`, second half): "assume I will say "fix it" to everything obviously
+broken. don't ask for obvious ones like this."
+
+A fault in what Vela does, one a user can meet and nobody would call
+intended, is fixed without an owner gate, also when no approved plan names
+it. The fix goes through the usual review and is reported to the owner
+afterwards, not asked about first.
+
+Still brought to the owner (the working agent's reading of where
+"obviously broken" ends): a choice between two behaviours neither of
+which is plainly a fault; a fix that would take something away from some
+users (for example making the player refuse a server certificate it
+accepts today); releases and tags; showing the embedded player's choice to
+users; and `.github/workflows`, which the agent does not edit.
+
+Taken as covered that day, each recorded in `.agents/state.md` as waiting
+for a go until then: the second half of `pw-9`; the external player
+idling at the end of a file under the user's own mpv configuration; the
+order of events left open in `pc-2`; the Arch package not installing
+`vela-markers.lua`; and the lockfile-only `npm audit fix` that turns the
+dependency gate green again.
+
+Reason:
+The owner's, in their words above, said with "this has been going for a
+day, and I need to speed it up" earlier the same day.
+
+Supersedes:
+For obvious faults, "No code change without an approved plan" as this
+repo applied it to faults found outside a plan, and the notes "needs a
+go" on the entries named above.
+
+## 2026-11-14 - The player checks the server's certificate, with a setting to turn it off
+
+Status: APPROVED (owner, 2026-11-14). Plan: `.agents/plans/tls-verify.md`.
+
+Decision:
+The player is told to check the media server's certificate, in mpv's own
+window and in the embedded player, and Settings gets a control that turns
+the check off. The owner chose this ("Verify, with a setting to turn it
+off") over checking with no way out, and over leaving things as they
+were.
+
+Reason:
+The system's mpv up to 0.41 does not check by default and Vela did not
+ask it to, so the stream's sign-in token went out without knowing who
+received it, while Vela's own client checked. Checking can stop playback
+for a server whose certificate mpv's TLS library does not accept (a
+private authority Vela's client trusts and mpv does not), so a user in
+that position needs a way on: naming the authority to mpv, or the
+setting.
+
+Supersedes:
+Nothing. It answers the entry "The external player does not check the
+media server's TLS certificate" under Blockers in `.agents/state.md`.
+
+## 2026-11-15 - The embedded player is offered in Settings; the owner is Vela's only user
+
+Status: OWNER RULING (2026-11-15).
+
+Decision:
+- **The embedded player is to be usable from the app.** The agent's report
+  on the run of 2026-11-12 to 14 called the embedded player "hidden" (no
+  Settings control; chosen only by writing `"player": "embedded"` into
+  `config.json`) and said it would stay so, away from users, until the
+  owner had done the by-eye checks. The owner: "what users are you not
+  showing it to? I'm the only user." The agent then asked whether to add
+  the Settings control. The owner: "so you're asking me, apparently for a
+  second time, whether I want the thing I asked you to build days ago to
+  actually be usable?" The Settings control is added now, under the plan's
+  D1 and D2: the external player stays the default, and the embedded one
+  is offered beside it marked experimental.
+- **The owner is Vela's only user.** Nothing is being kept from anyone by
+  holding work back from the app.
+
+Supersedes:
+The "Build on, keep hidden" choice in the entry of 2026-11-12 ("...
+owner-only checks wait and the embedded setting stays hidden"), as far as
+the Settings control, the documents and the release note go; and the
+sentence in `.agents/repo-guidance.md` (Mission Detail) that forbade
+showing the player choice until the by-eye checks were done.
+
+What does not change:
+- External is the default on every desktop system, and the embedded player
+  keeps its experimental mark (D1, 2026-11-12).
+- The by-eye checks in `.agents/plans/embedded-player.md` ("Owner checks
+  outstanding") are still the owner's. They are how the owner judges the
+  player; they no longer hold anything back.
+- Nothing is tagged or released by the agent, and the agent does not edit
+  `.github/workflows`. A package from the release workflow therefore does
+  not carry the embedded player's library yet; a local
+  `scripts/build.sh --with-libmpv` build does.
+
+Agent's reading (not the owner's words), for how to work here:
+- Something the owner asked to be built is to be made usable by the owner
+  as part of building it. Do not ask whether to, and do not describe
+  finished work as held back from "users".
+- An ask that the owner has already answered, in substance, is not put
+  again in other words.
+- This entry does not by itself retire the compatibility rules recorded
+  elsewhere (the legacy fields kept in `config.json`, the notes on going
+  back to an older Vela). Those are separate decisions and stand until the
+  owner says otherwise.
+
+Updates:
+`.agents/repo-guidance.md` (Mission Detail); `.agents/plans/embedded-player.md`
+(Status and log); `.agents/state.md`.
+
+## 2026-11-15 - Settings save each change as it is made; no Save buttons
+
+Status: OWNER REQUEST (2026-11-15), settled in detail by the agent
+(`.agents/plans/settings-autosave.md`).
+
+Decision:
+The owner, of the Player tab's seven Save buttons: "all the Save buttons
+in settings- do we need them? can we not either auto-save settings
+changes or have one save button per page? these are making the setting
+page difficult to use." Settings now save each change as it is made
+(`5fc040f`): a choice the moment it changes, text when its field is left
+or Settings closes. One status in the dialog's header says Saving, Saved
+or Not saved; a refused save is explained in its own section.
+
+How to apply:
+A setting added later follows the same rule and the same mechanism in
+`src/lib/Settings.svelte` (`createSetting`, `createDraft`, the setting's
+queue). It gets no Save button. Buttons are for actions (Browse, Clear,
+install, connect), not for saving.
+
+Supersedes:
+Nothing recorded; the buttons had grown one section at a time.
+
+## 2026-11-16 - Get 1.0.64 release-ready; the agent may edit the workflows; a final codex review round
+
+Status: OWNER RULING (2026-11-16).
+
+Decision:
+Asked what was left, and told that the release workflow did not ship the
+embedded player's library and that the agent had not edited the workflow
+files, the owner first asked why not ("why can you not edit release.yml";
+see below), then ruled: "okay, you have permission to update whatever you
+need to to get the release ready. then do a final round of reviews with
+codex, then come to me with actions you cannot do."
+
+So:
+- The agent gets 1.0.64 ready for release, `.github/workflows/ci.yml` and
+  `release.yml` included.
+- Then a final `codereview` round with codex over what has landed since
+  the last reviews.
+- Then the agent brings the owner the steps only the owner can take.
+  Tagging and publishing a release remain the owner's (AGENTS.md: an
+  outward-facing action needs its own go); so do `sudo`, signing
+  identities, and what has to be judged by eye.
+
+Why the workflows had been left alone (for the record; it was never the
+owner's rule): on 2026-11-14, with the owner away, Claude Code's automatic
+permission check refused one edit of `ci.yml` as "Destructive or Unwanted
+Actions". The agent does not work around a refusal, so it treated both
+workflow files as closed to it and wrote that into the records as if it
+were a rule. It was one refusal of one edit, generalised. With the owner's
+explicit permission the same edits went through on 2026-11-16.
+
+Supersedes:
+Every statement in `.agents/` that the agent "does not edit"
+`.github/workflows` or that a step in `ci.yml` or the release workflow is
+"the owner's" for that reason (in `.agents/state.md`, the embedded-player
+plan's log, and the decisions of 2026-11-12 and 2026-11-15 where they
+repeat it). Those statements record what was believed then.
+
+Also superseded: "tests are not a priority until the app is done and a
+release is in view" (2026-11-14) has reached its own condition. A release
+is in view; test findings are no longer set aside on that ground.
+
+## 2026-11-16 - Windows installers are no longer signed with Azure Trusted Signing; builds are verified before a tag
+
+Status: OWNER RULING (2026-11-16).
+
+Decision:
+Told that the release workflow's Windows leg fails because Azure's signing
+service refuses to sign (HTTP 403 when a file is submitted), and what to
+look at in the Azure portal, the owner ruled: "no more azure signing. I'm
+not paying monthly for that. is there an alternate way to sign windows
+apps?"
+
+Azure Trusted Signing is dropped. The release workflow no longer signs the
+Windows installers: its Azure steps and `.github/scripts/azure-sign.ps1`
+are removed. From 1.0.65 the Windows MSI and NSIS installer are unsigned,
+as they were before 1.0.60, and Windows SmartScreen warns before running
+them; `README.md` and `RELEASE_NOTES.md` say so. macOS signing and
+notarization are unchanged.
+
+In the same message, on the order of the release steps the agent had
+listed (tag and publish before the look at the macOS and Windows builds):
+"I need to verify the windows and mac builds first. shouldn't this come
+after 5 and 6?" It should. Builds are verified BEFORE any tag: a run of the
+release workflow by hand builds and checks everything, signs and notarizes
+the macOS app (the Windows installers come out unsigned), publishes
+nothing, and its artifacts can be downloaded from the run.
+
+Open, the owner's to choose:
+- Whether the Windows installers are signed another way. The owner asked
+  for the alternatives and was given them on 2026-11-16 (free signing for
+  open-source projects by SignPath Foundation, which then appears as the
+  publisher; a certificate from a certificate authority, the cheapest
+  known being Certum's for open-source developers; staying unsigned).
+  Nothing is chosen. Until the owner chooses, add no signing method.
+
+Why:
+The owner does not want a monthly fee for signing. The service had also
+stopped signing: the workflow's Windows leg failed in four runs by hand.
+
+How to apply:
+- Do not restore Azure signing, and do not describe the Windows installers
+  as signed anywhere.
+- The six `AZURE_*` repository secrets and the Azure subscription are the
+  owner's to remove and cancel; the agent has not touched them.
+- Before proposing a tag, point the owner at the artifacts of a green run
+  by hand of the commit to be tagged.
+- A release whose Windows installers are unsigned says so in its notes.

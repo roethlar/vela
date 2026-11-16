@@ -4,22 +4,38 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  goHome,
+  clickUnderPlay,
   holdsFor,
+  homeButton,
   logicalPlaybackInfoIds,
   makeClips,
   mockSource,
   pollUntil,
   seedConfig,
+  waitForPageUncovered,
+  velaConnected,
+  runPlayer,
 } from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
 import { MpvIpc, mpvSocketSnapshot, waitForNewMpvSocket } from '../mpv.mjs';
+import { shown } from '../proof.mjs';
 
 let healthy;
 let unavailable;
 
 export default {
   name: 'serverplaylists',
+  rows: ['5'],
+  testOnly: [
+    {
+      row: '5',
+      player: 'embedded',
+      via: 'clickUnderPlay',
+      route: 'clickUnderPlay: going Home during the first server-playlist item',
+      proves: 'that the dispatcher repaints Home for the next item underneath the player view',
+      unproven: 'that a user can watch Home during the run: the player view covers the page',
+    },
+  ],
 
   async seed({ configRoot }) {
     const mediaDir = makeClips(configRoot, [
@@ -92,21 +108,51 @@ export default {
     const localStore = path.join(configRoot, 'config', 'vela', 'playlists.json');
     assert.equal(fs.existsSync(localStore), false, 'server discovery must not create Vela storage');
 
+    // One get_server_playlists call returns every server's result together, so
+    // the healthy server's entry appearing means the failing server's result
+    // has arrived too.
     await driver.waitFor(
-      `return document.querySelector('[data-source-id="jf-playlists"]')?.dataset.playlistState === 'available'
-        && document.querySelector('[data-source-id="jf-offline"]')?.dataset.playlistState === 'unavailable'`,
-      'healthy and unavailable server playlist groups',
+      `return document.querySelector(
+        'button.serverplaylistitem[data-source-id="jf-playlists"]'
+      )?.getAttribute('aria-label') === 'Open Server Night from Playlist Server (Jellyfin)'`,
+      'the healthy server playlist entry, named with its server kind',
       { timeoutMs: 25_000 },
     );
-    assert.equal(
+    // Owner ruling 2026-11-12: a server with no available playlists shows
+    // nothing — no sub-heading, no "Unavailable", no placeholder line.
+    assert.deepEqual(
       await driver.exec(
-        `return document.querySelector('[data-source-id="jf-offline"] .serverplayliststate')?.textContent.trim()`,
+        `const nav = document.querySelector('aside nav');
+         const headings = [...nav.querySelectorAll('.sidegroup')].map((el) => el.textContent.trim());
+         return {
+           headings: headings.filter((text) => text === 'Server Playlists' || text === 'Sources'),
+           entries: [...nav.querySelectorAll('.serverplaylistitem')].map((el) => [
+             el.dataset.sourceId,
+             el.textContent.trim(),
+             el.querySelector('svg[role="img"]')?.getAttribute('aria-label') ?? null,
+           ]),
+           offlineInPlaylists: nav.querySelectorAll('.serverplaylistitem[data-source-id="jf-offline"]').length,
+           placeholders: /Unavailable(?! Server)|No video playlists|Experimental/.test(nav.textContent),
+           sources: [...nav.querySelectorAll('.sourceitem:not(.serverplaylistitem)')].map((el) => [
+             el.getAttribute('aria-label'),
+             el.querySelector('svg[role="img"]')?.getAttribute('aria-label') ?? null,
+           ]),
+         };`,
       ),
-      'Unavailable',
+      {
+        headings: ['Server Playlists', 'Sources'],
+        entries: [['jf-playlists', 'Server Night', 'Jellyfin']],
+        offlineInPlaylists: 0,
+        placeholders: false,
+        sources: [
+          ['Playlist Server (Jellyfin)', 'Jellyfin'],
+          ['Unavailable Server (Jellyfin)', 'Jellyfin'],
+        ],
+      },
     );
     const open = await driver.find(
       'css selector',
-      'button[aria-label="Open Server Night from Playlist Server"]',
+      'button[aria-label="Open Server Night from Playlist Server (Jellyfin)"]',
     );
     await driver.click(open);
     await driver.waitFor(
@@ -149,6 +195,10 @@ export default {
         loaded.startsWith(`http://127.0.0.1:${healthy.port}/Videos/${expectedId}/stream`),
         `expected ${expectedId}, got ${loaded}`,
       );
+      // playback::play: this client + position/window reader + EOF watcher;
+      // Original quality, no notice or health sampler.
+      // Embedded adds player::report::spawn_reporter for the view's state.
+      await velaConnected(socket, runPlayer === 'embedded' ? 4 : 3);
       return mpv;
     }
 
@@ -156,8 +206,11 @@ export default {
     await first.setProp('pause', true);
     // Establish Home before the intermediate EOF. A later navigation would
     // perform its own load and could not prove the dispatcher repainted the
-    // backend-owned successor.
-    await goHome(driver);
+    // backend-owned successor. In the embedded player the view covers the
+    // page during the run, so no user can go Home now; Home is reached there
+    // through the test-only route clickUnderPlay, and what is proven is the
+    // page's repaint underneath the view, not that a user sees it.
+    await clickUnderPlay(driver, await homeButton(driver), 'going Home during the first server-playlist item');
     await driver.waitFor(
       `return document.querySelector('[aria-label="Continue watching"] .flowcard.center')?.getAttribute('title') === 'Server First'`,
       'Server First rendered before server-playlist advancement',
@@ -226,5 +279,10 @@ export default {
       [],
       'an alternate configured server must never receive a rerouted playlist play',
     );
+    // A run stopped by owner loss leaves the user's page usable (the embedded
+    // player's view must not outlive its last play).
+    await waitForPageUncovered(driver, 'after owner loss stopped the server playlist');
+    // The end of its proof of its rows in this player (proof.mjs).
+    shown('5');
   },
 };
