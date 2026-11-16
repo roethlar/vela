@@ -24,6 +24,7 @@ import {
   nextPlayerState,
   nextSeekBar,
   nextTrackHighlight,
+  nextVolumeBar,
   nextWheelSteps,
   pictureClickAction,
   pictureDoubleClick,
@@ -518,7 +519,7 @@ test('wheel bursts wait for the answer, merge volume targets and seek seconds, a
   let bar = SEEK_IDLE;
   const enqueueVolume = () => {
     const [command] = wheelCommands('picture', { x: 0, y: -1 }, seekBarValue(bar, 40, 100), ready);
-    bar = nextSeekBar(bar, { kind: 'change', value: command.args[0], now: 100 });
+    bar = nextVolumeBar(bar, { kind: 'change', value: command.args[0], now: 100 });
     pending = mergeWheelCommand(pending, command);
   };
   enqueueVolume();
@@ -564,6 +565,28 @@ test('queued seeks split at the backend limit and retain every remaining second'
       assert.deepEqual(pending, [volume], 'the following command keeps its place');
     }
   }
+});
+
+test('volume acknowledges only its exact target, including fractional values', () => {
+  for (const [target, stale] of [[100, 99], [0, 1], [42, 41], [42, 41.99], [42.5, 42.49]]) {
+    const pending = nextVolumeBar(SEEK_IDLE, { kind: 'change', value: target, now: 100 });
+    assert.deepEqual(nextVolumeBar(pending, { kind: 'state', position: stale, now: 101 }), pending);
+    assert.deepEqual(nextVolumeBar(pending, { kind: 'state', position: null, now: 101 }), pending);
+    assert.deepEqual(nextVolumeBar(pending, { kind: 'state', position: target, now: 101 }), SEEK_IDLE);
+  }
+});
+
+test('volume retains drag and timeout behavior while seeking keeps its arrival tolerance', () => {
+  const dragging = nextVolumeBar(SEEK_IDLE, { kind: 'input', value: 73 });
+  assert.equal(seekBarValue(dragging, 40, 100), 73);
+  assert.deepEqual(nextVolumeBar(dragging, { kind: 'state', position: 40, now: 100 }), dragging);
+  const pending = nextVolumeBar(dragging, { kind: 'change', value: 73, now: 100 });
+  assert.equal(pending.dragging, null);
+  assert.equal(seekBarValue(pending, 72, 3099), 73);
+  assert.deepEqual(nextVolumeBar(pending, { kind: 'state', position: 72, now: 3099 }), pending);
+  assert.deepEqual(nextVolumeBar(pending, { kind: 'state', position: 72, now: 3100 }), SEEK_IDLE);
+  assert.equal(seekBarValue(pending, 72, 3100), 72);
+  assert.deepEqual(nextSeekBar(pending, { kind: 'state', position: 72, now: 101 }), SEEK_IDLE);
 });
 
 test('seek hover time uses thumb centres at both ends and at the middle', () => {

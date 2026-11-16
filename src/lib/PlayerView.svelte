@@ -28,6 +28,7 @@
     nextPlayerState,
     nextSeekBar,
     nextTrackHighlight,
+    nextVolumeBar,
     nextWheelSteps,
     pictureClickAction,
     pictureDoubleClick,
@@ -330,7 +331,7 @@
     });
     for (const command of commands) {
       if (command.name === "set-volume") {
-        volumeBar = nextSeekBar(volumeBar, { kind: "change", value: command.args[0], now });
+        volumeBar = nextVolumeBar(volumeBar, { kind: "change", value: command.args[0], now });
       }
       mousePending = mergeWheelCommand(mousePending, command);
     }
@@ -362,13 +363,13 @@
 
   function volumeInput(event: Event) {
     const value = Number((event.currentTarget as HTMLInputElement).value);
-    volumeBar = nextSeekBar(volumeBar, { kind: "input", value });
+    volumeBar = nextVolumeBar(volumeBar, { kind: "input", value });
   }
 
   function volumeChange(event: Event) {
     const input = event.currentTarget as HTMLInputElement;
     const value = Number(input.value);
-    volumeBar = nextSeekBar(volumeBar, { kind: "change", value, now: Date.now() });
+    volumeBar = nextVolumeBar(volumeBar, { kind: "change", value, now: Date.now() });
     send({ name: "set-volume", args: [value] });
     rangeDone(input);
   }
@@ -514,7 +515,7 @@
       if (player === null) return;
       const at = Date.now();
       seekBar = nextSeekBar(seekBar, { kind: "state", position: player.position, now: at });
-      volumeBar = nextSeekBar(volumeBar, { kind: "state", position: player.volume, now: at });
+      volumeBar = nextVolumeBar(volumeBar, { kind: "state", position: player.volume, now: at });
     }).then((un) => {
       if (gone) un();
       else unlistenState = un;

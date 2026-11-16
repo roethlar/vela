@@ -610,13 +610,22 @@ export type SeekEvent =
 
 /** The seek bar after an event. A `change` is where the view sends its one seek. */
 export function nextSeekBar(bar: SeekBar, event: SeekEvent): SeekBar {
+  return nextRangeBar(bar, event, SEEK_ARRIVED_S);
+}
+
+/** Volume must report the exact target: even one point away can be stale. */
+export function nextVolumeBar(bar: SeekBar, event: SeekEvent): SeekBar {
+  return nextRangeBar(bar, event, 0);
+}
+
+function nextRangeBar(bar: SeekBar, event: SeekEvent, tolerance: number): SeekBar {
   if (event.kind === "input") return { dragging: event.value, pending: null };
   if (event.kind === "change") {
     return { dragging: null, pending: { target: event.value, since: event.now } };
   }
   if (bar.pending === null) return bar;
   const arrived =
-    event.position !== null && Math.abs(event.position - bar.pending.target) <= SEEK_ARRIVED_S;
+    event.position !== null && Math.abs(event.position - bar.pending.target) <= tolerance;
   if (arrived || event.now - bar.pending.since >= SEEK_HOLD_MS) {
     return { dragging: bar.dragging, pending: null };
   }

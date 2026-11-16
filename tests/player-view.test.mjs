@@ -138,6 +138,7 @@ function viewHandlers(initial = {}) {
       commands, fullscreens, state, cleanup, event, send,
       get notice() { return notice; }, get stops() { return stops; },
       get list() { return openList; },
+      get volumeBar() { return volumeBar; },
       pointerdown: pointerActivity, click: pictureClick, dblclick: pictureDblClick,
       contextmenu: pictureContextMenu, open: toggleTrackList, choose: chooseTrack,
       wheel: (x, y) => onwheel({ ...event(), deltaX: x, deltaY: y, deltaMode: 0 }),
@@ -322,6 +323,42 @@ for (const end of ['stop', 'cleanup']) {
     assert.equal(h.commands.filter((c) => c.name === 'seek-relative').length, 1);
   });
 }
+
+for (const [start, delta, target, next] of [[99, -40, 100, 98], [1, 40, 0, 2]]) {
+  for (const timing of ['before', 'after']) {
+    test(`wheel volume at ${start} keeps its latest target through stale state ${timing} the reply`, async (t) => {
+      t.mock.timers.enable({ apis: ['Date'], now: 1000 });
+      const h = viewHandlers({ volume: start });
+      h.wheel(0, delta);
+      assert.deepEqual(h.commands, [{ name: 'set-volume', args: [target] }]);
+      if (timing === 'after') await h.reply();
+      h.state({ volume: start });
+      h.wheel(0, -delta);
+      if (timing === 'before') {
+        assert.equal(h.commands.length, 1);
+        await h.reply();
+      }
+      assert.deepEqual(h.commands[1], { name: 'set-volume', args: [next] });
+      h.state({ volume: next + (start === 99 ? 1 : -1) });
+      assert.equal(h.volumeBar.pending?.target, next, 'one point away is not an acknowledgement');
+      h.state({ volume: next });
+      assert.equal(h.volumeBar.pending, null, 'the exact target acknowledges it');
+      await h.reply();
+      assert.equal(h.commands.length, 2);
+    });
+  }
+}
+
+test('a released volume slider keeps its exact target through stale state', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: 1000 });
+  const h = viewHandlers({ volume: 99 });
+  h.volume(100);
+  h.state({ volume: 99 });
+  h.wheel(0, 40);
+  await h.reply();
+  assert.deepEqual(h.commands, [{ name: 'set-volume', args: [100] }, { name: 'set-volume', args: [98] }]);
+  await h.reply();
+});
 
 test('picture clicks without a primary press leave playback, fullscreen, and a running wait alone', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
@@ -521,7 +558,7 @@ test("the controls return focus to the view, and the view takes only its own pla
     view,
     shape(`function volumeInput(event: Event) {
       const value = Number((event.currentTarget as HTMLInputElement).value);
-      volumeBar = nextSeekBar(volumeBar, { kind: "input", value });
+      volumeBar = nextVolumeBar(volumeBar, { kind: "input", value });
     }`),
   );
   assert.match(
@@ -529,7 +566,7 @@ test("the controls return focus to the view, and the view takes only its own pla
     shape(`function volumeChange(event: Event) {
       const input = event.currentTarget as HTMLInputElement;
       const value = Number(input.value);
-      volumeBar = nextSeekBar(volumeBar, { kind: "change", value, now: Date.now() });
+      volumeBar = nextVolumeBar(volumeBar, { kind: "change", value, now: Date.now() });
       send({ name: "set-volume", args: [value] });
       rangeDone(input);
     }`),
@@ -637,7 +674,7 @@ test('each control is wired to what it shows and what it sends', () => {
     view,
     shape(`const at = Date.now();
       seekBar = nextSeekBar(seekBar, { kind: "state", position: player.position, now: at });
-      volumeBar = nextSeekBar(volumeBar, { kind: "state", position: player.volume, now: at });`),
+      volumeBar = nextVolumeBar(volumeBar, { kind: "state", position: player.volume, now: at });`),
   );
   // Native controls render dark over the picture; the keys start at the view.
   assert.match(view, /\.player \{[^}]*color-scheme: dark;/);
