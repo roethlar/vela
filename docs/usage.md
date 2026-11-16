@@ -69,7 +69,7 @@ what you see if you run Emby — a report is more useful than a guess.
 
 ## Playing in Vela's own window (experimental)
 
-Settings → Player → Video player chooses where videos play:
+Settings → Player → Video player (shown on Linux) chooses where videos play:
 
 - **mpv's own window** (the default): Vela starts the mpv installed on your
   system, in a window of its own. The rest of this page describes that
@@ -87,10 +87,14 @@ under the choice.
 It has its own control bar over the picture (pause, seeking, volume, audio
 and subtitle tracks, cropping, full screen, close) and a skip button for
 intros, credits and commercials. Its keys are `Space` (pause, or skip while
-the skip button shows), the arrow keys (5 and 60 seconds), `m`, `f`, `C` for
-cropping, `q` to close, and `Escape`, which leaves full screen and otherwise
-closes the player. Full screen is Vela's own window going full screen, and it
-stays that way from one video to the next.
+the skip button shows), the arrow keys (5 and 60 seconds), `m`, `f`, `Shift+C`
+for cropping, `q` to close, and `Escape`, which leaves full screen and
+otherwise closes the player. The Crop button and `Shift+C` are there when
+Black-bar cropping is set to Manual or Automatic. The Audio and Subtitles
+buttons open a list above the bar: the arrow keys, `Home` and `End` move in
+it, `Enter` or `Space` chooses, and `Escape` closes the list and nothing else.
+Full screen is Vela's own window going full screen, and it stays that way
+from one video to the next.
 
 With the mouse, on the picture: a click pauses and resumes (after a quarter of
 a second, so that a double-click does not also pause); a double-click toggles
@@ -156,11 +160,14 @@ Settings → Player → Player window chooses how that first play opens:
 If the saved screen is no longer connected, mpv opens on its default screen.
 Switching away from As you last left it deletes the saved window.
 
-Vela 1.0.58 to 1.0.60 refuse a `config.json` that holds these settings, and
-in the default mode Vela saves the window after the first video you play,
-even if you never open the setting. Going back to one of those releases
-after playing anything therefore stops at Settings recovery, where starting
-fresh settings resets every setting except your server connections.
+Vela 1.0.58 to 1.0.60 refuse a `config.json` with settings they do not know,
+and this version writes several: the player window, which in the default mode
+is saved after the first video you play even if you never open the setting; a
+Player window choice other than As you last left it; Vela's window as the
+video player; and Skip server certificate checks once it has been changed,
+even back to off. Going back to one of those releases after any of these
+therefore stops at Settings recovery, where starting fresh settings resets
+every setting except your server connections.
 
 The player checks the certificate of an HTTPS media server, as Vela itself
 does when it browses the server. A server whose certificate mpv does not
@@ -187,9 +194,13 @@ visible. `Space` keeps its normal pause behaviour at every other moment. Plex
 and Jellyfin publish these ranges; Emby currently has no equivalent API, so
 skipping is unavailable there.
 
-On NVIDIA + Wayland, Vela disables WebKitGTK's DMABUF renderer at startup to
-avoid a known webview crash. This affects the library UI renderer, not mpv's
-video output, and has no effect on macOS or Windows.
+On Linux, Vela turns off WebKitGTK's DMABUF renderer at startup, because it
+crashes the webview on NVIDIA with Wayland. This affects the library UI
+renderer, not mpv's video output, and has no effect on macOS or Windows. The
+one exception is a start with the embedded player chosen, which needs that
+renderer and is never entered with the NVIDIA proprietary driver. A
+`WEBKIT_DISABLE_DMABUF_RENDERER` you set yourself is left as it is, and rules
+the embedded player out.
 
 ## Configuration, recovery, and privacy
 

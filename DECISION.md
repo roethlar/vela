@@ -18,6 +18,10 @@ hardware; it just won't perform well there.
 - **Release packaging** is already handled by `.github/workflows/release.yml`
   (MSI/NSIS, dmg/.app, deb/AppImage/rpm via `tauri-action`).
 - **mpv stays unbundled** and runtime-detected; the in-app installer fetches it.
+  (Since 2026-11: still true of the mpv program. Vela's Linux packages also
+  carry its own build of mpv's library for the experimental embedded player,
+  `.agents/decisions.md` 2026-11-12; and the launch arguments now live in
+  `src-tauri/src/player/launch.rs`.)
 - **Minimums** are documented in the README only. They are *not* enforced — no runtime
   notice, no gating. Users may run Vela on below-minimum hardware and accept the
   performance/HDR tradeoff.

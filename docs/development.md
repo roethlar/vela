@@ -197,7 +197,8 @@ in `.agents/plans/embedded-player.md`.
    Only a development build reads that variable. A release build loads the
    library from its own resource directory and nowhere else.
 3. In Settings → Player → Video player choose "Vela's window
-   (experimental)", save, and restart Vela. The choice is stored as
+   (experimental)" (it is saved at once) and restart Vela. The choice is
+   stored as
    `"player": "embedded"` in `~/.config/vela/config.json`; choosing mpv's own
    window removes the field.
 
@@ -444,8 +445,12 @@ is manual: nothing automated compares the pins with an advisory database.
 - **Sources:** Plex and the shared Jellyfin/Emby client implement a common
   `MediaSource` interface behind a source registry. Item keys are namespaced by
   source, allowing unified browsing and cross-source playlists.
-- **Playback:** mpv runs out of process. Vela owns launch configuration,
-  stream authentication (including credential-safe Plex headers), JSON IPC,
-  progress tracking, and sequence handoff; mpv owns decoding and video output.
+- **Playback:** by default mpv runs out of process. Vela owns launch
+  configuration, stream authentication (including credential-safe Plex
+  headers), JSON IPC, progress tracking, and sequence handoff; mpv owns
+  decoding and video output. The experimental embedded player (Linux on
+  Wayland) loads Vela's shipped libmpv in process instead and draws on a
+  Wayland surface under the webview; everything else is shared, through one
+  launch description and the same JSON IPC.
 - **Persistence:** defensive, atomic JSON stores keep application config and
   playlists separate, with cross-process locking and fail-closed parsing.
