@@ -1444,6 +1444,33 @@ fn wait_tick(stop_flag: &AtomicBool, done: &AtomicBool) -> bool {
     !(stop_flag.load(Ordering::Relaxed) || done.load(Ordering::Relaxed))
 }
 
+/// These reports are safe to repeat. The current-thread runtime is idle between
+/// reports, so a pooled connection can close without reqwest noticing until send.
+fn send_report_with_retry<T>(
+    client: &reqwest::Client,
+    mut send: impl FnMut(&reqwest::Client) -> Result<T, reqwest::Error>,
+) -> Result<T, reqwest::Error> {
+    let result = match send(client) {
+        // Retry once for request/connect/body/decode errors, never timeouts or HTTP status errors.
+        Err(e)
+            if !e.is_timeout()
+                && !e.is_status()
+                && (e.is_request() || e.is_connect() || e.is_body() || e.is_decode()) =>
+        {
+            // A clone shares the old pool. A new client cannot reuse a dead
+            // connection from it, and retains the tracker's ten-second limit.
+            reqwest::Client::builder()
+                .timeout(Duration::from_secs(10))
+                .build()
+                .and_then(|fresh| send(&fresh))
+        }
+        result => result,
+    };
+    // Callers log only the final error. Strip the entire URL, including any
+    // query or credentials, before it can reach those diagnostics.
+    result.map_err(reqwest::Error::without_url)
+}
+
 /// Plex: report position on a timer, then post the authoritative final position
 /// when mpv exits (this is what makes resume work). The caller guarantees a
 /// non-empty `info.server_base` (see the match guards in [`play`]).
@@ -1492,17 +1519,19 @@ fn start_tracking_plex(
 
                 while wait_tick(&stop_flag, &reading.done) {
                     let t = reading.last_t_ms.load(Ordering::Relaxed);
-                    if let Err(e) = rt.block_on(crate::plex_api::update_timeline(
-                        &client,
-                        &info.server_base,
-                        &info.token,
-                        &info.client_identifier,
-                        &info.rating_key,
-                        &info.key,
-                        "playing",
-                        t,
-                        info.duration_ms,
-                    )) {
+                    if let Err(e) = send_report_with_retry(&client, |client| {
+                        rt.block_on(crate::plex_api::update_timeline(
+                            client,
+                            &info.server_base,
+                            &info.token,
+                            &info.client_identifier,
+                            &info.rating_key,
+                            &info.key,
+                            "playing",
+                            t,
+                            info.duration_ms,
+                        ))
+                    }) {
                         eprintln!("plex: timeline update failed: {}", e);
                     }
                 }
@@ -1512,25 +1541,31 @@ fn start_tracking_plex(
                 // existing resume point with 0.
                 let t = reading.last_t_ms.load(Ordering::Relaxed);
                 if t > 0 {
-                    let _ = rt.block_on(crate::plex_api::update_timeline(
-                        &client,
-                        &info.server_base,
-                        &info.token,
-                        &info.client_identifier,
-                        &info.rating_key,
-                        &info.key,
-                        "stopped",
-                        t,
-                        info.duration_ms,
-                    ));
-                    if let Err(e) = rt.block_on(crate::plex_api::update_progress(
-                        &client,
-                        &info.server_base,
-                        &info.token,
-                        &info.client_identifier,
-                        &info.rating_key,
-                        t,
-                    )) {
+                    if let Err(e) = send_report_with_retry(&client, |client| {
+                        rt.block_on(crate::plex_api::update_timeline(
+                            client,
+                            &info.server_base,
+                            &info.token,
+                            &info.client_identifier,
+                            &info.rating_key,
+                            &info.key,
+                            "stopped",
+                            t,
+                            info.duration_ms,
+                        ))
+                    }) {
+                        eprintln!("plex: final timeline update failed: {}", e);
+                    }
+                    if let Err(e) = send_report_with_retry(&client, |client| {
+                        rt.block_on(crate::plex_api::update_progress(
+                            client,
+                            &info.server_base,
+                            &info.token,
+                            &info.client_identifier,
+                            &info.rating_key,
+                            t,
+                        ))
+                    }) {
                         eprintln!("plex: final progress update failed: {}", e);
                     }
                 }
@@ -1607,13 +1642,13 @@ fn start_tracking_jellyfin(
                     if let Some(ev) = event {
                         body["EventName"] = serde_json::Value::String(ev.to_string());
                     }
-                    let mut rb = client.post(&url).json(&body);
-                    for (k, v) in &track.headers {
-                        rb = rb.header(k, v);
-                    }
-                    if let Err(e) =
+                    if let Err(e) = send_report_with_retry(&client, |client| {
+                        let mut rb = client.post(&url).json(&body);
+                        for (k, v) in &track.headers {
+                            rb = rb.header(k, v);
+                        }
                         rt.block_on(async { rb.send().await.and_then(|r| r.error_for_status()) })
-                    {
+                    }) {
                         eprintln!("jellyfin: progress update failed: {}", e);
                     }
                 };
@@ -1685,6 +1720,94 @@ pub(crate) use tests::{mpv_is, stand_in_for_mpv, FailingLauncher};
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reports_retry_after_a_pooled_connection_closes() {
+        use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
+
+        async fn receive_report(stream: &mut tokio::net::TcpStream) -> String {
+            let mut reader = tokio::io::BufReader::new(stream);
+            let mut length = None;
+            loop {
+                let mut line = String::new();
+                assert_ne!(reader.read_line(&mut line).await.unwrap(), 0);
+                if line == "\r\n" {
+                    break;
+                }
+                if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                    length = Some(value.trim().parse::<usize>().unwrap());
+                }
+            }
+            let mut body = vec![0; length.expect("report has a body")];
+            reader.read_exact(&mut body).await.unwrap();
+            String::from_utf8(body).unwrap()
+        }
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/Sessions/Playing", listener.local_addr().unwrap());
+        listener.set_nonblocking(true).unwrap();
+        let (close, close_requested) = tokio::sync::oneshot::channel();
+        let (closed, connection_closed) = std::sync::mpsc::channel();
+        let server = std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            rt.block_on(async {
+                let listener = tokio::net::TcpListener::from_std(listener).unwrap();
+                tokio::time::timeout(Duration::from_secs(5), async {
+                    let (mut first, _) = listener.accept().await.unwrap();
+                    let first_report = receive_report(&mut first).await;
+                    first
+                        .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: keep-alive\r\n\r\n")
+                        .await
+                        .unwrap();
+                    // Close only after block_on returned, with the connection
+                    // pooled and the client's runtime no longer polling it.
+                    close_requested.await.unwrap();
+                    first.shutdown().await.unwrap();
+                    drop(first);
+                    closed.send(()).unwrap();
+
+                    let (mut second, _) = listener.accept().await.unwrap();
+                    let second_report = receive_report(&mut second).await;
+                    second
+                        .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                        .await
+                        .unwrap();
+                    [first_report, second_report]
+                })
+                .await
+                .expect("both reports arrive")
+            })
+        });
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .no_proxy()
+            .build()
+            .unwrap();
+        let send = |client: &reqwest::Client, body: &'static str| {
+            rt.block_on(async {
+                client.post(&url).body(body).send().await?.error_for_status()
+            })
+        };
+        send_report_with_retry(&client, |client| send(client, "start")).unwrap();
+        close.send(()).unwrap();
+        connection_closed.recv_timeout(Duration::from_secs(5)).unwrap();
+        let mut attempts = 0;
+        send_report_with_retry(&client, |client| {
+            attempts += 1;
+            send(client, "stopped")
+        })
+        .unwrap();
+        assert_eq!(attempts, 2, "the stale connection required exactly one retry");
+        assert_eq!(server.join().unwrap(), ["start", "stopped"]);
+    }
 
     // Review finding sel-4. Handed an embedded play and nothing to start it
     // with, `play` must refuse, and refuse before it has done anything:
