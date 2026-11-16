@@ -2389,6 +2389,14 @@ artifact keeps the probe's logs and screenshots.
   of 51, parity verdict PASS. The Windows set on a real Windows runner
   (CI run 43954255770, `libmpv-windows-check`): client API 2.6, mpv
   0.42.0, the test pattern played to its end, every DLL of the set mapped
-  from the set's own directory. Probe M1 answered (above).
+  from the set's own directory. Probe M1 answered (above). The Windows
+  installers carry the set (`4fe60b8`): the release workflow run by hand
+  at that commit (43960939329) built the NSIS installer and the MSI, found
+  every file of the set in each matching the MANIFEST, and loaded and
+  played the set unpacked from each on the Windows runner; the same run
+  notarized the macOS app ("Accepted", Gatekeeper "Notarized Developer
+  ID") with the local-network sentence in its Info.plist. The macOS host
+  landed after it (`623ec17`; Linux's suites in full at that commit:
+  48 of 48, 51 of 51, parity PASS).
   In progress: the macOS set; next, the macOS host, then packaging of
   both sets into the Windows and macOS bundles.
