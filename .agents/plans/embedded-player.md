@@ -821,9 +821,9 @@ How to try it (since 2026-11-15): install a package that carries the
 library, choose Settings, Player, Video player, "Vela's window
 (experimental)" (it is saved at once), and restart Vela. On `continuum`
 such a package,
-built from `013cee3` by `scripts/build.sh --with-libmpv` and checked (the
-log's last entries say how), is
-`~/dev/vela-agent-keep/pkg/vela-1.0.64-1-x86_64.pkg.tar.zst`; installing
+built from `382acc8` by `scripts/build.sh --with-libmpv` and checked (the
+log's last entry says how), is
+`~/dev/vela-agent-keep/pkg/vela-1.0.65-1-x86_64.pkg.tar.zst`; installing
 it is `sudo pacman -U` of that file, which is the owner's to run. A
 development build works as before: start it with `VELA_LIBMPV_DIR` naming
 the set (`docs/development.md`, "Trying the embedded player").
@@ -2195,3 +2195,56 @@ the embedded player. The full run of both suites at `013cee3`, each building its
 
 **Not seen.** A real mouse on the owner's desktop: the size of a wheel
 notch there, whether the stray click appears, how the 250 ms wait feels.
+
+### 2026-11-16 — made ready for release: the packages carry the library, the final review, a stop that told the truth
+
+The owner, that day: "you have permission to update whatever you need to to
+get the release ready. then do a final round of reviews with codex, then
+come to me with actions you cannot do." What that changed for this plan:
+
+**The released Linux packages carry the library.** The release workflow
+builds the set (or takes it from the cache CI fills), puts it into the
+AppImage, the deb, the rpm and the Arch package, and checks each against
+the set that was built before any of them can reach a draft release
+(`4ab145b`; `docs/development.md`, "In the release workflow"). Run by hand
+on `main`, all four were built on GitHub's runners and passed: the first
+AppImage ever built with the set keeps it whole and loads it. Item 7 of
+"For the owner" (shipping the library) is done as far as the agent can
+take it; the tag is the owner's.
+
+**Closing a play reported a position it was never at** (`3e0a485`). Found
+by the test repair of `pa-7` (`c618d31`), which holds a play still before
+it is stopped: paused at 9.000 s, the embedded player's final report said
+8822, 8819, 8822 ms. On a stop the play's thread left its loop at once and
+freed the renderer before mpv was told to quit; mpv then gave up its video
+output, fell back to the audio's position, and reported that as the play's
+last. Now a stop asks mpv to quit through `mpv_command_async`, and the loop
+goes on drawing and reading events until mpv has shut down, or 250 ms have
+passed; the teardown itself is unchanged. A helper had reported this on
+2026-11-14 and it had stayed an unverified note. A codex hunt over the fix
+found nothing in it.
+
+**The final review** (`.agents/review/codereview-2026-11-16-release.md`)
+found fourteen things in what had landed since 2026-11-14, all repaired.
+In this player's view: a right-click or a track choice made while a wheel
+command was unanswered was dropped as "The player is busy" (now every
+command but Close goes through the one queue, `e453ad1`); a wheel burst of
+more than 600 seconds of seeking was refused whole (sent in pieces now,
+`0cd99a2`); the volume drifted a point near 0 and 100 (`1f35c2b`); four
+rules of the view had no test (`b7e2caa`). In Settings: the sentence under
+"Video player" said every change of player waits for a restart, and going
+back to mpv's own window does not (`861cc3f`).
+
+**Checked** at `382acc8`: the full check (727 Rust tests, 672 Node tests),
+the 11 tests against the shipped library, of which one is new: a stop
+reaches mpv's shutdown in every state of a play. Both suites in full at
+`8b16a46`, after which only unit-test code changed: external 48 of 48,
+embedded 51 of 51, parity verdict PASS. The package for `continuum` was
+built from `382acc8` as Vela 1.0.65 (sha256 `2374c0d7...84bdc970`); its check
+passed, and its own binary passed `playback`, `multiplex`,
+`embeddedcontrols`, `embeddedtracks`, `embeddedfullscreenend`,
+`embeddedcrop` and `sourcepolicy` in the embedded player.
+
+**Still the owner's**, unchanged: every item of "Owner checks outstanding"
+and the unruled assumptions of "For the owner" (the cropping script
+against the rule of 2026-07-05; cropping HDR video).

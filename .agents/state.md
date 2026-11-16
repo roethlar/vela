@@ -9,94 +9,45 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Now
 
-- RELEASE READINESS, 2026-11-16 (in progress). The owner that day: "you
-  have permission to update whatever you need to to get the release
-  ready. then do a final round of reviews with codex, then come to me
-  with actions you cannot do" (`.agents/decisions.md`, that date: the
-  workflows are the agent's to edit under it; tagging and publishing a
-  release, `sudo`, signing identities and by-eye judgments stay the
-  owner's; the 2026-11-14 rule that set tests aside is superseded, a
-  release being in view). Where it stands:
-  - The release workflow puts the embedded player's library into the
-    four Linux packages and checks each one (`4ab145b`); macOS and
-    Windows packages carry none of it. It has been run by hand on `main`
-    (a `workflow_dispatch` run builds, signs and checks everything and
-    creates NO release; only a `v*` tag creates one, as a draft). The
-    Linux side passes: the AppImage, the deb, the rpm and the Arch
-    package were built with the library on GitHub's runners and each
-    passed `packaging/libmpv/check-package.sh` (run 43879587091, the
-    first AppImage ever built with it). The macOS leg builds and then
-    fails at notarization: Apple answers 403, "A required agreement is
-    missing or has expired", which only the owner can accept, in the
-    Apple Developer account. The Windows leg builds and then fails at
-    the first signature: the signing service answers 403 (Forbidden)
-    when the digest is submitted (run 43887131049; TrustedSigning module
-    0.5.8, client 1.0.95). The credentials are accepted and the signing
-    request is refused, which only the owner can look into, in the Azure
-    portal: the usual causes are the service principal no longer holding
-    the certificate profile's signer role, an identity validation or a
-    subscription that has lapsed, or an endpoint that is not the
-    account's region. Tauri shows nothing a signing command says, so
-    `.github/scripts/azure-sign.ps1` now signs in a child process and
-    leaves all it said for the workflow to print (`9e7554f`, `6b7dd7c`,
-    `2ffbffe`). v1.0.60 was signed by the same workflow and the same
-    secrets on 2026-08-08, so both failures are something that changed
-    in the owner's accounts since. Four runs were made by hand; each
-    sent the owner a failure e-mail, which the owner asked about and was
-    told to expect.
-  - CI (`ci.yml`): the package-check tests run instead of skipping
-    (`4ab145b`), and a job compiles the backend on macOS and Windows
-    (`687d533`): the first compile off Linux since v1.0.60, 429 commits
-    on (that commit's message says "some three hundred"), and it passes
-    on both. Two red runs, at `d1e771a` and `6f53c11`, were GitHub's
-    macOS runner failing inside `actions/checkout` before any code was
-    compiled; every run since is green.
-  - A package that carries the library names its licences (`c45fe51`).
-    `RELEASE_NOTES.md` is written as a release's notes, still headed
-    "Unreleased". The documents say that the Linux packages carry the
-    library. Stale records the audit named are tidied (`2a4fa26`,
-    `5c53c2c`, this rotation).
-  - Found on the way and fixed: an embedded play closed by its user
-    reported a final position about 180 ms before where it was
-    (`3e0a485`: a stop now asks mpv to quit before the renderer is
-    freed; the blocker's entry, with the trace, rotated to
-    `docs/history/state-archive.md` that day). The test repair that
-    showed it is `pa-7`'s, ported onto `main`'s tests and finished by
-    codex and landed at `c618d31` (its record).
-  - The version is 1.0.65 (`c093289`, by `scripts/bump.sh`, with the
-    notes' heading; 1.0.64 is what the package on `continuum` carries,
-    built before later fixes). No tag and no release: the owner's.
-  - The final review round is done and closed
-    (`.agents/review/codereview-2026-11-16-release.md`): five codex
-    hunts, fourteen findings (`fr-1` to `fr-14`), all admitted, each
-    repaired by codex as a coding task and landed as a commit of its
-    own on the working agent's review (`ceed9be` to `9171b2e`; the
-    review index has each). What a user would notice of them: one
-    Settings change can no longer save over another setting stored with
-    it; a refused save is shown even when it arrives after Settings has
-    closed; in the embedded player a right-click or a track choice made
-    during wheel input is no longer dropped, a long wheel seek goes all
-    the way, and the volume no longer drifts a point; a Jellyfin play
-    is not counted twice when a start report's answer is lost. CI now
-    compiles both macOS architectures (seen passing on GitHub's runner
-    at `9d05964`).
-  - A mutation check of three window-state repairs that had landed
-    without one (three helper agents, 2026-11-16; the records of
-    `pw-1`, `pw-8` and `pw-9` have the results) found the first two
-    guarded throughout and twelve behaviours of `pw-9`'s second half
-    held by no test. No defect of the product was found. The tests
-    landed at `484939c`.
-  - Being written by codex (worktree `cx-testrobust`), tests only: a
-    Rust test that failed once on GitHub's runner and never locally (the
-    CI run at `b7e2caa`:
-    `an_external_play_reports_its_end_without_waiting_for_the_eof_watcher`
-    reads the stand-in player's arguments file the moment it exists,
-    which can be before it is written), and the two unit tests of `pw-8`
-    that hang instead of failing when their rule is removed.
-  - Left, in order: land that; the full check, both end-to-end suites
-    with the parity verdict, and a package built from the final commit;
-    then the list for the owner. Nothing since `013cee3` has had a full
-    end-to-end run.
+- VELA 1.0.65 IS READY TO BE RELEASED, AS FAR AS THE AGENT CAN TAKE IT
+  (2026-11-16). It is NOT tagged and NOT published, and it cannot be until
+  the owner has dealt with two things in the owner's own accounts: Apple
+  refuses notarization ("A required agreement is missing or has
+  expired") and Azure's signing service refuses to sign (403 when a file
+  is submitted). The whole account, with what was verified and the
+  owner's steps in order, is `.agents/plans/v1-release-readiness.md`,
+  "Release candidate: Vela 1.0.65"; read that before doing anything about
+  the release. In short:
+  - The owner's word that day: "you have permission to update whatever
+    you need to to get the release ready. then do a final round of
+    reviews with codex, then come to me with actions you cannot do"
+    (`.agents/decisions.md`: the workflows are the agent's to edit under
+    it; tagging and publishing, `sudo`, signing identities and by-eye
+    judgments stay the owner's; the 2026-11-14 rule that set tests aside
+    is superseded).
+  - Done: the Linux packages carry the embedded player's library and
+    each is checked in the release workflow (all four built and passing
+    on GitHub's runners); CI compiles the backend on Windows and for
+    both macOS architectures; the notes are written and headed "Vela
+    1.0.65"; the final review (five codex hunts, fourteen findings, all
+    repaired and closed: `.agents/review/codereview-2026-11-16-release.md`);
+    a mutation check of three window-state repairs and the tests it
+    showed missing; a fault found on the way (an embedded play closed by
+    its user reported a final position about 180 ms early, `3e0a485`).
+  - Verified at `382acc8`, the last commit that changes code or tests: the
+    full check (727 Rust tests, 672 Node tests; `cargo audit` not
+    installed on `continuum`, run by CI); both end-to-end suites in full
+    with the parity verdict PASS (external 48 of 48, embedded 51 of 51,
+    at `8b16a46`, after which only unit-test code changed); the package
+    built from it for `continuum`
+    (`~/dev/vela-agent-keep/pkg/vela-1.0.65-1-x86_64.pkg.tar.zst`), whose
+    own binary passed in both players.
+  - NOT verified by anyone: this version running on macOS or Windows (it
+    is compiled there by CI, nothing more), and everything that takes
+    eyes (the plans' owner checks).
+  - Told to the owner on 2026-11-16, as the list of what only the owner
+    can do; whether and when to release is the owner's. Until the owner
+    says more, nothing is queued for the agent on the release.
 - THE EMBEDDED PLAYER IS OFFERED IN SETTINGS (2026-11-15). The owner
   ruled that day that what is built is to be usable from the app, and
   that the owner is Vela's only user (`.agents/decisions.md`; read it

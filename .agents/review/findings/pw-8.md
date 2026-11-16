@@ -314,3 +314,9 @@ the exit order in `lib.rs`, the 500 ms value, and the production call
 passing the real limits. Still not covered, as the commit said: the real
 exit handler running twice, and a wrapper `mpv_path` whose kill does not
 end the real mpv.
+
+The first of the two was repaired the same day (`382acc8`, written by
+codex, reviewed by the working agent): the waits under test run on a
+thread of their own behind a watchdog, and with the reader's wait made an
+hour again both tests fail in five seconds instead of hanging. The second
+stands as described.
