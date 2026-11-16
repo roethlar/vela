@@ -45,6 +45,10 @@
 
 ## Fixes
 
+- Send a playback report again, once, when the connection it was sent on had
+  already been closed by the server. The final report of a play could be lost
+  this way, leaving the server showing the item as playing and without its
+  last position.
 - Check the certificate of an HTTPS media server when playing. mpv's own
   window did not check it, so the stream's sign-in token was sent without
   knowing who received it. A server whose certificate mpv does not accept (a

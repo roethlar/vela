@@ -44,7 +44,12 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   fullscreen; fixed at `e64efb3`. The package on `continuum` is rebuilt
   after each fix (the plan's "How to try it" names the commit). Expect
   more such reports; each is fixed as it comes (decision of 2026-11-14
-  on what is obviously broken).
+  on what is obviously broken). 2026-11-16: the embedded player answers
+  the mouse (`013cee3`; the owner asked for "all the mouse actions that
+  make sense for standard video player apps", the set is in the plan's
+  log), and testing it uncovered that a play's final report to the
+  server could be lost to a closed connection, in both players; fixed
+  at `e50aa83`.
 - WHERE THE RUN OF 2026-11-12 TO 14 ENDED (2026-11-14, evening). The
   agent's part of both approved plans is done and every codex review of
   it is closed (`.agents/review/index.md` has no open finding). `main` at

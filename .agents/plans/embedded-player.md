@@ -820,7 +820,7 @@ and removes nothing from it.
 How to try it (since 2026-11-15): install a package that carries the
 library, choose Settings, Player, Video player, "Vela's window
 (experimental)", save, and restart Vela. On `continuum` such a package,
-built from `e64efb3` by `scripts/build.sh --with-libmpv` and checked (the
+built from `013cee3` by `scripts/build.sh --with-libmpv` and checked (the
 log's last entries say how), is
 `~/dev/vela-agent-keep/pkg/vela-1.0.64-1-x86_64.pkg.tar.zst`; installing
 it is `sudo pacman -U` of that file, which is the owner's to run. A
@@ -2128,3 +2128,69 @@ Not compared by eye.
 **The package** was rebuilt at `e64efb3` (sha256 `b27e7ce1...2b9b05e2`); its check
 passed, and the unpacked package's own binary passed `embeddedcontrols`,
 `embeddedtracks` and `playback` in the embedded player. The full run of both suites at that commit, each building its app, passed everything: external 48 of 48, embedded 51 of 51, parity verdict PASS.
+
+### 2026-11-16 — the mouse (`013cee3`), and a lost final report found on the way (`e50aa83`)
+
+**The request.** The owner: "add all the mouse actions that make sense
+for standard video player apps." The set was the agent's to settle, from
+mpv 0.41's own defaults (`/usr/share/doc/mpv/input.conf`: double-click
+fullscreen, right-click pause, wheel volume 2, wheel left/right seek 10)
+and what players in general do:
+
+| Mouse | Does |
+| --- | --- |
+| click on the picture | play/pause, after 250 ms, so a double-click never pauses |
+| double-click | fullscreen, however far apart the desktop lets the clicks be |
+| right-click on the picture | play/pause at once; no browser menu anywhere in the player |
+| wheel up/down | volume, 2 points a notch |
+| wheel left/right | seek 10 seconds |
+| wheel over the seek bar / the volume slider or mute | seek / volume |
+| pointing at the seek bar | the time at that point |
+| middle, back, forward | nothing |
+
+Rules are pure functions in `src/lib/playerControls.ts`; `docs/usage.md`
+lists the actions. Written by codex in three passes, each read and run in
+the real window by the working agent.
+
+**What the real window showed, and changed.**
+
+- A slow double-click (second click after the 250 ms wait, still a
+  double-click to the desktop) paused, resumed and did not go fullscreen.
+  Now the desktop's `dblclick` always toggles fullscreen, and a pause the
+  first click already made is toggled back.
+- After a right-click, this WebKitGTK also delivers a trusted `click`
+  with button 0 that nobody pressed (and no `pointerup`; a second
+  right-click arrives without a `pointerdown`). The first version resumed
+  a quarter of a second after every right-click pause because of it. A
+  click now counts only when a primary press on the picture began it.
+  Whether a real mouse does the same is not known; the rule is right
+  either way.
+- WebKitGTK's WebDriver delivers each wheel action followed by its exact
+  opposite and collapses a burst to one pair, so the scenario sends
+  WheelEvents made in the page. It also showed WebKit's scale: one notch
+  (wheelDelta 120) is 40 pixels. **No test drives a real wheel.**
+
+**The lost report.** The longer scenario then failed, 4 runs of 6, at a
+leg after the mouse's: Vela's final "stopped" report never reached the
+mock server. It was not the mouse. The tracker thread's HTTP client
+pools its connection between the reports it sends every five seconds and
+cannot notice the server closing it; the next report written into the
+dead connection was lost (`IncompleteMessage`) and never sent again.
+The mock closes an idle connection after five seconds, so where a play's
+end fell decided it. Real servers close idle connections too, later.
+Fixed at `e50aa83` for both trackers: a report that fails at the
+connection level is sent once more through a new client; what is logged
+no longer names the URL. With it the variant that failed 5 of 5 passes 5
+of 5. This fault is older than the embedded player and touches the
+external one equally; it may be behind stop-report timeouts recorded as
+flakes before.
+
+**Checked.** The full check at `e50aa83` (697 Rust tests, both clippy
+runs, the 1.89 check); `npm run check` (582 tests) and the build at
+`013cee3`; `embeddedcontrols`, 6 runs of 6. The package was rebuilt at
+`013cee3` (sha256 `8e003dee...a577962a`); its check passed and the unpacked package's
+own binary passed `embeddedcontrols`, `embeddedtracks` and `playback` in
+the embedded player. The full run of both suites at `013cee3`, each building its app, passed everything: external 48 of 48, embedded 51 of 51, parity verdict PASS.
+
+**Not seen.** A real mouse on the owner's desktop: the size of a wheel
+notch there, whether the stray click appears, how the 250 ms wait feels.
