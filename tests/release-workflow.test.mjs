@@ -65,11 +65,11 @@ test("release artifacts fail closed through a final inventory", () => {
   assert.match(workflow, /find "\$root" -type f -name "\$pattern"/);
   assert.match(workflow, /inventory:\n[\s\S]*needs: \[bundle, arch\]/);
   assert.match(workflow, /uses: actions\/download-artifact@v8/);
-  // Both package jobs wait for the audit and for the libmpv set that the
-  // Linux packages carry (tests/libmpv-packaging.test.mjs holds that part).
+  // Package jobs wait for audits and for the sets their platforms carry
+  // (tests/libmpv-packaging.test.mjs also holds the Linux part).
   assert.match(
     workflow,
-    /  bundle:\n    needs: \[npm-audit, cargo-audit, libmpv\]\n    permissions:\n      contents: write/,
+    /  bundle:\n    needs: \[npm-audit, cargo-audit, libmpv, libmpv-windows\]\n    permissions:\n      contents: write/,
   );
   assert.match(workflow, /  arch:\n    name: Arch package\n    needs: \[npm-audit, cargo-audit, libmpv\]\n/);
   // A known vulnerability fails the release as it fails CI, in either ecosystem.
@@ -88,6 +88,69 @@ test("release artifacts fail closed through a final inventory", () => {
     workflow,
     /gh release upload "\$GITHUB_REF_NAME"[\s\S]*--repo "\$GITHUB_REPOSITORY"[\s\S]*--clobber/,
   );
+});
+
+function releaseJob(source, name) {
+  const body = source.match(new RegExp(`^  ${name}:\\n[\\s\\S]*?(?=^  [a-z][a-z0-9_-]*:\\n|(?![\\s\\S]))`, 'm'))?.[0];
+  assert.ok(body, `missing ${name} job`);
+  return body.split('\n').filter((line) => !/^\s*#/.test(line)).join('\n');
+}
+
+function windowsReleaseContracts(source) {
+  const set = releaseJob(source, 'libmpv-windows');
+  const ciSet = releaseJob(ci, 'libmpv-windows');
+  const cache = (job) => job.match(/^          key: (.+)$/m)?.[1];
+  assert.match(set, /^    needs: \[npm-audit, cargo-audit\]$/m, 'Windows set waits for audits');
+  assert.match(set, /^    runs-on: ubuntu-22\.04$/m, 'Windows set build baseline');
+  assert.ok(cache(set), 'Windows cache key exists');
+  assert.equal(cache(set), cache(ciSet), 'Windows release uses CI cache key');
+  assert.match(set, /uses: actions\/cache@v6\n        with:\n          path: \.libmpv\/out\/libmpv-windows-x86_64\n/, 'Windows cache path');
+  assert.match(set, /if: steps\.cache\.outputs\.cache-hit != 'true'\n        run: bash scripts\/build-libmpv-windows\.sh --container\n/, 'Windows cache miss builds from pins');
+  assert.match(set, /- name: Check the manifest\n        run: python3 -B packaging\/libmpv\/check-libmpv-windows\.py \.libmpv\/out\/libmpv-windows-x86_64 --manifest-only\n/, 'cached and new Windows sets checked');
+  assert.match(set, /uses: actions\/upload-artifact@v7\n        with:\n          name: libmpv-windows-x86_64\n          if-no-files-found: error\n          path: \.libmpv\/out\/libmpv-windows-x86_64\n/, 'Windows set handed off');
+  assert.doesNotMatch(set, /continue-on-error|tauri-action/, 'Windows set must pass before packaging');
+
+  const bundle = releaseJob(source, 'bundle');
+  assert.match(bundle, /^    needs: \[npm-audit, cargo-audit, libmpv, libmpv-windows\]$/m, 'bundle waits for both sets');
+  const download = '- name: Fetch the libmpv set (Windows)';
+  assert.match(bundle, /- name: Fetch the libmpv set \(Windows\)\n        if: matrix\.os == 'windows-latest'\n        uses: actions\/download-artifact@v8\n        with:\n          name: libmpv-windows-x86_64\n          path: \.libmpv\/out\/libmpv-windows-x86_64\n/, 'Windows download feeds overlay source');
+  assert.match(bundle, /- uses: actions\/setup-python@v6\n        if: runner\.os == 'Windows'\n        with:\n          python-version: '3\.13'\n          architecture: x64\n/, 'Windows playback requires x64 Python');
+  assert.ok(bundle.includes("(matrix.os == 'windows-latest' && '--bundles nsis,msi --config src-tauri/tauri.libmpv-windows.conf.json' ||"), 'Windows build must pass overlay and both bundle types');
+  const build = '- uses: tauri-apps/tauri-action@v1';
+  const check = '- name: Require the libmpv set in every Windows installer';
+  const upload = '- name: Upload the Windows installers';
+  assert.match(bundle, /- name: Require the libmpv set in every Windows installer\n        if: runner\.os == 'Windows'\n        shell: pwsh\n        run: \|\n          python -B packaging\/libmpv\/check-package-windows\.py --set \.libmpv\/out\/libmpv-windows-x86_64 --bundle-dir '\$\{\{ matrix\.bundle_dir \}\}'\n/, 'every Windows installer must be checked');
+  assert.ok(bundle.indexOf(download) < bundle.indexOf(build), 'download precedes build');
+  assert.ok(bundle.indexOf(build) < bundle.indexOf(check), 'installer check follows build');
+  assert.ok(bundle.indexOf(check) < bundle.indexOf(upload), 'installer check precedes upload');
+  assert.doesNotMatch(bundle, /continue-on-error:|if:.*always\(/, 'package failures cannot be ignored');
+  for (const [key, value] of [['tagName', 'github.ref_name'], ['releaseName', "format('Vela {0}', github.ref_name)"]]) {
+    assert.ok(bundle.includes(`${key}: \${{ startsWith(github.ref, 'refs/tags/') && matrix.os == 'macos-latest' && ${value} || '' }}`), 'only macOS may attach before package checks');
+  }
+  const inventory = releaseJob(source, 'inventory');
+  assert.match(inventory, /needs: \[bundle, arch\]/, 'inventory waits for package checks');
+  assert.ok(inventory.includes("\\( -name '*.msi' -o -name '*-setup.exe' \\) -print0 | sort -z"), 'inventory collects both checked Windows formats');
+  assert.ok(inventory.includes('[ "${#windows[@]}" -eq 2 ] || {'), 'inventory requires both Windows installers');
+  assert.ok(inventory.includes('            "${windows[@]}" \\\n'), 'inventory attaches checked Windows installers');
+}
+
+test('Windows release builds once, packages both installers, and checks them before upload', () => {
+  windowsReleaseContracts(workflow);
+});
+
+test('Windows release guards reject a missing overlay, download, check or dependency (red proof)', () => {
+  const breaks = [
+    ["--bundles nsis,msi --config src-tauri/tauri.libmpv-windows.conf.json", '--bundles nsis,msi', /must pass overlay/],
+    ['- name: Fetch the libmpv set (Windows)', '- name: Removed Windows download', /download feeds/],
+    ['python -B packaging/libmpv/check-package-windows.py --set .libmpv/out/libmpv-windows-x86_64 --bundle-dir', 'echo skipped --bundle-dir', /installer must be checked/],
+    ['needs: [npm-audit, cargo-audit, libmpv, libmpv-windows]', 'needs: [npm-audit, cargo-audit, libmpv]', /waits for both sets/],
+    ["matrix.os == 'macos-latest' && github.ref_name", "matrix.os != 'ubuntu-22.04' && github.ref_name", /only macOS may attach/],
+    ['            "${windows[@]}" \\\n', '', /attaches checked Windows/],
+  ];
+  for (const [before, after, reason] of breaks) {
+    assert.ok(workflow.includes(before), `mutation must apply: ${before}`);
+    assert.throws(() => windowsReleaseContracts(workflow.replace(before, after)), reason);
+  }
 });
 
 test("the Arch package is built without root and uploaded", () => {

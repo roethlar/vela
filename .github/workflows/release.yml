@@ -13,8 +13,9 @@ name: Release
 # one it will load (docs/development.md, "The shipped libmpv set"). The
 # `libmpv` job builds it once from the pins; the two jobs that make Linux
 # packages put it in, and each then proves it is whole in every package it
-# made. macOS and Windows packages carry none of it: there is no embedded
-# player there yet.
+# made. The `libmpv-windows` job likewise builds the Windows DLL set once;
+# the Windows leg packages and checks it in both NSIS and MSI installers.
+# macOS packaging of its library set is still pending.
 #
 # Code signing: the macOS app is signed with a Developer ID certificate and
 # notarized through App Store Connect when the secrets for it are set, and
@@ -96,8 +97,33 @@ jobs:
           if-no-files-found: error
           path: .libmpv/out/libmpv
 
+  libmpv-windows:
+    name: Shipped libmpv set (Windows x86_64 cross build)
+    needs: [npm-audit, cargo-audit]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+      # Identical to CI's libmpv-windows cache: reuse the pinned build.
+      - name: Restore the built set
+        id: cache
+        uses: actions/cache@v6
+        with:
+          path: .libmpv/out/libmpv-windows-x86_64
+          key: libmpv-windows-x86_64-${{ hashFiles('scripts/build-libmpv-windows.sh', 'packaging/libmpv/versions.txt', 'packaging/libmpv/Containerfile.windows', 'packaging/libmpv/windows-license-notes.txt') }}
+      - name: Build the Windows set
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: bash scripts/build-libmpv-windows.sh --container
+      - name: Check the manifest
+        run: python3 -B packaging/libmpv/check-libmpv-windows.py .libmpv/out/libmpv-windows-x86_64 --manifest-only
+      - name: Hand the set to the Windows package job
+        uses: actions/upload-artifact@v7
+        with:
+          name: libmpv-windows-x86_64
+          if-no-files-found: error
+          path: .libmpv/out/libmpv-windows-x86_64
+
   bundle:
-    needs: [npm-audit, cargo-audit, libmpv]
+    needs: [npm-audit, cargo-audit, libmpv, libmpv-windows]
     permissions:
       contents: write
     strategy:
@@ -144,6 +170,24 @@ jobs:
         with:
           name: libmpv-linux-x86_64
           path: .libmpv/out/libmpv
+
+      - name: Fetch the libmpv set (Windows)
+        if: matrix.os == 'windows-latest'
+        uses: actions/download-artifact@v8
+        with:
+          name: libmpv-windows-x86_64
+          path: .libmpv/out/libmpv-windows-x86_64
+
+      - uses: actions/setup-python@v6
+        if: runner.os == 'Windows'
+        with:
+          python-version: '3.13'
+          architecture: x64
+
+      - name: Check Windows packaging prerequisites
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: python -B packaging/libmpv/check-package-windows.py --set .libmpv/out/libmpv-windows-x86_64 --preflight
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -244,11 +288,11 @@ jobs:
       # are absent rather than empty on a secretless run. Nothing signs the
       # Windows installers.
       #
-      # The Linux leg builds and does NOT attach: its bundles go to the draft
+      # The Linux and Windows legs build and do NOT attach: bundles go to the draft
       # release from the inventory job, after the libmpv check below has
       # passed every one of them. (tauri-action uploads in the step that
       # builds, which would put a bundle on the draft before it was checked.)
-      # macOS and Windows attach here as before, and so create the draft.
+      # macOS attaches here as before, and so creates the draft.
       #
       # NO_STRIP and APPIMAGE_EXTRACT_AND_RUN are for the AppImage tooling and
       # mean nothing elsewhere: linuxdeploy's own `strip` must not rewrite the
@@ -260,13 +304,12 @@ jobs:
           NO_STRIP: '1'
           APPIMAGE_EXTRACT_AND_RUN: '1'
         with:
-          # Linux: the overlay that adds the libmpv set to the bundles'
-          # resources (what `scripts/build.sh --with-libmpv` passes).
-          args: ${{ matrix.target && format('--target {0}', matrix.target) || (matrix.os == 'ubuntu-22.04' && '--config src-tauri/tauri.libmpv.conf.json' || '') }}
+          # Each platform's overlay maps its own set into libmpv/.
+          args: ${{ matrix.target && format('--target {0}', matrix.target) || (matrix.os == 'windows-latest' && '--bundles nsis,msi --config src-tauri/tauri.libmpv-windows.conf.json' || (matrix.os == 'ubuntu-22.04' && '--config src-tauri/tauri.libmpv.conf.json' || '')) }}
           # Only create/attach a release when triggered by a v* tag, and never
-          # from the Linux leg (see above).
-          tagName: ${{ startsWith(github.ref, 'refs/tags/') && matrix.os != 'ubuntu-22.04' && github.ref_name || '' }}
-          releaseName: ${{ startsWith(github.ref, 'refs/tags/') && matrix.os != 'ubuntu-22.04' && format('Vela {0}', github.ref_name) || '' }}
+          # from the Linux or Windows legs (see above).
+          tagName: ${{ startsWith(github.ref, 'refs/tags/') && matrix.os == 'macos-latest' && github.ref_name || '' }}
+          releaseName: ${{ startsWith(github.ref, 'refs/tags/') && matrix.os == 'macos-latest' && format('Vela {0}', github.ref_name) || '' }}
           releaseDraft: true
 
       - name: Require the universal macOS DMG
@@ -344,6 +387,12 @@ jobs:
               throw "Required Windows artifact is missing: $pattern"
             }
           }
+
+      - name: Require the libmpv set in every Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          python -B packaging/libmpv/check-package-windows.py --set .libmpv/out/libmpv-windows-x86_64 --bundle-dir '${{ matrix.bundle_dir }}'
 
       - name: Upload the macOS bundle
         if: runner.os == 'macOS'
@@ -472,7 +521,7 @@ jobs:
       contents: write
     steps:
       # Only what is released. The libmpv set travels between jobs as an
-      # artifact too, and is inside the Linux packages, not beside them.
+      # artifact too, and is inside the Linux and Windows packages, not beside them.
       - uses: actions/download-artifact@v8
         with:
           pattern: vela-*
@@ -514,10 +563,10 @@ jobs:
           if-no-files-found: error
           path: artifacts/SHA256SUMS
 
-      # The draft exists by now: the macOS and Windows legs of `bundle` made
-      # it. The Linux bundles are attached here and not by their own job, so
+      # The draft exists by now: the macOS leg of `bundle` made
+      # it. The Linux and Windows bundles are attached here, so
       # that none reaches the draft before its libmpv check has passed.
-      - name: Attach the Linux bundles, the Arch package and checksums to tagged draft
+      - name: Attach the checked Linux and Windows bundles, Arch package and checksums to tagged draft
         if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -532,8 +581,17 @@ jobs:
             echo "Expected the AppImage, the deb and the rpm; found ${#linux[@]} Linux bundles." >&2
             exit 1
           }
+          mapfile -d '' windows < <(
+            find artifacts/vela-windows -type f \
+              \( -name '*.msi' -o -name '*-setup.exe' \) -print0 | sort -z
+          )
+          [ "${#windows[@]}" -eq 2 ] || {
+            echo "Expected the MSI and NSIS installers; found ${#windows[@]} Windows bundles." >&2
+            exit 1
+          }
           gh release upload "$GITHUB_REF_NAME" \
             "${linux[@]}" \
+            "${windows[@]}" \
             artifacts/vela-arch/*.pkg.tar.zst \
             artifacts/SHA256SUMS \
             --repo "$GITHUB_REPOSITORY" \

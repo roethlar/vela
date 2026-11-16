@@ -112,7 +112,7 @@ place after it was found.
 ## The shipped libmpv set
 
 This is the library behind the experimental embedded player, which
-Settings → Player → Video player offers. The Linux packages the release
+Settings → Player → Video player offers. The Linux and Windows packages the release
 workflow builds carry it; a package you build yourself carries it when you
 ask, and a development build can be pointed at it: see "Trying the embedded
 player" and "Packaging the set" below. By default playback still runs the
@@ -121,8 +121,8 @@ system's `mpv` program as described under Architecture.
 The embedded player will not use whichever mpv library a machine happens to
 have. Vela builds one pinned set of libraries (mpv, FFmpeg, libplacebo,
 libass, FreeType, HarfBuzz, FriBidi, dav1d, Lua and uchardet) and ships it
-inside its Linux packages. The set is always an LGPL build, and every library
-in it is a separate shared object.
+inside its Linux packages and Windows installers. The set is always an LGPL
+build, with mpv and its media libraries separate from Vela's executable.
 
 ```bash
 scripts/build-libmpv.sh --container     # needs podman or docker; several minutes
@@ -138,7 +138,8 @@ CI builds the same set in its `libmpv` job and uploads it as the
 `libmpv-linux-x86_64` artifact; `gh run download --name libmpv-linux-x86_64`
 fetches it without building.
 
-For Windows x86_64, run `bash scripts/build-libmpv-windows.sh --container`.
+For Windows x86_64, run `bash scripts/build-libmpv-windows.sh --container`
+on Linux (or in WSL with a Linux container engine).
 The separate recipe uses Debian Trixie's mingw-w64 cross compiler and writes
 `.libmpv/out/libmpv-windows-x86_64/`: `libmpv-2.dll`, its non-system DLL
 dependencies, licences and the same file-hash/version manifest format. It
@@ -153,8 +154,9 @@ Windows and runs `python -B packaging/libmpv/check-libmpv-windows.py DIR`.
 That check verifies the manifest before loading, restricts DLL search to
 the set and Windows, audits loaded module paths, reports the client API and
 plays a two-second lavfi pattern to EOF with null outputs. It does not
-exercise D3D11 drawing, HDR, hardware decoding or HTTPS, nor does this build
-recipe wire the embedded player into the Windows app or installer.
+exercise D3D11 drawing, HDR, hardware decoding or HTTPS. The Windows host
+loads this set from the installed app; the release workflow packages it into
+both installers (see "Windows installers with the set" below).
 
 For macOS 11+, run `bash packaging/libmpv/macos/prepare-tools.sh`, then
 `bash scripts/build-libmpv-macos.sh` on Apple Silicon. The same Linux pins
@@ -286,7 +288,7 @@ reached, in each player, by a scenario that passed there.
 
 No package contains the set unless its builder asks for it. A default build
 of the deb, rpm, AppImage or Arch package by `scripts/build.sh` is the package
-it has always been. The release workflow asks, for every Linux package it
+it has always been. The release workflow asks, for every Linux and Windows package it
 builds ("In the release workflow", below); CI builds no package. On your own
 machine the way to ask is a switch on
 the build script, for trying the embedded player in an installed Vela. (It
@@ -406,9 +408,67 @@ fails and copies nothing. If makepkg
 writes its packages under an ending the check does not know (it knows
 `.pkg.tar.zst` and `.pkg.tar.xz`), the check fails the package and says so.
 
+#### Windows installers with the set
+
+On x64 Windows, install the usual Tauri prerequisites (MSVC Build Tools,
+WebView2, the `x86_64-pc-windows-msvc` Rust toolchain and the Node/npm versions
+accepted by `package.json`), plus PowerShell 7, x64 Python 3.13 (`python` on
+PATH), and 7-Zip (`7z` on PATH or the normal `Program Files/7-Zip` location).
+Windows supplies `msiexec`; lessmsi is not needed.
+
+From the repo root, obtain the `libmpv-windows-x86_64` artifact from a
+successful CI run matching this checkout. GitHub CLI prompts for a run:
+
+```powershell
+gh run download --repo roethlar/vela --name libmpv-windows-x86_64 --dir .libmpv/out/libmpv-windows-x86_64
+pwsh -NoProfile -File scripts/build-windows.ps1
+```
+
+Alternatively, cross-build the set with
+`bash scripts/build-libmpv-windows.sh --container` on Linux/WSL and copy the
+whole output directory to that same Windows path. The wrapper verifies the
+input MANIFEST and prerequisites before building, runs the toolchain check
+and `npm ci`, clears old NSIS/MSI outputs, then runs:
+
+```powershell
+npm run tauri -- build --bundles nsis,msi --config src-tauri/tauri.libmpv-windows.conf.json
+python -B packaging/libmpv/check-package-windows.py --set .libmpv/out/libmpv-windows-x86_64 --bundle-dir src-tauri/target/release/bundle
+```
+
+The wrapper stops on any failed command. It leaves the unsigned installers
+under `src-tauri/target/release/bundle/nsis/` and `msi/`, with no copy to
+`dist/`. It expects the standard Cargo host output directory (unset
+`CARGO_TARGET_DIR` and `CARGO_BUILD_TARGET`). The older `scripts/build.ps1`
+continues to build without the set.
+
+The overlay maps the **whole directory**, including `licenses/` and
+`MANIFEST`, from `../.libmpv/out/libmpv-windows-x86_64/` to `libmpv/`.
+Tauri's Windows resource directory is the executable's directory (confirmed
+in the locked Tauri 2.11.5 / tauri-utils 2.9.3 source), so the installed
+library is `<install directory>/libmpv/libmpv-2.dll`, with `libmpv/` beside
+Vela.exe. The base resource map is merged, retaining the mpv scripts.
+The overlay's licence metadata follows `windows-license-notes.txt`, including
+the Windows combined library's LGPL-3.0-or-later and its static support
+notices; Vela's own licence stays MIT.
+
+`check-package-windows.py` requires both formats and checks **every** matching
+installer. NSIS is unpacked by `7z x`; MSI is expanded with
+`msiexec /a ... /qn /norestart TARGETDIR=... /L*V ...` into a fresh temporary
+administrative image. It does not run the NSIS installer or install Vela as a
+product. An extraction error fails the check; an MSI failure prints its log.
+The check locates exactly one Vela.exe, refuses links/reparse points, and
+requires `libmpv/` in that executable's directory. Its MANIFEST must be
+byte-identical to the input set's, and the existing Windows manifest checker
+must accept every file's SHA-256 and size, the licences and component pins,
+with no extra files. Only then does a fresh Python process run
+`check-libmpv-windows.py` on that **unpacked** set to load and play to EOF.
+Each installer gets its own process and temporary directory; both are
+finished before the next is checked. This proves headless loading/playback,
+not D3D11 drawing, HDR, hardware decoding, HTTPS or interactive installation.
+
 #### In the release workflow
 
-`.github/workflows/release.yml` puts the set into every Linux package it
+`.github/workflows/release.yml` puts the set into every Linux and Windows package it
 builds (the owner's ruling of 2026-11-16, `.agents/decisions.md`):
 
 - Its `libmpv` job builds the set from the release commit's pins, or restores
@@ -429,7 +489,18 @@ builds (the owner's ruling of 2026-11-16, `.agents/decisions.md`):
   runs the check on the package.
 - Both jobs install what the check needs: `bsdtar`, Python 3, `unsquashfs`
   for the AppImage, and the system libraries the set loads.
-- macOS and Windows packages carry none of it.
+- The `libmpv-windows` job runs after the audits, on `ubuntu-22.04`. It
+  restores CI's Windows cache (the identical key), builds the pinned set on
+  a miss, and always runs `check-libmpv-windows.py --manifest-only` before
+  uploading the `libmpv-windows-x86_64` artifact. `bundle` waits for it.
+- The Windows leg downloads that artifact into
+  `.libmpv/out/libmpv-windows-x86_64`, uses x64 Python 3.13, and passes
+  `--bundles nsis,msi --config src-tauri/tauri.libmpv-windows.conf.json` to
+  Tauri. It then runs `check-package-windows.py` against every installer,
+  before uploading `vela-windows`. As for Linux, only `inventory` attaches
+  these checked installers to a tagged draft. Manual runs publish nothing.
+  The Windows installers remain unsigned.
+- macOS packaging of its library set is still pending.
 
 `tests/libmpv-packaging.test.mjs` holds those lines of the workflow as far as
 words can: a step that brought the set in, or left it out, without the names

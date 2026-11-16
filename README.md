@@ -140,8 +140,13 @@ included under
 [`src-tauri/resources/mpv-scripts/`](src-tauri/resources/mpv-scripts/PROVENANCE.md).
 
 The experimental embedded player uses an mpv library that comes with Vela
-rather than the system's. Vela's Linux packages (x86_64) carry it: an LGPL
-build of mpv and of the libraries it needs, as separate shared libraries,
-with each component's licence text. It is built from the sources pinned in
+rather than the system's. Vela's Linux packages and Windows NSIS/MSI
+installers (x86_64) carry it: an LGPL build of mpv and the libraries it
+needs, as separate shared libraries, with each component's licence text
+and a file-hash `MANIFEST`. On Windows the set is in `libmpv/` beside
+Vela.exe. It is built from the sources pinned in
 [`packaging/libmpv/versions.txt`](packaging/libmpv/versions.txt) by
-[`scripts/build-libmpv.sh`](scripts/build-libmpv.sh).
+[`scripts/build-libmpv.sh`](scripts/build-libmpv.sh) and
+[`scripts/build-libmpv-windows.sh`](scripts/build-libmpv-windows.sh).
+For local Windows installers with the set, see
+[the development guide](docs/development.md#windows-installers-with-the-set).

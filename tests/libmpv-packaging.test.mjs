@@ -1,4 +1,4 @@
-// Packaging the embedded player's libmpv set into the Linux packages
+// Packaging the embedded player's libmpv sets into Linux and Windows packages
 // (.agents/plans/embedded-player.md, "libmpv is shipped with Vela" and
 // Slice 3).
 //
@@ -36,6 +36,8 @@ const tauriConfText = read('src-tauri/tauri.conf.json');
 const tauriConf = JSON.parse(tauriConfText);
 const overlayPath = 'src-tauri/tauri.libmpv.conf.json';
 const overlay = JSON.parse(read(overlayPath));
+const windowsOverlayPath = 'src-tauri/tauri.libmpv-windows.conf.json';
+const windowsOverlay = JSON.parse(read(windowsOverlayPath));
 const packageJson = JSON.parse(read('package.json'));
 const buildScript = read('scripts/build.sh');
 const pkgbuild = read('packaging/arch/PKGBUILD');
@@ -85,21 +87,23 @@ test('a default build packages no part of the libmpv set', () => {
   // that file has three spellings: tauri.linux.conf.json, the same in .json5,
   // and Tauri.linux.toml. The set must not come in through any of them, so
   // every file of src-tauri/ whose name begins with "tauri", in either case,
-  // is read here. The overlay is the one exception, and it must not have a
+  // is read here. Explicit overlays are the exceptions; none may have a
   // name Tauri picks up by itself.
   // The overlay is told apart by its file name and not by a joined path: a
   // joined path has the separator of the machine the test runs on, and on
   // Windows it would never equal the name written here with a slash.
-  const overlayName = overlayPath.split('/').pop();
+  const overlayNames = [overlayPath, windowsOverlayPath].map((name) => name.split('/').pop());
   const inspected = [];
   for (const entry of fs.readdirSync(path.join(repoRoot, 'src-tauri'), { withFileTypes: true })) {
-    if (entry.isDirectory() || !/^tauri/i.test(entry.name) || entry.name === overlayName) continue;
+    if (entry.isDirectory() || !/^tauri/i.test(entry.name) || overlayNames.includes(entry.name)) continue;
     inspected.push(entry.name);
     assert.doesNotMatch(read(`src-tauri/${entry.name}`), /libmpv/i, `${entry.name} must not package the set`);
   }
   assert.ok(inspected.includes('tauri.conf.json'), 'the configuration every build uses was not among the files read');
-  assert.doesNotMatch(overlayName, /^tauri\.(linux|windows|macos|android|ios)\.conf\.json5?$/i);
-  assert.doesNotMatch(overlayName, /^tauri(\.(linux|windows|macos|android|ios))?\.toml$/i);
+  for (const overlayName of overlayNames) {
+    assert.doesNotMatch(overlayName, /^tauri\.(linux|windows|macos|android|ios)\.conf\.json5?$/i);
+    assert.doesNotMatch(overlayName, /^tauri(\.(linux|windows|macos|android|ios))?\.toml$/i);
+  }
 
   // The commands a default build runs name neither the overlay nor the
   // variable the PKGBUILD reads.
@@ -155,6 +159,44 @@ test('the overlay adds the set, and only the set, where the loader reads it', ()
   const base = tauriConf.bundle.resources;
   assert.equal(Object.prototype.toString.call(base), '[object Object]');
   assert.ok(!Object.keys(base).includes(source) && !Object.values(base).includes(target));
+});
+
+test('the Windows overlay carries the whole set beside Vela.exe with the recorded licences', () => {
+  assert.deepEqual(windowsOverlay, {
+    bundle: {
+      license: `${tauriConf.bundle.license} AND LGPL-3.0-or-later AND ISC AND FTL AND MIT-Modern-Variant AND BSD-2-Clause AND BSD-3-Clause AND MPL-1.1 AND Apache-2.0 AND Zlib AND (GPL-3.0-or-later WITH GCC-exception-3.1)`,
+      resources: { '../.libmpv/out/libmpv-windows-x86_64/': 'libmpv/' },
+    },
+  });
+  has(loader, '_ => resource_dir.join("libmpv"),', 'Windows loader uses the resources directory');
+  has(loader, 'const WINDOWS_LIBRARY_FILE: &str = "libmpv-2.dll";', 'Windows loader uses this DLL');
+  has(read('scripts/build-libmpv-windows.sh'), 'OUT="$LIBMPV_ROOT/out/libmpv-windows-x86_64"', 'overlay names the built set');
+  assert.equal(Object.prototype.toString.call(tauriConf.bundle.resources), '[object Object]', 'merging the overlay preserves the base mpv scripts');
+});
+
+test('the local Windows wrapper builds both installers with the overlay and checks before success', () => {
+  const script = code(read('scripts/build-windows.ps1'));
+  has(script, "$set = '.libmpv/out/libmpv-windows-x86_64'", 'local build uses the overlay input');
+  has(script, "$check = 'packaging/libmpv/check-package-windows.py'", 'local build uses the release checker');
+  const preflight = "Invoke-Checked python @('-B', $check, '--set', $set, '--preflight')";
+  const build = "Invoke-Checked npm @('run', 'tauri', '--', 'build', '--bundles', 'nsis,msi',\n        '--config', 'src-tauri/tauri.libmpv-windows.conf.json')";
+  const check = "Invoke-Checked python @('-B', $check, '--set', $set, '--bundle-dir', $bundleDir)";
+  for (const command of [preflight, build, check]) has(script, command, 'local packaging command');
+  assert.ok(script.indexOf(preflight) < script.indexOf(build), 'prerequisites before building');
+  assert.ok(script.indexOf(build) < script.indexOf(check), 'check the finished installers');
+  assert.ok(script.indexOf(check) < script.indexOf('Write-Host "Both checked installers'), 'success follows check');
+  has(script, 'if ($LASTEXITCODE -ne 0) {\n        throw', 'a failed native command stops the wrapper');
+});
+
+test('Windows package verification rejects broken payloads and invokes the shipped-byte playback check', () => {
+  // Real hashes/manifest checking on synthetic payloads; Windows extraction
+  // commands and playback are mocked. Real installer acceptance runs only in
+  // release.yml on Windows. Python is also needed by the Linux package tests.
+  const python = process.platform === 'win32' ? 'python' : 'python3';
+  const run = spawnSync(python, ['-I', '-B', 'tests/libmpv-windows-package.py', '-v'], {
+    cwd: repoRoot, encoding: 'utf8', timeout: 30000,
+  });
+  assert.equal(run.status, 0, `${run.error ?? ''}\n${run.stdout}\n${run.stderr}`);
 });
 
 test('the package check looks where the loader looks, for the library the loader loads', () => {
@@ -282,8 +324,8 @@ test('the Arch package installs the set where the loader reads it, with its lice
 test('the release workflow puts the set into every Linux package and checks each one; CI packages none', () => {
   // The owner's step, taken on 2026-11-16 with the Settings control already
   // in (.agents/decisions.md): released Linux packages carry the set. What
-  // must then hold is that every one of them does, whole, and that nothing
-  // else does. (Until that day this test held the opposite: neither workflow
+  // must then hold is that every Linux package does, whole, while CI builds
+  // no Vela package. (Until that day this test held the opposite: neither workflow
   // mentioned the set outside CI's own job.)
   const release = read('.github/workflows/release.yml');
   const ci = read('.github/workflows/ci.yml');
@@ -310,7 +352,7 @@ test('the release workflow puts the set into every Linux package and checks each
   // The bundles: only the Linux leg fetches the set and is given the
   // overlay, and every bundle it makes is checked for the whole set.
   const bundle = jobOf(release, 'bundle');
-  assert.match(bundle, /^    needs: \[npm-audit, cargo-audit, libmpv\]$/m);
+  assert.match(bundle, /^    needs: \[npm-audit, cargo-audit, libmpv, libmpv-windows\]$/m);
   assert.match(
     bundle,
     /- name: Fetch the libmpv set \(Linux\)\n\s+if: matrix\.os == 'ubuntu-22\.04'\n\s+uses: actions\/download-artifact@v8\n\s+with:\n\s+name: libmpv-linux-x86_64\n\s+path: \.libmpv\/out\/libmpv\n/,
@@ -354,12 +396,12 @@ test('the release workflow puts the set into every Linux package and checks each
   // tooling is told not to strip, so that it leaves the set as it is.
   has(
     bundle,
-    "tagName: ${{ startsWith(github.ref, 'refs/tags/') && matrix.os != 'ubuntu-22.04' && github.ref_name || '' }}\n",
+    "tagName: ${{ startsWith(github.ref, 'refs/tags/') && matrix.os == 'macos-latest' && github.ref_name || '' }}\n",
     'the Linux leg does not attach to the release',
   );
   has(
     bundle,
-    "releaseName: ${{ startsWith(github.ref, 'refs/tags/') && matrix.os != 'ubuntu-22.04' && format('Vela {0}', github.ref_name) || '' }}\n",
+    "releaseName: ${{ startsWith(github.ref, 'refs/tags/') && matrix.os == 'macos-latest' && format('Vela {0}', github.ref_name) || '' }}\n",
     'nor name one',
   );
   assert.match(bundle, /uses: tauri-apps\/tauri-action@v1\n\s+env:\n(?:\s+[A-Z_]+: .*\n)*?\s+NO_STRIP: '1'\n/);
