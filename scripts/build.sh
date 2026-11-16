@@ -29,11 +29,12 @@
 # mpv is intentionally NOT bundled — Vela detects it at runtime and offers to
 # install it, keeping these packages small and the player user-updatable.
 #
-# The one exception is opt-in and Linux only. Vela's embedded player
-# (experimental, and not offered anywhere in the app) does not run the mpv
-# program: it loads Vela's own build of mpv's library, the "libmpv set", from
-# the package's resources and from nowhere else. A default build does not
-# package that set and is the package it has always been. --with-libmpv
+# The one exception is Linux only. Vela's embedded player (experimental,
+# chosen in Settings) does not run the mpv program: it loads Vela's own build
+# of mpv's library, the "libmpv set", from the package's resources and from
+# nowhere else. The release workflow puts the set into every Linux package it
+# builds. A default build by this script does not, and is the package it has
+# always been. --with-libmpv
 # packages it, from .libmpv/out/libmpv (where scripts/build-libmpv.sh
 # --container leaves it) or from the directory named as --with-libmpv=DIR.
 # Every package such a build produces is then unpacked and checked by

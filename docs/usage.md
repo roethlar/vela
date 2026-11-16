@@ -111,10 +111,11 @@ What is different from mpv's own window, and why it is marked experimental:
   mpv scripts, per-script option files or key bindings.
 - The Player window setting below is about mpv's own window and does not
   apply to it.
-- Its library has to be in the package you installed. A package built with
-  `scripts/build.sh --with-libmpv` carries it
-  ([docs/development.md](development.md#packaging-the-set)); the released
-  packages do not yet. Settings says so when the library is missing.
+- Its library comes in Vela's Linux packages (AppImage, deb, rpm and Arch,
+  x86_64). A package you build yourself carries it only when it is built with
+  `scripts/build.sh --with-libmpv`
+  ([docs/development.md](development.md#packaging-the-set)). Settings says so
+  when the library is missing.
 
 The embedded player's library is an LGPL build of mpv and of the libraries it
 needs, shipped as separate shared libraries with their licence texts.

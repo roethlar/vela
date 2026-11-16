@@ -113,8 +113,8 @@ exactly where credentials can appear locally, are in
 - Emby remains experimental until it receives live-server integration testing.
 - HDR fidelity ultimately depends on mpv, its GPU backend, the display, and the
   operating system's color-management path.
-- Playing inside Vela's own window is experimental: Linux on Wayland only, off
-  by default, and not yet in the released packages. See
+- Playing inside Vela's own window is experimental: Linux on Wayland only and
+  off by default. See
   [docs/usage.md](docs/usage.md#playing-in-velas-own-window-experimental).
 
 Known issues and follow-up work are tracked in [ISSUES.md](ISSUES.md).
@@ -138,6 +138,8 @@ included under
 [`src-tauri/resources/mpv-scripts/`](src-tauri/resources/mpv-scripts/PROVENANCE.md).
 
 The experimental embedded player uses an mpv library that comes with Vela
-rather than the system's. A package that carries it contains an LGPL build of
-mpv and of the libraries it needs, as separate shared libraries, with each
-component's licence text.
+rather than the system's. Vela's Linux packages (x86_64) carry it: an LGPL
+build of mpv and of the libraries it needs, as separate shared libraries,
+with each component's licence text. It is built from the sources pinned in
+[`packaging/libmpv/versions.txt`](packaging/libmpv/versions.txt) by
+[`scripts/build-libmpv.sh`](scripts/build-libmpv.sh).

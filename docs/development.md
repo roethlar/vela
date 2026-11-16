@@ -112,11 +112,11 @@ place after it was found.
 ## The shipped libmpv set
 
 This is the library behind the experimental embedded player, which
-Settings → Player → Video player offers. No released package carries it yet,
-so by default playback runs the system's `mpv` program as described under
-Architecture. A package you build yourself can carry it, and a development
-build can be pointed at it: see "Trying the embedded player" and "Packaging
-the set" below.
+Settings → Player → Video player offers. The Linux packages the release
+workflow builds carry it; a package you build yourself carries it when you
+ask, and a development build can be pointed at it: see "Trying the embedded
+player" and "Packaging the set" below. By default playback still runs the
+system's `mpv` program as described under Architecture.
 
 The embedded player will not use whichever mpv library a machine happens to
 have. Vela builds one pinned set of libraries (mpv, FFmpeg, libplacebo,
@@ -182,9 +182,10 @@ packaging/libmpv/check-in-container.sh registry.fedoraproject.org/fedora:latest
 ### Trying the embedded player
 
 Experimental and Linux on Wayland only. Settings → Player → Video player
-offers it, and says why when it cannot be used; no released package ships its
-library yet. A package you build yourself can carry it; see "Packaging the
-set" below. The plan and its state are in `.agents/plans/embedded-player.md`.
+offers it, and says why when it cannot be used. The released Linux packages
+carry its library; a package you build yourself carries it when built with
+`--with-libmpv` (see "Packaging the set" below). The plan and its state are
+in `.agents/plans/embedded-player.md`.
 
 1. Build the set (above), or download CI's.
 2. Start a development build with the set's directory named:
@@ -242,8 +243,10 @@ reached, in each player, by a scenario that passed there.
 ### Packaging the set
 
 No package contains the set unless its builder asks for it. A default build
-of the deb, rpm, AppImage or Arch package is the package it has always been,
-and neither the release workflow nor CI asks. The way to ask is a switch on
+of the deb, rpm, AppImage or Arch package by `scripts/build.sh` is the package
+it has always been. The release workflow asks, for every Linux package it
+builds ("In the release workflow", below); CI builds no package. On your own
+machine the way to ask is a switch on
 the build script, for trying the embedded player in an installed Vela. (It
 is not the only way in: see the Arch package below.)
 
@@ -361,49 +364,50 @@ fails and copies nothing. If makepkg
 writes its packages under an ending the check does not know (it knows
 `.pkg.tar.zst` and `.pkg.tar.xz`), the check fails the package and says so.
 
-Not done yet:
+#### In the release workflow
 
-- **Released packages do not contain the set.** `.github/workflows/release.yml`
-  and `ci.yml` use none of the above, so that the switch is a decision and not
-  a side effect. `tests/libmpv-packaging.test.mjs` holds that as far as words
-  can: `release.yml` does not mention the set at all, and `ci.yml` mentions it
-  only in its `libmpv` job, which builds the set and no package. A step that
-  brought the set in without naming it would get past that test, so a change
-  to either workflow still has to be read. Switching it on is the owner's
-  step, taken together with the Settings control.
-  The release workflow will then have to:
-  1. get the set built from the release commit's pins into
-     `.libmpv/out/libmpv`. Only CI's `libmpv` job builds it today, and CI does
-     not run on a tag;
-  2. in the Linux `bundle` job, add
-     `--config src-tauri/tauri.libmpv.conf.json` to the `tauri-action`
-     arguments for Linux only, and run `check-package.sh --set
-     .libmpv/out/libmpv` on the deb, the rpm and the AppImage. `tauri-action`
-     uploads to the draft release in the same step that builds, so a failed
-     check comes after the upload unless building and uploading are split;
-  3. in the `arch` job, set `VELA_PACKAGE_LIBMPV` to the set's absolute
-     path for `npm run build:arch` (that job does not go through
-     `scripts/build.sh`) and run the check on the package;
-  4. install what the check needs on both runners: `bsdtar`, Python 3, and
-     the system libraries the set loads.
-- **CI does not run the tests of the check.** Most of
-  `tests/libmpv-packaging.test.mjs` runs `check-package.sh` on packages it
-  makes itself, and for that it needs `bsdtar`, as the check does. Where
-  `bsdtar` is missing those tests are skipped and the output says so; the one
-  that reads a real squashfs behind an ELF program also needs squashfs-tools
-  (`mksquashfs` and `unsquashfs`) and is skipped without it. `npm
-  run check` runs in the `frontend` job of `ci.yml`, which installs nothing,
-  and the software list of GitHub's `ubuntu-latest` image does not name
-  `bsdtar`. So on CI they are most likely skipped, and a green run there
-  holds nothing about the check. To have CI hold it, the `frontend` job
-  needs `sudo apt-get install -y libarchive-tools` before `npm run check`.
-  That is a change to a workflow, and so the owner's.
-- **No AppImage with the set has been built.** The check handles the format,
-  but that path has never met a real AppImage. It expects the program at
-  `usr/bin/vela` and the set at `usr/lib/Vela/libmpv` under the AppImage's own
-  root, as Tauri lays an AppImage out, and whether the AppImage tooling leaves
-  the set's libraries exactly as they are is not known. The check is what
-  will say.
+`.github/workflows/release.yml` puts the set into every Linux package it
+builds (the owner's ruling of 2026-11-16, `.agents/decisions.md`):
+
+- Its `libmpv` job builds the set from the release commit's pins, or restores
+  it from the cache that CI's job of the same name fills (the same key), proves
+  it on three clean distributions, and hands it to the two package jobs as a
+  workflow artifact. The set is never a release asset of its own: the
+  `inventory` job takes `vela-*` only.
+- The Linux leg of `bundle` gives `tauri-action` `--config
+  src-tauri/tauri.libmpv.conf.json` and then runs `check-package.sh --set
+  .libmpv/out/libmpv` on the AppImage, the deb and the rpm. `tauri-action`
+  uploads in the step that builds, which is before the check, so that leg
+  does not attach to the draft release at all; the `inventory` job attaches
+  the three bundles after both package jobs have passed. No Linux bundle
+  reaches the draft unchecked. `NO_STRIP=1` keeps the AppImage tooling's own
+  `strip` away from the set's libraries, as `scripts/build.sh` does.
+- The `arch` job sets `VELA_PACKAGE_LIBMPV` to the set's absolute path for
+  `npm run build:arch` (that job does not go through `scripts/build.sh`) and
+  runs the check on the package.
+- Both jobs install what the check needs: `bsdtar`, Python 3, `unsquashfs`
+  for the AppImage, and the system libraries the set loads.
+- macOS and Windows packages carry none of it.
+
+`tests/libmpv-packaging.test.mjs` holds those lines of the workflow as far as
+words can: a step that brought the set in, or left it out, without the names
+the test knows would get past it, so a change to either workflow still has to
+be read.
+
+CI (`ci.yml`) builds the set and proves it in its own `libmpv` job, and builds
+no package. Its `frontend` job installs `bsdtar` and squashfs-tools before
+`npm run check`, so the tests of the check (most of
+`tests/libmpv-packaging.test.mjs`, which pack and unpack packages they make
+themselves) run there and are not skipped.
+
+Not known yet:
+
+- **Whether a real AppImage keeps the set as it is.** The check handles the
+  format, but until the release workflow's first run with the set that path
+  has not met a real AppImage. It expects the program at `usr/bin/vela` and
+  the set at `usr/lib/Vela/libmpv` under the AppImage's own root, as Tauri
+  lays an AppImage out. If the AppImage tooling rewrites one of the set's
+  libraries, the check fails the release and says which.
 - **The packages' licence field** (`bundle.license` in `tauri.conf.json`,
   `license=` in the PKGBUILD) still names only Vela's licence and the
   bundled script's. A package with the set carries every licence text; the

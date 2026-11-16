@@ -266,29 +266,109 @@ test('the Arch package installs the set where the loader reads it, with its lice
   );
 });
 
-test('the release and CI workflows do not package the set yet', () => {
-  // Putting the set into released packages is the owner's step, taken
-  // together with the Settings control (docs/development.md, "Packaging the
-  // set"). Until then neither workflow may opt in, by any name the opt-in has.
+test('the release workflow puts the set into every Linux package and checks each one; CI packages none', () => {
+  // The owner's step, taken on 2026-11-16 with the Settings control already
+  // in (.agents/decisions.md): released Linux packages carry the set. What
+  // must then hold is that every one of them does, whole, and that nothing
+  // else does. (Until that day this test held the opposite: neither workflow
+  // mentioned the set outside CI's own job.)
   const release = read('.github/workflows/release.yml');
   const ci = read('.github/workflows/ci.yml');
-  for (const [workflow, text] of [['release.yml', release], ['ci.yml', ci]]) {
-    assert.doesNotMatch(text, /tauri\.libmpv\.conf|with-libmpv|VELA_PACKAGE_LIBMPV|check-package/, workflow);
-  }
+  const jobOf = (text, name) =>
+    text.match(new RegExp(`^  ${name}:\\n(?<body>[\\s\\S]*?)(?=\\n  [a-z][a-z0-9_-]*:\\n|(?![\\s\\S]))`, 'm'))?.groups
+      ?.body;
+  const cacheKey = (body) => body?.match(/key: (libmpv-linux-x86_64-\$\{\{ hashFiles\([^)]*\) \}\})/)?.[1];
 
-  // The opt-in's names are not the only way in. A step can write a platform
-  // config that Tauri then merges by itself (the Windows job of release.yml
-  // already writes one), hand `tauri build` a config as inline JSON, or copy
-  // the set into the resources every build bundles. So this goes further
-  // than the names: release.yml builds every released package and has no
-  // other business with the set, and it does not mention it at all. (A step
-  // that brought the set in without ever writing "libmpv" would still not be
-  // seen here; a change to a workflow has to be read all the same.)
-  assert.doesNotMatch(release, /libmpv/i, 'release.yml');
+  // One job builds the set, on the bundles' baseline, from the cache CI
+  // fills, and proves it before any package takes it. It builds no package.
+  const set = jobOf(release, 'libmpv');
+  assert.ok(set, 'release.yml builds the set in a job of its own');
+  assert.match(set, /^    runs-on: ubuntu-22\.04$/m);
+  assert.ok(cacheKey(set), 'the set is restored by a key that hashes its inputs');
+  assert.equal(cacheKey(set), cacheKey(jobOf(ci, 'libmpv')), 'the same cache key as CI: the set CI proved');
+  assert.match(
+    set,
+    /- name: Build the set\n\s+if: steps\.cache\.outputs\.cache-hit != 'true'\n\s+run: scripts\/build-libmpv\.sh --container/,
+  );
+  assert.match(set, /check-in-container\.sh docker\.io\/library\/ubuntu:22\.04/);
+  assert.match(set, /name: libmpv-linux-x86_64\n\s+if-no-files-found: error\n\s+path: \.libmpv\/out\/libmpv/);
+  assert.doesNotMatch(set, /tauri|makepkg|scripts\/build\.sh|build:arch|build:linux/i, 'the set job builds no package');
 
-  // ci.yml does have business with it: its `libmpv` job builds the set and
-  // proves it. Every line of ci.yml that mentions the set is in that job, and
-  // that job builds no package of Vela.
+  // The bundles: only the Linux leg fetches the set and is given the
+  // overlay, and every bundle it makes is checked for the whole set.
+  const bundle = jobOf(release, 'bundle');
+  assert.match(bundle, /^    needs: \[npm-audit, cargo-audit, libmpv\]$/m);
+  assert.match(
+    bundle,
+    /- name: Fetch the libmpv set \(Linux\)\n\s+if: matrix\.os == 'ubuntu-22\.04'\n\s+uses: actions\/download-artifact@v8\n\s+with:\n\s+name: libmpv-linux-x86_64\n\s+path: \.libmpv\/out\/libmpv\n/,
+  );
+  has(
+    bundle,
+    "(matrix.os == 'ubuntu-22.04' && '--config src-tauri/tauri.libmpv.conf.json' || '')",
+    'the overlay goes to the Linux build alone',
+  );
+  assert.equal(bundle.split('tauri.libmpv.conf.json').length - 1, 2, 'and is named nowhere else but its comment');
+  has(
+    bundle,
+    "      - name: Require the libmpv set in every Linux bundle\n" +
+      "        if: runner.os == 'Linux'\n" +
+      '        shell: bash\n' +
+      '        run: |\n' +
+      '          packaging/libmpv/check-package.sh --set .libmpv/out/libmpv \\\n' +
+      "            '${{ matrix.bundle_dir }}'/appimage/*.AppImage \\\n" +
+      "            '${{ matrix.bundle_dir }}'/deb/*.deb \\\n" +
+      "            '${{ matrix.bundle_dir }}'/rpm/*.rpm\n",
+    'every Linux bundle is checked for the set it was built from',
+  );
+
+  // The Arch package: told of the set the one way a PKGBUILD can be, and
+  // checked the same.
+  const arch = jobOf(release, 'arch');
+  assert.match(arch, /^    needs: \[npm-audit, cargo-audit, libmpv\]$/m);
+  assert.match(arch, /name: libmpv-linux-x86_64\n\s+path: \.libmpv\/out\/libmpv\n/);
+  has(arch, '            VELA_PACKAGE_LIBMPV="$GITHUB_WORKSPACE/.libmpv/out/libmpv" \\\n', 'the PKGBUILD is told of the set');
+  has(
+    arch,
+    '          packaging/libmpv/check-package.sh --set .libmpv/out/libmpv \\\n' +
+      '            packaging/arch/*.pkg.tar.zst\n',
+    'and the package is checked',
+  );
+
+  // A Linux bundle reaches the draft release only after its check: the
+  // Linux leg of `bundle` never attaches (tauri-action uploads in the step
+  // that builds, which is before the check), and the inventory job, which
+  // needs both package jobs, attaches the three bundles. The AppImage
+  // tooling is told not to strip, so that it leaves the set as it is.
+  has(
+    bundle,
+    "tagName: ${{ startsWith(github.ref, 'refs/tags/') && matrix.os != 'ubuntu-22.04' && github.ref_name || '' }}\n",
+    'the Linux leg does not attach to the release',
+  );
+  has(
+    bundle,
+    "releaseName: ${{ startsWith(github.ref, 'refs/tags/') && matrix.os != 'ubuntu-22.04' && format('Vela {0}', github.ref_name) || '' }}\n",
+    'nor name one',
+  );
+  assert.match(bundle, /uses: tauri-apps\/tauri-action@v1\n\s+env:\n(?:\s+[A-Z_]+: .*\n)*?\s+NO_STRIP: '1'\n/);
+  assert.ok(
+    bundle.indexOf('- uses: tauri-apps/tauri-action@v1') < bundle.indexOf('- name: Require the libmpv set in every Linux bundle'),
+    'the check comes after the build',
+  );
+  const attach = jobOf(release, 'inventory');
+  has(attach, "\\( -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \\) -print0 | sort -z\n", 'the inventory finds the Linux bundles');
+  has(attach, '          gh release upload "$GITHUB_REF_NAME" \\\n            "${linux[@]}" \\\n', 'and attaches them');
+
+  // No package is ever checked as one that must NOT hold the set, and the
+  // set is not itself a released file: the inventory takes `vela-*` only.
+  assert.doesNotMatch(release, /--without-libmpv/);
+  const inventory = jobOf(release, 'inventory');
+  assert.match(inventory, /uses: actions\/download-artifact@v8\n\s+with:\n\s+pattern: vela-\*\n\s+path: artifacts\n/);
+  assert.doesNotMatch(inventory, /libmpv-linux/);
+
+  // ci.yml still has one piece of business with the set: its `libmpv` job
+  // builds it and proves it. Every line of ci.yml that mentions the set is in
+  // that job, and that job builds no package of Vela. No job of CI packages.
+  assert.doesNotMatch(ci, /tauri\.libmpv\.conf|with-libmpv|VELA_PACKAGE_LIBMPV|check-package/, 'ci.yml');
   let job = null;
   let inJobs = false;
   const outside = [];

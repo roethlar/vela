@@ -17,10 +17,20 @@ test("release artifacts fail closed through a final inventory", () => {
   assert.match(workflow, /find "\$root" -type f -name "\$pattern"/);
   assert.match(workflow, /inventory:\n[\s\S]*needs: \[bundle, arch\]/);
   assert.match(workflow, /uses: actions\/download-artifact@v8/);
+  // Both package jobs wait for the audit and for the libmpv set that the
+  // Linux packages carry (tests/libmpv-packaging.test.mjs holds that part).
   assert.match(
     workflow,
-    /  bundle:\n    needs: npm-audit\n    permissions:\n      contents: write/,
+    /  bundle:\n    needs: \[npm-audit, cargo-audit, libmpv\]\n    permissions:\n      contents: write/,
   );
+  assert.match(workflow, /  arch:\n    name: Arch package\n    needs: \[npm-audit, cargo-audit, libmpv\]\n/);
+  // A known vulnerability fails the release as it fails CI, in either ecosystem.
+  assert.match(workflow, /  npm-audit:\n[\s\S]*?- run: npm audit --audit-level=moderate\n/);
+  assert.match(workflow, /  cargo-audit:\n[\s\S]*?- run: cargo audit --file src-tauri\/Cargo\.lock\n/);
+  assert.match(workflow, /  libmpv:\n[\s\S]*?    needs: \[npm-audit, cargo-audit\]\n/);
+  // The inventory takes what is released and nothing that merely travelled
+  // between jobs, or SHA256SUMS would list the set's files.
+  assert.match(workflow, /uses: actions\/download-artifact@v8\n\s+with:\n\s+pattern: vela-\*\n\s+path: artifacts\n/);
   assert.match(
     workflow,
     /find artifacts -type f ! -name SHA256SUMS -print0 \| sort -z/,

@@ -59,6 +59,13 @@ jobs:
           node scripts/check-js-toolchain.mjs
       - run: npm ci
       - run: npm audit --audit-level=moderate
+      # The package-check tests (run by `npm run check`) pack and unpack
+      # stand-in packages with bsdtar, and one of them reads a real squashfs.
+      # Without the tools they skip, and a skipped test holds nothing.
+      - name: Install bsdtar and squashfs-tools for the package-check tests
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libarchive-tools squashfs-tools
       - run: npm run check
       - run: npm run build
 
