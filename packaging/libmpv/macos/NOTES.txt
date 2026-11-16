@@ -67,11 +67,11 @@ two architectures, deployment floor and dependency closure, then runs
 Apple's Python natively and under Rosetta with no DYLD_* overrides. It
 reports the client API, compares the mpv version with the pin, plays a
 two-second lavfi pattern to clean EOF and audits vmmap/dyld image paths.
-The executable itself is excluded; all libraries, including Python's,
-must be in the set's MANIFEST or /usr/lib or /System. If the runner's
-Apple Python framework/extensions live under Xcode in /Applications or
-/Library/Developer, this strict requested rule fails at startup and
-reports their paths. There is intentionally no silent harness exemption.
+The executable itself is excluded, and so is the running interpreter's
+own installation (sys.base_prefix: on a hosted runner, Xcode's Python
+framework under /Applications); every other library must be in the set's
+MANIFEST or /usr/lib or /System, so a Homebrew library or any other
+foreign image fails.
 Null-output playback does not prove GL drawing, fonts, Lua execution,
 VideoToolbox hardware decoding, audio output, HTTPS, or macOS 11 runtime
 compatibility. Those remain first-run/on-device checks for the reviewer.

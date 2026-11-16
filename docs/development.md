@@ -163,10 +163,11 @@ For macOS 11+, run `bash packaging/libmpv/macos/prepare-tools.sh`, then
 produce `.libmpv/out/libmpv-macos-universal/`: separate arm64/x86_64 dylibs
 joined with `lipo`, licences and a MANIFEST. FFmpeg uses system
 SecureTransport, VideoToolbox, AudioToolbox, zlib and iconv; libass uses
-CoreText. mpv uses the OpenGL render API (`plain-gl`) and CoreAudio, with
-Swift and its own macOS windows disabled. This mpv pin cannot enable
-VideoToolbox GL interop without Swift, so hardware decoding uses the copy
-path. Every install name/reference uses `@rpath`, with `@loader_path` on
+CoreText. mpv uses the OpenGL render API (`plain-gl`) and the CoreAudio
+and AVFoundation audio outputs, with Swift and its own macOS windows
+disabled. This mpv pin cannot enable VideoToolbox GL interop without
+Swift, so hardware decoding uses the copy path. Every install
+name/reference uses `@rpath`, with `@loader_path` on
 each dylib; in the app they resolve siblings in `Contents/Frameworks` without
 adding a run path to Vela's executable.
 CI's `libmpv-macos` job caches the set by all recipe inputs and the recorded
@@ -174,17 +175,20 @@ runner/toolchain, checks native and Rosetta playback with
 `/usr/bin/python3 -I -B packaging/libmpv/check-libmpv-macos.py DIR`, and
 uploads `libmpv-macos-universal`. The check audits MANIFEST integrity,
 architectures, deployment versions, dependencies, clean EOF and loaded
-library paths. Its strict path rule also covers Python's libraries, so
-an Xcode Python outside `/System` or `/usr/lib` is reported as a failure.
-The manual `libmpv-macos` probe retains diagnostic evidence. See
+library paths: every loaded library must be in the set's MANIFEST,
+`/usr/lib` or `/System`, except the running interpreter's own
+installation (`sys.base_prefix`; on a hosted runner, Xcode's Python
+framework), so a Homebrew library or any other foreign image still
+fails. The manual `libmpv-macos` probe retains diagnostic evidence. See
 `packaging/libmpv/macos/NOTES.txt` for the build-file patch and limitations.
 The packaging overlay declares macOS 11.0, and the build sets
 `MACOSX_DEPLOYMENT_TARGET=11.0` for both Rust targets. This raises the app's
 `LSMinimumSystemVersion` from Tauri's default 10.13 to the set's 11.0 floor;
 it does not prove runtime compatibility on macOS 11. See "macOS app with
 the set" below for local builds and the signed-app check. The first cold
-set build on a hosted Mac is still unproven (CI's job is manual until it
-passes); visual/hardware/HTTPS checks remain separate.
+set build and its check passed on a hosted Mac on 2026-11-16 (probe run
+43969988737), and CI's job runs on every push and pull request;
+visual/hardware/HTTPS checks remain separate.
 
 How the set is put together:
 
