@@ -1,9 +1,9 @@
 # fr-5: settings and the guide say a change of player waits for a restart; going back to mpv's own window does not
 
 **Severity**: LOW — Settings and the guide say a change of player waits for a restart; going back to mpv's own window does not.
-**Status**: In progress
+**Status**: Verified — codex wrote the repair; reviewed by the working agent, 2026-11-16
 **Branch**: —
-**Commit**: —
+**Commit**: `861cc3f`
 
 ## Evidence
 
@@ -27,12 +27,21 @@ contradicts.
 
 ## Approach
 
-The repair is being written by codex as a coding task (worktree
-`~/dev/vela-agent-keep/wt/cx-rvsettings` on `continuum`, not on `main` until the
-working agent has reviewed and landed it), under the owner's decision of
-2026-11-14 that coding tasks may go to codex and that a repair codex wrote
-is closed by the working agent's review. This section is replaced by what
-landed.
+What landed (`861cc3f`), in its commit's words:
+
+Settings, the guide and the release notes said a change of video player
+takes effect the next time Vela starts. That is true only one way. Which
+player a video uses is read when the video starts, so going back to
+mpv's own window applies to the next video; it is choosing Vela's window
+that needs a restart, when this run did not start with it (review
+finding fr-5).
+
+The sentence under the control, docs/usage.md and RELEASE_NOTES.md now
+say that. Nothing about the selection itself changed.
+
+Written by codex; reviewed by the working agent: with the old sentence
+put back in Settings.svelte its two guards fail; codex saw the same for
+each of the two documents.
 
 ## Reviewer comments
 

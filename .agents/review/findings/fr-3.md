@@ -1,9 +1,9 @@
 # fr-3: the certificate checkbox can become usable while showing a value that was never loaded
 
 **Severity**: MEDIUM — The certificate checkbox can become usable while showing a value that was never loaded.
-**Status**: In progress
+**Status**: Verified — codex wrote the repair; reviewed by the working agent, 2026-11-16
 **Branch**: —
-**Commit**: —
+**Commit**: `00693e5`
 
 ## Evidence
 
@@ -27,12 +27,24 @@ value has loaded.
 
 ## Approach
 
-The repair is being written by codex as a coding task (worktree
-`~/dev/vela-agent-keep/wt/cx-rvsettings` on `continuum`, not on `main` until the
-working agent has reviewed and landed it), under the owner's decision of
-2026-11-14 that coding tasks may go to codex and that a repair codex wrote
-is closed by the working agent's review. This section is replaced by what
-landed.
+What landed (`00693e5`), in its commit's words:
+
+"Skip server certificate checks" is disabled until its stored value has
+loaded. But the read marked the control ready whether or not its answer
+was accepted: an answer belonging to an opening that had since closed,
+rightly discarded, still enabled the checkbox, which then showed
+"checks on" over a stored choice to skip them (review finding fr-3).
+
+The checkbox, and the guard in front of its save, now follow whether a
+value is confirmed for the setting, which only an accepted read or a
+save can make true. An accepted value also clears an earlier "could not
+read" message; a refused save is still shown.
+
+Written by codex; reviewed by the working agent: with Settings.svelte
+put back, the three new tests fail (an obsolete read answering while the
+current one is pending; an obsolete success after the current read
+failed; an accepted value clearing a read error and not a save's); with
+the repair, 64 of 64.
 
 ## Reviewer comments
 

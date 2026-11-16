@@ -1,9 +1,9 @@
 # fr-7: a long wheel burst adds up to a seek the player refuses, and all of it is lost
 
 **Severity**: MEDIUM — A long wheel burst adds up to a seek the player refuses, and all of it is lost.
-**Status**: In progress
+**Status**: Verified — codex wrote the repair; reviewed by the working agent, 2026-11-16
 **Branch**: —
-**Commit**: —
+**Commit**: `0cd99a2`
 
 ## Evidence
 
@@ -25,12 +25,22 @@ whole with "Not a player command."
 
 ## Approach
 
-The repair is being written by codex as a coding task (worktree
-`~/dev/vela-agent-keep/wt/cx-rvview` on `continuum`, not on `main` until the
-working agent has reviewed and landed it), under the owner's decision of
-2026-11-14 that coding tasks may go to codex and that a repair codex wrote
-is closed by the working agent's review. This section is replaced by what
-landed.
+What landed (`0cd99a2`), in its commit's words:
+
+Wheel seeks made while a command is unanswered are added together, and
+the player accepts a relative seek of at most 600 seconds either way.
+Sixty-one steps made 610, which was refused whole with "Not a player
+command.": the whole burst was lost (review finding fr-7). One large
+wheel event could do the same.
+
+A seek larger than the player takes is now sent in pieces of at most 600
+seconds, the rest kept queued for the next reply, where later wheel
+input still adds to it or cancels it and a pause still goes first.
+
+Written by codex; reviewed by the working agent: with playerControls.ts
+put back, nine tests fail (61 steps in each direction, one large event
+in each, the remainder kept, reversed and cancelled, Close and the
+view's removal dropping it); with the repair, 91 of 91.
 
 ## Reviewer comments
 

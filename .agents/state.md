@@ -66,26 +66,37 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   - The version is 1.0.65 (`c093289`, by `scripts/bump.sh`, with the
     notes' heading; 1.0.64 is what the package on `continuum` carries,
     built before later fixes). No tag and no release: the owner's.
-  - The final review round is in
-    (`.agents/review/codereview-2026-11-16-release.md`): four codex
-    hunts, thirteen findings (`fr-1` to `fr-13`), all admitted. Their
-    repairs are being written by codex in four worktrees under
-    `~/dev/vela-agent-keep/wt/` on `continuum` (`cx-rvsettings`,
-    `cx-rvview`, `cx-rvfixes`, `cx-rvrelease`), each finding to land as
-    a commit of its own on the working agent's review. A fifth hunt,
-    over the stop fix and the test repair, is out.
+  - The final review round is done and closed
+    (`.agents/review/codereview-2026-11-16-release.md`): five codex
+    hunts, fourteen findings (`fr-1` to `fr-14`), all admitted, each
+    repaired by codex as a coding task and landed as a commit of its
+    own on the working agent's review (`ceed9be` to `9171b2e`; the
+    review index has each). What a user would notice of them: one
+    Settings change can no longer save over another setting stored with
+    it; a refused save is shown even when it arrives after Settings has
+    closed; in the embedded player a right-click or a track choice made
+    during wheel input is no longer dropped, a long wheel seek goes all
+    the way, and the volume no longer drifts a point; a Jellyfin play
+    is not counted twice when a start report's answer is lost. CI now
+    compiles both macOS architectures (seen passing on GitHub's runner
+    at `9d05964`).
   - A mutation check of three window-state repairs that had landed
     without one (three helper agents, 2026-11-16; the records of
     `pw-1`, `pw-8` and `pw-9` have the results) found the first two
     guarded throughout and twelve behaviours of `pw-9`'s second half
-    held by no test. No defect of the product was found. The tests are
-    being written by codex (`cx-pw9guards`). Also found and not yet
-    taken up: two unit tests of `pw-8` hang, not fail, when their rule
-    is removed.
-  - Left, in order: land those repairs and tests; the full check, both
-    end-to-end suites with the parity verdict, and a package built from
-    the final commit; then the list for the owner. Nothing since
-    `013cee3` has had a full end-to-end run.
+    held by no test. No defect of the product was found. The tests
+    landed at `484939c`.
+  - Being written by codex (worktree `cx-testrobust`), tests only: a
+    Rust test that failed once on GitHub's runner and never locally (the
+    CI run at `b7e2caa`:
+    `an_external_play_reports_its_end_without_waiting_for_the_eof_watcher`
+    reads the stand-in player's arguments file the moment it exists,
+    which can be before it is written), and the two unit tests of `pw-8`
+    that hang instead of failing when their rule is removed.
+  - Left, in order: land that; the full check, both end-to-end suites
+    with the parity verdict, and a package built from the final commit;
+    then the list for the owner. Nothing since `013cee3` has had a full
+    end-to-end run.
 - THE EMBEDDED PLAYER IS OFFERED IN SETTINGS (2026-11-15). The owner
   ruled that day that what is built is to be usable from the app, and
   that the owner is Vela's only user (`.agents/decisions.md`; read it

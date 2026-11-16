@@ -221,8 +221,17 @@ TWELVE left every test green. Nothing holds:
 Not tried: the serial captured where a play falls back from the embedded
 player to the external one.
 
-The tests for all thirteen are being written by codex as a coding task
-(worktree `~/dev/vela-agent-keep/wt/cx-pw9guards` on `continuum`), each to
-be shown red under the mutation above; this section is added to when they
-land. No defect of the product was found by the check: the behaviours are
+No defect of the product was found by the check: the behaviours were
 there, unguarded.
+
+The tests for all thirteen landed at `484939c` (2026-11-16), written by
+codex and reviewed by the working agent: seventeen tests in `playback.rs`
+on the real `PlayerExit`, `ReaderDone`, reader and trackers (three of them
+call the real `play()` against a loopback server), and the certificate
+rule pulled out of the launch path into a function of its own with its
+truth table tested (the one change to product code; the line that computed
+it now calls it). Codex injected nineteen regressions and saw each fail
+its test at the intended assertion; the working agent injected ten of them
+again itself, ten of ten red. One limit: the three wiring tests tell "at
+once" from "after five seconds of connection tries" by a three-second
+deadline.

@@ -1,9 +1,9 @@
 # fr-2: a Settings save that is refused after the dialog has closed is never shown
 
 **Severity**: MEDIUM — A Settings save that is refused after the dialog has closed is never shown.
-**Status**: In progress
+**Status**: Verified — codex wrote the repair; reviewed by the working agent, 2026-11-16
 **Branch**: —
-**Commit**: —
+**Commit**: `88aa965`
 
 ## Evidence
 
@@ -27,12 +27,25 @@ opening is not cleared by a later successful save from another.
 
 ## Approach
 
-The repair is being written by codex as a coding task (worktree
-`~/dev/vela-agent-keep/wt/cx-rvsettings` on `continuum`, not on `main` until the
-working agent has reviewed and landed it), under the owner's decision of
-2026-11-14 that coding tasks may go to codex and that a repair codex wrote
-is closed by the working agent's review. This section is replaced by what
-landed.
+What landed (`88aa965`), in its commit's words:
+
+The reason for a refused save was kept by the opening of Settings that
+made it. Text edited when Settings closes is saved as it closes, so a
+refusal of that save arrived for a dialog that was gone: the next
+opening showed the old value and nothing else, and the header never said
+Not saved. And an error shown in one opening stayed after another
+opening had saved the same setting successfully (review finding fr-2).
+
+The outcome of a save now belongs to the setting's queue, which outlives
+the dialog: a refusal is shown in that setting's section by whichever
+opening is there, now or next, and the next successful save of that
+setting clears it everywhere. It is kept in memory only, so it is gone
+when Vela restarts.
+
+Written by codex; reviewed by the working agent: with Settings.svelte
+put back, 26 tests fail (for each of thirteen controls: a save refused
+after closing reaches the current and the next opening; a later success
+clears it in every opening); with the repair, 61 of 61.
 
 ## Reviewer comments
 

@@ -1,9 +1,9 @@
 # fr-1: changing one Settings control can save over another setting that is stored with it
 
 **Severity**: MEDIUM — Changing one Settings control can save over another setting that is stored with it.
-**Status**: In progress
+**Status**: Verified — codex wrote the repair; reviewed by the working agent, 2026-11-16
 **Branch**: —
-**Commit**: —
+**Commit**: `72270d8`
 
 ## Evidence
 
@@ -30,12 +30,33 @@ rule that a late load must not overwrite a change was held, and its mirror
 
 ## Approach
 
-The repair is being written by codex as a coding task (worktree
-`~/dev/vela-agent-keep/wt/cx-rvsettings` on `continuum`, not on `main` until the
-working agent has reviewed and landed it), under the owner's decision of
-2026-11-14 that coding tasks may go to codex and that a repair codex wrote
-is closed by the working agent's review. This section is replaced by what
-landed.
+What landed (`72270d8`), in its commit's words:
+
+Seven mpv options are stored by one command and the source policy with
+the two display overrides by another. A change captured the whole group
+as the dialog held it at that moment and wrote it whole. So a field this
+opening had not loaded yet was written with its built-in default (change
+Skip intros before the first load answered, and the stored extra mpv
+arguments were erased), and a field another opening's save was still
+writing was written back to its old value. Both writes succeeded and the
+header said Saved (review finding fr-1).
+
+Now a change queues only the field that changed. Its write waits for the
+settings to have been loaded, and is put together, when its turn in the
+queue comes, from what is confirmed stored at that moment plus that one
+field. A load that fails refuses the write and says so; nothing is ever
+written from defaults. A choice no longer submits text that is still
+being typed in the same group, and a refused text is not sent again by a
+sibling's save.
+
+Written by codex; reviewed by the working agent: with Settings.svelte
+put back, seven tests fail (for each group: a change before the load
+answers, changes queued across two openings with the first accepted or
+refused, a failed load; and a choice made beside unblurred text); with
+the repair, 35 of 35. End to end with the four repairs after it, in both
+players: sourcepolicy, continueoff, windowsetting, autocrop,
+embeddedcrop and the reviewer's own autosave checks (one of them 40
+bursts of 13 changes, each stored and shown).
 
 ## Reviewer comments
 

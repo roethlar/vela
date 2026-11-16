@@ -1,9 +1,9 @@
 # fr-4: the Settings tests pass when a choice saves its previous value
 
 **Severity**: LOW — The Settings tests pass when a choice saves its previous value.
-**Status**: In progress
+**Status**: Verified — codex wrote the repair; reviewed by the working agent, 2026-11-16
 **Branch**: —
-**Commit**: —
+**Commit**: `1f3c4f5`
 
 ## Evidence
 
@@ -25,12 +25,24 @@ tests; a release is in view, so it is repaired.
 
 ## Approach
 
-The repair is being written by codex as a coding task (worktree
-`~/dev/vela-agent-keep/wt/cx-rvsettings` on `continuum`, not on `main` until the
-working agent has reviewed and landed it), under the owner's decision of
-2026-11-14 that coding tasks may go to codex and that a repair codex wrote
-is closed by the working agent's review. This section is replaced by what
-landed.
+What landed (`1f3c4f5`), in its commit's words:
+
+Svelte calls a control's change handler before it updates the bound
+value, so the handler must take the new value from the event:
+`changeDraft` assigns it first. The tests that drive the handlers set
+the bound value themselves and then called the handler, which supplied
+that assignment's effect: with the line removed, every choice in
+Settings would have saved its PREVIOUS value and all 61 tests of the two
+files stayed green (review finding fr-4).
+
+Both drivers now call the parsed handler with the new value first and
+update the binding after, and two tests keep the proof: with the
+assignment taken out they fail for saving the wrong value.
+
+Written by codex; reviewed by the working agent, who removed the
+assignment again: 28 tests fail, the two named ones among them.
+
+Tests only.
 
 ## Reviewer comments
 

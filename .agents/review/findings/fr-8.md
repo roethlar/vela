@@ -1,9 +1,9 @@
 # fr-8: the volume can drift by one point near 0 and near 100
 
 **Severity**: LOW — The volume can drift by one point near 0 and near 100.
-**Status**: In progress
+**Status**: Verified — codex wrote the repair; reviewed by the working agent, 2026-11-16
 **Branch**: —
-**Commit**: —
+**Commit**: `1f35c2b`
 
 ## Evidence
 
@@ -24,12 +24,23 @@ unit) has already let an older state event overwrite, so a step down from
 
 ## Approach
 
-The repair is being written by codex as a coding task (worktree
-`~/dev/vela-agent-keep/wt/cx-rvview` on `continuum`, not on `main` until the
-working agent has reviewed and landed it), under the owner's decision of
-2026-11-14 that coding tasks may go to codex and that a repair codex wrote
-is closed by the working agent's review. This section is replaced by what
-landed.
+What landed (`1f35c2b`), in its commit's words:
+
+The volume control held its target with the seek bar's rule for
+"arrived", which is "within one unit": right for a position in seconds,
+wrong for a volume. An older state event one point away from the target
+counted as the target having arrived and released it, and the next wheel
+step was worked out from the stale value: from 99, a step up to 100, a
+stale 99, a step down gave 97 where it should give 98 (review finding
+fr-8).
+
+The volume now holds its target until the player reports exactly that
+value (or the hold times out, as before); the seek bar keeps its
+tolerance.
+
+Written by codex; reviewed by the working agent: with the two product
+files put back, the five tests that drive the handlers near 100 and near
+0, and the slider's, fail; with the repair, 98 of 98.
 
 ## Reviewer comments
 

@@ -1,27 +1,29 @@
 # Review status
 
-**Final round before the release of Vela 1.0.65, 2026-11-16 (open: repairs being written):** four codereview codex
-hunts, one per slice (called plainly; standard), over `7b17f63..c093289`
-(release engineering to `2ffbffe`): `findings` in each. Thirteen
-candidates, thirteen admitted, none declined. A fifth hunt, over the two
-commits that landed afterwards (`2ffbffe..c618d31`), is out. Record:
+**Final round before the release of Vela 1.0.65, 2026-11-16 (closed 2026-11-16):** five codereview codex
+hunts (called plainly; standard): four, one per slice, over
+`7b17f63..c093289` (release engineering to `2ffbffe`), and a fifth over the
+two commits that landed afterwards (`2ffbffe..c618d31`): `findings` in
+each. Fourteen candidates, fourteen admitted, none declined, all repaired:
+codex wrote each repair and the working agent's review closed it. Record:
 `.agents/review/codereview-2026-11-16-release.md`.
 
 | ID    | Severity | Impact (one line) | Status | Commit | Reviewer |
 |-------|----------|-------------------|--------|--------|----------|
-| fr-1  | MEDIUM   | Changing one Settings control can save over another setting that is stored with it | `[ ]` | — | codex/default/standard |
-| fr-2  | MEDIUM   | A Settings save that is refused after the dialog has closed is never shown | `[ ]` | — | codex/default/standard |
-| fr-3  | MEDIUM   | The certificate checkbox can become usable while showing a value that was never loaded | `[ ]` | — | codex/default/standard |
-| fr-4  | LOW      | The Settings tests pass when a choice saves its previous value | `[ ]` | — | codex/default/standard |
-| fr-5  | LOW      | Settings and the guide say a change of player waits for a restart; going back to mpv's own window does not | `[ ]` | — | codex/default/standard |
-| fr-6  | MEDIUM   | A right-click, or a track chosen, while a wheel command is unanswered is dropped with "The player is busy" | `[ ]` | — | codex/default/standard |
-| fr-7  | MEDIUM   | A long wheel burst adds up to a seek the player refuses, and all of it is lost | `[ ]` | — | codex/default/standard |
-| fr-8  | LOW      | The volume can drift by one point near 0 and near 100 | `[ ]` | — | codex/default/standard |
-| fr-9  | LOW      | The view's tests pass with several of its rules removed | `[ ]` | — | codex/default/standard |
-| fr-10 | MEDIUM   | A Jellyfin start report whose answer was lost is sent again, and the server counts the play twice | `[ ]` | — | codex/default/standard |
-| fr-11 | MEDIUM   | A report's failure is logged with whatever the server put in its status line | `[ ]` | — | codex/default/standard |
-| fr-12 | MEDIUM   | CI compiles the macOS app for one of the two architectures the release builds | `[ ]` | — | codex/default/standard |
-| fr-13 | LOW      | The guide says any value of `WEBKIT_DISABLE_DMABUF_RENDERER` rules out the embedded player; `0` and empty do not | `[ ]` | — | codex/default/standard |
+| fr-1  | MEDIUM   | Changing one Settings control can save over another setting that is stored with it | `[x]` | `72270d8` | codex/default/standard; codex wrote the repair; reviewed by the agent |
+| fr-2  | MEDIUM   | A Settings save that is refused after the dialog has closed is never shown | `[x]` | `88aa965` | codex/default/standard; codex wrote the repair; reviewed by the agent |
+| fr-3  | MEDIUM   | The certificate checkbox can become usable while showing a value that was never loaded | `[x]` | `00693e5` | codex/default/standard; codex wrote the repair; reviewed by the agent |
+| fr-4  | LOW      | The Settings tests pass when a choice saves its previous value | `[x]` | `1f3c4f5` | codex/default/standard; codex wrote the repair; reviewed by the agent |
+| fr-5  | LOW      | Settings and the guide say a change of player waits for a restart; going back to mpv's own window does not | `[x]` | `861cc3f` | codex/default/standard; codex wrote the repair; reviewed by the agent |
+| fr-6  | MEDIUM   | A right-click, or a track chosen, while a wheel command is unanswered is dropped with "The player is busy" | `[x]` | `e453ad1` | codex/default/standard; codex wrote the repair; reviewed by the agent |
+| fr-7  | MEDIUM   | A long wheel burst adds up to a seek the player refuses, and all of it is lost | `[x]` | `0cd99a2` | codex/default/standard; codex wrote the repair; reviewed by the agent |
+| fr-8  | LOW      | The volume can drift by one point near 0 and near 100 | `[x]` | `1f35c2b` | codex/default/standard; codex wrote the repair; reviewed by the agent |
+| fr-9  | LOW      | The view's tests pass with several of its rules removed | `[x]` | `b7e2caa` | codex/default/standard; codex wrote the repair; reviewed by the agent |
+| fr-10 | MEDIUM   | A Jellyfin start report whose answer was lost is sent again, and the server counts the play twice | `[x]` | `935e964` | codex/default/standard; codex wrote the repair; reviewed by the agent |
+| fr-11 | MEDIUM   | A report's failure is logged with whatever the server put in its status line | `[x]` | `9d05964` | codex/default/standard; codex wrote the repair; reviewed by the agent |
+| fr-12 | MEDIUM   | CI compiles the macOS app for one of the two architectures the release builds | `[x]` | `ceed9be` | codex/default/standard; codex wrote the repair; reviewed by the agent |
+| fr-13 | LOW      | The guide says any value of `WEBKIT_DISABLE_DMABUF_RENDERER` rules out the embedded player; `0` and empty do not | `[x]` | `5e48e11` | codex/default/standard; codex wrote the repair; reviewed by the agent |
+| fr-14 | MEDIUM   | The end-to-end judge let a play report its stop twice | `[x]` | `9171b2e` | codex/default/standard; codex wrote the repair; reviewed by the agent |
 
 **Player window review (mpv window state, size, the setting), 2026-11-14 (closed 2026-11-14):** three codereview codex
 hunts, one per slice (called plainly; the host's codex config resolves to
