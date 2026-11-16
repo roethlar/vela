@@ -1,0 +1,18 @@
+[package]
+name = "m0-embed"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+# Match src-tauri/Cargo.lock, including the patch versions inspected locally.
+tao = "=0.35.3"
+wry = { version = "=0.55.1", default-features = false, features = ["os-webview", "transparent"] }
+libloading = "0.8"
+objc2 = "=0.6.4"
+objc2-app-kit = { version = "=0.3.2", default-features = false, features = ["std", "NSColor", "NSGraphics", "NSResponder", "NSView", "NSWindow", "objc2-core-graphics", "objc2-quartz-core"] }
+objc2-foundation = { version = "=0.3.2", default-features = false, features = ["std", "NSArray", "NSEnumerator", "NSGeometry"] }
+objc2-quartz-core = { version = "=0.3.2", default-features = false, features = ["std", "CALayer", "objc2-core-graphics"] }
+
+# Standalone probe, never part of Vela's build.
+[workspace]
