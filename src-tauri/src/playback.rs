@@ -481,6 +481,14 @@ fn display_property_change(value: &serde_json::Value) -> Option<DisplayPropertyC
     }
 }
 
+/// How mpv's window backend addresses screens. Windows needs the names in
+/// the current EnumDisplayMonitors order; Linux and macOS take a name directly.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PlaybackScreens {
+    Named,
+    Windows(Vec<Option<String>>),
+}
+
 /// What to play, as opposed to the supervision plumbing `play` also takes:
 /// the stream URL, the human title for mpv's window/OSD, the auth headers the
 /// stream needs (written to a private include; see `crate::player::launch`),
@@ -520,6 +528,9 @@ pub struct PlaySpec {
     /// holding Vela's window. Only mpv's own window is placed with it, which
     /// includes a play the embedded player could not start.
     pub screen_name: Option<String>,
+    /// The backend's screen addressing, with a fresh, unfiltered enumeration
+    /// on Windows. The launch builder resolves screen_name against this list.
+    pub screens: PlaybackScreens,
     /// Fresh handle populated by this launch's IPC reader and published by the
     /// command layer only after the full launch succeeds.
     pub window_observation: WindowStateObservation,
@@ -2247,6 +2258,7 @@ mod tests {
             crop_script: None,
             inherited_window_state: PlaybackWindowState::default(),
             screen_name: None,
+            screens: PlaybackScreens::Named,
             window_observation: WindowStateObservation::default(),
             markers_script: None,
             markers: Vec::new(),

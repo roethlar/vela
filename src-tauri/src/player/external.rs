@@ -351,6 +351,7 @@ mod tests {
             crop_script: None,
             inherited_window_state: PlaybackWindowState::default(),
             screen_name: None,
+            screens: crate::playback::PlaybackScreens::Named,
             window_observation: WindowStateObservation::default(),
             markers_script: None,
             markers: Vec::new(),

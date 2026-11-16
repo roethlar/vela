@@ -368,6 +368,49 @@ pub(crate) async fn look_at_screens(app: &tauri::AppHandle) -> Screens {
     screens_from(velas, monitors, platform_outputs().await)
 }
 
+/// The zero-based index of the first monitor whose name exactly matches.
+/// Keep unnamed monitors and duplicates in enumeration order: mpv counts
+/// every EnumDisplayMonitors callback, as does tao on Windows. Never sort,
+/// deduplicate, or interpret the number inside a DISPLAY name as an index.
+pub(crate) fn windows_screen_index(name: &str, monitor_names: &[Option<String>]) -> Option<usize> {
+    monitor_names
+        .iter()
+        .position(|monitor| monitor.as_deref() == Some(name))
+}
+
+/// Windows needs a fresh enumeration because its indices are not persistent
+/// screen identities. A failed query supplies an empty list, so the launch
+/// builder leaves placement to mpv rather than inventing an index.
+pub(crate) async fn screens_for_mpv(
+    app: Option<&tauri::AppHandle>,
+) -> crate::playback::PlaybackScreens {
+    use crate::playback::PlaybackScreens;
+
+    // Keep both branches typechecked on every platform; only Windows asks
+    // for this extra enumeration. The Tauri calls wait on the window thread.
+    if cfg!(windows) {
+        let app = app.cloned();
+        let names = tauri::async_runtime::spawn_blocking(move || {
+            use tauri::Manager;
+            let window = app?.get_webview_window("main")?;
+            let monitors = window.available_monitors().ok()?;
+            Some(
+                monitors
+                    .iter()
+                    .map(|monitor| monitor.name().cloned())
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+        PlaybackScreens::Windows(names)
+    } else {
+        PlaybackScreens::Named
+    }
+}
+
 /// A monitor Tauri gives, with the name mpv takes for it
 /// (`platform_screen_name`; the two differ on macOS).
 #[derive(Debug, Clone)]
@@ -1237,6 +1280,55 @@ mod wayland_hdr {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn windows_screen_index_finds_first_middle_and_last_in_enumeration_order() {
+        let names = [r"\\.\DISPLAY7", r"\\.\DISPLAY2", r"\\.\DISPLAY1"]
+            .map(|name| Some(name.to_string()));
+        for (expected, name) in names.iter().enumerate() {
+            assert_eq!(
+                windows_screen_index(name.as_deref().unwrap(), &names),
+                Some(expected)
+            );
+        }
+    }
+
+    #[test]
+    fn windows_screen_index_counts_unnamed_monitors() {
+        let names = [
+            None,
+            Some(r"\\.\DISPLAY7".to_string()),
+            None,
+            Some(r"\\.\DISPLAY2".to_string()),
+        ];
+        assert_eq!(windows_screen_index(r"\\.\DISPLAY7", &names), Some(1));
+        assert_eq!(windows_screen_index(r"\\.\DISPLAY2", &names), Some(3));
+    }
+
+    #[test]
+    fn windows_screen_index_requires_an_exact_connected_name() {
+        let names = [Some(r"\\.\DISPLAY2".to_string())];
+        for absent in [
+            r"\\.\DISPLAY1",
+            r"\\.\DISPLAY",
+            r"\\.\display2",
+            r"\\.\DISPLAY2 ",
+        ] {
+            assert_eq!(windows_screen_index(absent, &names), None);
+        }
+    }
+
+    #[test]
+    fn windows_screen_index_takes_the_first_duplicate() {
+        let names = [r"\\.\DISPLAY7", r"\\.\DISPLAY2", r"\\.\DISPLAY2"]
+            .map(|name| Some(name.to_string()));
+        assert_eq!(windows_screen_index(r"\\.\DISPLAY2", &names), Some(1));
+    }
+
+    #[test]
+    fn windows_screen_index_of_an_empty_list_is_unknown() {
+        assert_eq!(windows_screen_index(r"\\.\DISPLAY2", &[]), None);
+    }
 
     fn detected() -> DisplayProfile {
         DisplayProfile {

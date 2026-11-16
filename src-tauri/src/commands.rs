@@ -6196,6 +6196,7 @@ async fn play_by_key_locked(
             inherited_window_state,
             screen_name,
             window_observation: window_observation.clone(),
+            screens: display::screens_for_mpv(state.app_handle.get()).await,
             markers_script,
             markers,
             intro_policy: skip_policies.intro,

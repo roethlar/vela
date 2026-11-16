@@ -9,7 +9,7 @@
 use std::io::Write;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::playback::{PlaySpec, PlaybackWindowState};
+use crate::playback::{PlaySpec, PlaybackScreens, PlaybackWindowState};
 use crate::player::PlayerKind;
 
 /// One mpv option of a launch.
@@ -551,10 +551,19 @@ fn embedded_required_args() -> [LaunchArg; 2] {
     ]
 }
 
-fn screen_name_arg(name: Option<&str>) -> Option<LaunchArg> {
-    name.map(str::trim)
-        .filter(|name| !name.is_empty())
-        .map(|name| LaunchArg::set("screen-name", name))
+fn screen_name_arg(name: Option<&str>, screens: &PlaybackScreens) -> Option<LaunchArg> {
+    let name = name?;
+    match screens {
+        PlaybackScreens::Named => {
+            let name = name.trim();
+            (!name.is_empty()).then(|| LaunchArg::set("screen-name", name))
+        }
+        // mpv places the initial window before entering fullscreen. Its
+        // default fs-screen=current follows that window, including after
+        // the user moves it; setting fs-screen would pin later toggles too.
+        PlaybackScreens::Windows(names) => crate::display::windows_screen_index(name, names)
+            .map(|index| LaunchArg::set("screen", index.to_string())),
+    }
 }
 
 /// mpv launch args for the autocrop feature, given the config `mode`
@@ -913,7 +922,7 @@ pub(crate) fn build_launch_for(
     if !embedded {
         // The embedded player has no window of its own to place or size.
         args.extend(window_state_args(spec.inherited_window_state));
-        if let Some(screen_arg) = screen_name_arg(spec.screen_name.as_deref()) {
+        if let Some(screen_arg) = screen_name_arg(spec.screen_name.as_deref(), &spec.screens) {
             // Reassert after user options. On Wayland this is a placement request,
             // not a guarantee; the compositor's actual choice is observed over IPC.
             args.push(screen_arg);
@@ -999,6 +1008,7 @@ mod tests {
             crop_script: None,
             inherited_window_state: PlaybackWindowState::default(),
             screen_name: None,
+            screens: PlaybackScreens::Named,
             window_observation: crate::playback::WindowStateObservation::default(),
             markers_script: None,
             markers: Vec::new(),
@@ -1045,7 +1055,8 @@ mod tests {
     }
 
     fn screen_name_arg(name: Option<&str>) -> Option<String> {
-        super::screen_name_arg(name).map(|arg| arg.to_cli())
+        super::screen_name_arg(name, &PlaybackScreens::Named)
+            .map(|arg| arg.to_cli())
     }
 
     fn autocrop_args(mode: &str, script: Option<&str>, shim: Option<&str>) -> Vec<String> {
@@ -1274,6 +1285,92 @@ mod tests {
         );
         assert_eq!(screen_name_arg(Some("  ")), None);
         assert_eq!(screen_name_arg(None), None);
+    }
+
+    #[test]
+    fn windows_launch_reasserts_the_index_for_windowed_and_fullscreen_plays() {
+        let cfg = crate::config::AppConfig {
+            mpv_extra_args: Some("--screen=0".to_string()),
+            ..Default::default()
+        };
+        for fullscreen in [false, true] {
+            let spec = PlaySpec {
+                screen_name: Some(r"\\.\DISPLAY2".to_string()),
+                screens: PlaybackScreens::Windows(
+                    [r"\\.\DISPLAY7", r"\\.\DISPLAY2", r"\\.\DISPLAY1"]
+                        .map(|name| Some(name.to_string()))
+                        .to_vec(),
+                ),
+                inherited_window_state: PlaybackWindowState {
+                    fullscreen: Some(fullscreen),
+                    ..Default::default()
+                },
+                ..plain_spec(PlayerKind::External, "https://media.invalid/video.mkv")
+            };
+            let args = cli(build_launch(&spec, &cfg, "screen-test.sock").unwrap().args);
+            assert_eq!(
+                args.iter()
+                    .filter(|arg| arg.starts_with("--screen="))
+                    .map(String::as_str)
+                    .collect::<Vec<_>>(),
+                ["--screen=0", "--screen=1"],
+                "the remembered screen wins over the user's option"
+            );
+            assert!(args.contains(&format!(
+                "--fullscreen={}",
+                if fullscreen { "yes" } else { "no" }
+            )));
+            assert!(!args.iter().any(|arg| arg.starts_with("--screen-name=")));
+            assert!(
+                !args.iter().any(|arg| arg.starts_with("--fs-screen")),
+                "later fullscreen follows the moved window"
+            );
+        }
+    }
+
+    #[test]
+    fn linux_and_macos_launches_reassert_the_name_without_a_screen_index() {
+        let cfg = crate::config::AppConfig {
+            mpv_extra_args: Some("--screen-name=other".to_string()),
+            ..Default::default()
+        };
+        for name in ["DP-3", "Studio Display (1234)"] {
+            let spec = PlaySpec {
+                screen_name: Some(name.to_string()),
+                screens: PlaybackScreens::Named,
+                ..plain_spec(PlayerKind::External, "https://media.invalid/video.mkv")
+            };
+            let args = cli(build_launch(&spec, &cfg, "screen-test.sock").unwrap().args);
+            let expected = format!("--screen-name={name}");
+            assert_eq!(
+                args.iter()
+                    .filter(|arg| arg.starts_with("--screen-name="))
+                    .map(String::as_str)
+                    .collect::<Vec<_>>(),
+                ["--screen-name=other", &expected]
+            );
+            assert!(!args.iter().any(|arg| arg.starts_with("--screen=")));
+        }
+    }
+
+    #[test]
+    fn windows_launch_omits_an_unresolved_screen() {
+        for names in [vec![], vec![Some(r"\\.\DISPLAY1".to_string())]] {
+            for screen_name in [None, Some(r"\\.\DISPLAY2".to_string())] {
+                let spec = PlaySpec {
+                    screen_name,
+                    screens: PlaybackScreens::Windows(names.clone()),
+                    ..plain_spec(PlayerKind::External, "https://media.invalid/video.mkv")
+                };
+                let args = cli(
+                    build_launch(&spec, &Default::default(), "screen-test.sock")
+                        .unwrap()
+                        .args,
+                );
+                assert!(!args.iter().any(|arg| arg.starts_with("--screen=")));
+                assert!(!args.iter().any(|arg| arg.starts_with("--screen-name=")));
+            }
+        }
     }
 
     /// The window options of the launch the first play of a run gets with
