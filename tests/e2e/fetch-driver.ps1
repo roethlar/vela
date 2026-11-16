@@ -41,7 +41,9 @@ if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notm
     throw "Microsoft Edge WebDriver signature rejected: $($signature.Status)"
 }
 $reported = & $driver --version
-if ($LASTEXITCODE -ne 0 -or $reported -notmatch "^MSEdgeDriver $([regex]::Escape($version))(\s|$)") {
+# Older drivers say "MSEdgeDriver <version>", current ones "Microsoft Edge
+# WebDriver <version> (<commit>)"; either way the version must be exact.
+if ($LASTEXITCODE -ne 0 -or $reported -notmatch "^(MSEdgeDriver|Microsoft Edge WebDriver) $([regex]::Escape($version))(\s|$)") {
     throw "Edge WebDriver does not match WebView2 $version : $reported"
 }
 $record = @{
