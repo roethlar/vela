@@ -42,34 +42,51 @@ if ! (cd "$probe" && cargo build --release) > "$out/build.log" 2>&1; then
 fi
 
 : > "$out/result.txt"
+: > "$out/started"
 pid=''
 watchdog=''
 cleanup() {
   # Only processes started by this script; also clean up if the job is cancelled.
   if [[ -n "$watchdog" ]]; then kill "$watchdog" 2>/dev/null || true; fi
   if [[ -n "$pid" ]]; then kill -KILL "$pid" 2>/dev/null || true; fi
+  pkill -KILL -f "$CARGO_TARGET_DIR/release/m0-embed" 2>/dev/null || true
 }
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
-for variant in wid wid-gpu; do
-  "$CARGO_TARGET_DIR/release/m0-embed" "$variant" > "$out/console-$variant.log" 2>&1 &
+# The program runs under lldb, which prints every thread's backtrace if it
+# crashes (the runs so far died of SIGSEGV just after mpv's first frame, and
+# macOS kept no crash report). A runner may need debugging enabled first.
+sudo -n DevToolsSecurity -enable > "$out/devtools.log" 2>&1 || true
+# variant  extra mpv options (name=value;...)
+variants=(
+  'wid|'
+  'wid-nodr|vd-lavc-dr=no'
+  'wid-gpu|'
+)
+for entry in "${variants[@]}"; do
+  variant="${entry%%|*}"
+  export M0_EXTRA="${entry#*|}"
+  lldb --batch -o run -k 'thread backtrace all' -k 'quit 1' \
+    -- "$CARGO_TARGET_DIR/release/m0-embed" "$variant" > "$out/console-$variant.log" 2>&1 &
   pid=$!
-  # Enforce twenty seconds from launch, including the eight-second capture delay.
+  # Enforce twenty-five seconds from launch, including the captures.
   (
-    sleep 20
+    sleep 25
     if kill -0 "$pid" 2>/dev/null; then
-      echo 'exceeded 20s; sent SIGKILL' > "$out/timeout-$variant.txt"
+      echo 'exceeded 25s; sent SIGKILL' > "$out/timeout-$variant.txt"
       kill -KILL "$pid" 2>/dev/null || true
+      pkill -KILL -f "$CARGO_TARGET_DIR/release/m0-embed" 2>/dev/null || true
     fi
   ) &
   watchdog=$!
-  # An early picture too: the first run crashed about 3 s in, just after
-  # mpv showed its first frame.
-  sleep 2.4
-  screencapture -x "$out/screen-$variant-early.png" 2>> "$out/screencapture-$variant.err" || true
-  sleep 5.6
-  if screencapture -x "$out/screen-$variant.png" 2> "$out/screencapture-$variant.err"; then
+  # Pictures early as well: without lldb the program crashed about 2-3 s in.
+  sleep 2.5
+  screencapture -x "$out/screen-$variant-a.png" 2>> "$out/screencapture-$variant.err" || true
+  sleep 1.5
+  screencapture -x "$out/screen-$variant-b.png" 2>> "$out/screencapture-$variant.err" || true
+  sleep 4
+  if screencapture -x "$out/screen-$variant.png" 2>> "$out/screencapture-$variant.err"; then
     capture=ok
   else
     capture=failed
@@ -81,12 +98,16 @@ for variant in wid wid-gpu; do
   kill "$watchdog" 2>/dev/null || true
   wait "$watchdog" 2>/dev/null || true
   watchdog=''
-  echo "$variant: exit=$status screencapture=$capture" >> "$out/result.txt"
-  # macOS writes a crash report for a process that died of a signal.
-  sleep 3
-  for report in "$HOME"/Library/Logs/DiagnosticReports/m0-embed*; do
-    [[ -f "$report" ]] && mv "$report" "$out/crash-$variant-$(basename "$report")"
-  done
+  crashed=no
+  grep -q 'stop reason = ' "$out/console-$variant.log" && crashed=yes
+  echo "$variant: lldb-exit=$status crashed=$crashed screencapture=$capture extra='$M0_EXTRA'" >> "$out/result.txt"
 done
 cat "$out/result.txt"
+# Any crash reports macOS wrote meanwhile, wherever it put them.
+sleep 5
+find "$HOME/Library/Logs/DiagnosticReports" /Library/Logs/DiagnosticReports \
+  -newer "$out/started" -type f -print 2>/dev/null | while read -r report; do
+  cp "$report" "$out/crash-$(basename "$report")"
+done
 ls "$out" | grep -E '^crash-' || echo 'no crash reports'
+grep -h -A12 'stop reason = ' "$out"/console-*.log | head -n 60 || true

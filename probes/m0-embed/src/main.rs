@@ -194,7 +194,14 @@ impl Mpv {
         let log = log.to_str().ok_or("log path is not UTF-8")?;
         for (name, value) in [
             ("wid", wid.as_str()),
-            ("vo", if variant == "wid" { "gpu-next" } else { "gpu" }),
+            (
+                "vo",
+                if variant.starts_with("wid-gpu") {
+                    "gpu"
+                } else {
+                    "gpu-next"
+                },
+            ),
             ("gpu-api", "vulkan"),
             ("gpu-context", "macvk"),
             ("hwdec", "no"),
@@ -212,6 +219,21 @@ impl Mpv {
             let value = CString::new(value)?;
             // SAFETY: live, uninitialized handle and C strings that outlive the
             // call; mpv copies the option. All options precede mpv_initialize.
+            player.check(
+                unsafe { set_option(handle, key.as_ptr(), value.as_ptr()) },
+                name,
+            )?;
+        }
+        // Extra options for this variant, from run.sh: "name=value;name=value".
+        let extra = std::env::var("M0_EXTRA").unwrap_or_default();
+        for pair in extra.split(';').filter(|pair| !pair.is_empty()) {
+            let (name, value) = pair
+                .split_once('=')
+                .ok_or("M0_EXTRA: expected name=value")?;
+            eprintln!("option {name}={value} (extra)");
+            let key = CString::new(name)?;
+            let value = CString::new(value)?;
+            // SAFETY: as above.
             player.check(
                 unsafe { set_option(handle, key.as_ptr(), value.as_ptr()) },
                 name,
