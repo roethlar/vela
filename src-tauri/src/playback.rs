@@ -3053,6 +3053,273 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
+    fn ended_player() -> crate::player::PlayerHandle {
+        let mut child = std::process::Command::new("sh")
+            .args(["-c", "exit 0"])
+            .spawn()
+            .expect("stand-in player");
+        assert!(child.wait().unwrap().success());
+        crate::player::PlayerHandle::External(crate::player::external::ManagedChild::for_test(
+            child,
+        ))
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn another_players_exit_does_not_confirm_this_plays_exit() {
+        let original = ended_player();
+        let serial = original.serial();
+        let slot = Arc::new(Mutex::new(Some(original)));
+        let exit = PlayerExit {
+            slot: slot.clone(),
+            serial,
+        };
+        assert!(exit.confirmed(), "the matching ended player is evidence");
+
+        let mut replacement = ended_player();
+        assert_ne!(replacement.serial(), serial);
+        assert!(replacement.has_ended().unwrap());
+        *slot.lock().unwrap() = Some(replacement);
+        assert!(
+            !exit.confirmed(),
+            "another player's exit is no evidence for this play"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_busy_player_slot_does_not_confirm_an_exit() {
+        let player = ended_player();
+        let serial = player.serial();
+        let slot = Arc::new(Mutex::new(Some(player)));
+        let exit = PlayerExit {
+            slot: slot.clone(),
+            serial,
+        };
+        let held = slot.lock().unwrap();
+        assert!(
+            !exit.confirmed(),
+            "a busy player slot is no evidence of exit"
+        );
+        drop(held);
+        assert!(
+            exit.confirmed(),
+            "the same player is confirmed once the slot is available"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_exit_query_error_does_not_confirm_an_exit() {
+        let child = std::process::Command::new("sh")
+            .args(["-c", "exit 0"])
+            .spawn()
+            .expect("stand-in player");
+        let pid = child.id() as libc::pid_t;
+        // Reap only this child, outside Child's cached status. Its real
+        // try_wait now returns ECHILD; no global signal disposition changes.
+        loop {
+            // SAFETY: pid names our child, and a null status pointer is allowed.
+            let result = unsafe { libc::waitpid(pid, std::ptr::null_mut(), 0) };
+            if result == pid {
+                break;
+            }
+            assert_eq!(
+                std::io::Error::last_os_error().raw_os_error(),
+                Some(libc::EINTR)
+            );
+        }
+        let mut player = crate::player::PlayerHandle::External(
+            crate::player::external::ManagedChild::for_test(child),
+        );
+        assert_eq!(
+            player.has_ended().unwrap_err().raw_os_error(),
+            Some(libc::ECHILD)
+        );
+        let serial = player.serial();
+        let exit = PlayerExit {
+            slot: Arc::new(Mutex::new(Some(player))),
+            serial,
+        };
+        assert!(
+            !exit.confirmed(),
+            "an exit-query error is no evidence of exit"
+        );
+    }
+
+    #[test]
+    fn reader_done_is_published_when_its_thread_panics() {
+        let done = Arc::new(AtomicBool::new(false));
+        let guard = ReaderDone(done.clone());
+        let reader = std::thread::spawn(move || {
+            let _guard = guard;
+            panic!("unwind the real ReaderDone guard");
+        });
+        assert!(reader.join().is_err());
+        assert!(
+            done.load(Ordering::Acquire),
+            "ReaderDone must publish done during unwinding"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stopping_before_connect_publishes_reader_done() {
+        let observation = WindowStateObservation::default();
+        // Set before spawning: this deterministically takes the connect
+        // loop's stop return, without racing a sleep or a socket connection.
+        let stop = Arc::new(AtomicBool::new(true));
+        let reading = spawn_position_reader(
+            nowhere("done-before-connect"),
+            0,
+            stop,
+            observation.clone(),
+            PlayerExit::default(),
+        )
+        .unwrap();
+        assert!(reader_finished(&observation, Duration::from_secs(10)));
+        assert!(
+            reading.done.load(Ordering::Acquire),
+            "stopping before connect must publish done"
+        );
+    }
+
+    #[test]
+    fn a_reader_stopped_by_vela_did_not_fail_to_start() {
+        let reading = PositionReader {
+            last_t_ms: Arc::new(AtomicU64::new(1234)),
+            done: Arc::new(AtomicBool::new(true)),
+            start_unconfirmed: Arc::new(AtomicBool::new(true)),
+        };
+        let stop = AtomicBool::new(false);
+        assert!(
+            reading.end(&stop).failed_to_start,
+            "an unconfirmed, unstopped end is a failure"
+        );
+        stop.store(true, Ordering::Relaxed);
+        assert!(
+            !reading.end(&stop).failed_to_start,
+            "Vela stopping a play is not a failed start"
+        );
+        assert_eq!(reading.end(&stop).position_ms, 1234);
+    }
+
+    #[test]
+    fn a_reader_that_confirmed_start_did_not_fail_to_start() {
+        let reading = PositionReader {
+            last_t_ms: Arc::new(AtomicU64::new(1234)),
+            done: Arc::new(AtomicBool::new(true)),
+            start_unconfirmed: Arc::new(AtomicBool::new(true)),
+        };
+        let stop = AtomicBool::new(false);
+        assert!(reading.end(&stop).failed_to_start);
+        reading.start_unconfirmed.store(false, Ordering::Relaxed);
+        assert!(
+            !reading.end(&stop).failed_to_start,
+            "a confirmed start cannot be a failed start"
+        );
+    }
+
+    /// Feed exactly one event, then EOF, through the real reader. Waiting
+    /// for ReaderFinishes synchronizes all event handling and ReaderDone;
+    /// ten seconds is only a deadlock watchdog, never evidence of a start.
+    #[cfg(unix)]
+    fn end_after_startup_event(name: &str, event: serde_json::Value) -> PlaybackEnd {
+        let path = nowhere(name);
+        let listener = std::os::unix::net::UnixListener::bind(&path).expect("listen for reader");
+        let observation = WindowStateObservation::default();
+        let stop = Arc::new(AtomicBool::new(false));
+        let reading = spawn_position_reader(
+            path.clone(),
+            0,
+            stop.clone(),
+            observation.clone(),
+            PlayerExit::default(),
+        )
+        .unwrap();
+        let mut mpv = accept_reader(&listener);
+        writeln!(mpv, "{event}").unwrap();
+        drop(mpv);
+        let finished = reader_finished(&observation, Duration::from_secs(10));
+        std::fs::remove_file(path).unwrap();
+        assert!(finished, "the reader consumed the event and EOF");
+        assert!(reading.done.load(Ordering::Acquire));
+        reading.end(&stop)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_time_pos_event_confirms_start_in_the_real_reader() {
+        let end =
+            end_after_startup_event("start-position", event("time-pos", serde_json::json!(0.0)));
+        assert_eq!(
+            end.position_ms, 0,
+            "even the initial zero position confirms start"
+        );
+        assert!(!end.failed_to_start, "time-pos must confirm start");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_file_loaded_event_confirms_start_in_the_real_reader() {
+        let end =
+            end_after_startup_event("start-loaded", serde_json::json!({"event": "file-loaded"}));
+        assert!(!end.failed_to_start, "file-loaded alone must confirm start");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_eof_event_confirms_start_in_the_real_reader() {
+        let end = end_after_startup_event(
+            "start-eof",
+            serde_json::json!({"event": "end-file", "reason": "eof"}),
+        );
+        assert!(
+            !end.failed_to_start,
+            "end-file eof alone must confirm start"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_quit_event_confirms_start_in_the_real_reader() {
+        let end = end_after_startup_event(
+            "start-quit",
+            serde_json::json!({"event": "end-file", "reason": "quit"}),
+        );
+        assert!(
+            !end.failed_to_start,
+            "end-file quit alone must confirm start"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_stop_event_confirms_start_in_the_real_reader() {
+        let end = end_after_startup_event(
+            "start-stop",
+            serde_json::json!({"event": "end-file", "reason": "stop"}),
+        );
+        assert!(
+            !end.failed_to_start,
+            "end-file stop alone must confirm start"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_error_event_does_not_confirm_start_in_the_real_reader() {
+        let end = end_after_startup_event(
+            "start-error",
+            serde_json::json!({"event": "end-file", "reason": "error"}),
+        );
+        assert!(
+            end.failed_to_start,
+            "end-file error is not evidence of start"
+        );
+    }
+
     /// A socket path nothing listens on.
     #[cfg(unix)]
     fn nowhere(name: &str) -> String {
@@ -3145,6 +3412,202 @@ mod tests {
             );
         }
         std::fs::remove_dir_all(program.parent().unwrap()).unwrap();
+    }
+
+    /// Exercise play's actual launch and tracker dispatch. A loopback HTTP
+    /// server acknowledges reports; the player never creates its IPC socket.
+    /// A three-second bound distinguishes the repaired end from fifty 100 ms
+    /// retries. Unlike the socket-event tests this needs a real deadline:
+    /// both versions eventually end, and the production waits use std threads.
+    #[cfg(unix)]
+    fn early_exit_through_play(
+        name: &str,
+        fallback: bool,
+        target: impl FnOnce(String) -> ProgressTarget,
+    ) -> Vec<String> {
+        use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        listener.set_nonblocking(true).unwrap();
+        let (shutdown, stop_server) = tokio::sync::oneshot::channel();
+        let server = std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            rt.block_on(async {
+                let listener = tokio::net::TcpListener::from_std(listener).unwrap();
+                let mut stop_server = stop_server;
+                let mut requests = Vec::new();
+                loop {
+                    let stream = tokio::select! {
+                        _ = &mut stop_server => break,
+                        accepted = listener.accept() => accepted.unwrap().0,
+                    };
+                    // Watchdog only: the end callback comes after these replies.
+                    let request = tokio::time::timeout(Duration::from_secs(10), async {
+                        let mut reader = tokio::io::BufReader::new(stream);
+                        let mut request = String::new();
+                        assert_ne!(reader.read_line(&mut request).await.unwrap(), 0);
+                        let mut length = 0;
+                        loop {
+                            let mut line = String::new();
+                            assert_ne!(reader.read_line(&mut line).await.unwrap(), 0);
+                            if line == "\r\n" {
+                                break;
+                            }
+                            if let Some(value) =
+                                line.to_ascii_lowercase().strip_prefix("content-length:")
+                            {
+                                length = value.trim().parse::<usize>().unwrap();
+                            }
+                        }
+                        reader.read_exact(&mut vec![0; length]).await.unwrap();
+                        reader.get_mut().write_all(
+                            b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                        ).await.unwrap();
+                        request
+                    })
+                    .await
+                    .expect("the local report request completes");
+                    requests.push(request);
+                }
+                requests
+            })
+        });
+
+        let (program, _) = stand_in_for_mpv(name);
+        let found = program.to_string_lossy().into_owned();
+        let _mpv = mpv_is(move || Ok(found.clone()));
+        let launcher = FailingLauncher {
+            asked: Arc::new(Mutex::new(Vec::new())),
+        };
+        let mut spec = embedded_spec();
+        spec.player = if fallback {
+            crate::player::PlayerKind::Embedded
+        } else {
+            crate::player::PlayerKind::External
+        };
+        spec.start_seconds = 1.25;
+        let progress = target(base);
+        let expected_position = if matches!(&progress, ProgressTarget::None) {
+            0
+        } else {
+            1250
+        };
+        let slot = Arc::new(Mutex::new(None));
+        let (ended, end) = std::sync::mpsc::channel();
+        let began = Instant::now();
+        let started = play(
+            &spec,
+            progress,
+            Players {
+                slot: &slot,
+                shutting_down: &Arc::new(AtomicBool::new(false)),
+                embedded: Some(&launcher),
+            },
+            &Arc::new(crate::commands::PlaybackAdvance::default()),
+            name.to_string(),
+            Some(Arc::new(move |end: PlaybackEnd| {
+                let _ = ended.send((end.position_ms, end.failed_to_start));
+            })),
+            None,
+        )
+        .expect("play starts");
+        slot.lock().unwrap().as_mut().unwrap().kill().unwrap();
+        // Bound the whole launch as well as the receive: a delayed test
+        // cannot accidentally pass after the old five-second retry timeout.
+        let limit = Duration::from_secs(3);
+        let finished = end.recv_timeout(limit.saturating_sub(began.elapsed()));
+        let elapsed = began.elapsed();
+        // Clean up before asserting, including with a wrong serial/default
+        // PlayerExit injected. Stop wakes the tracker within its 100 ms tick.
+        started.stop.store(true, Ordering::Relaxed);
+        let reader_stopped = reader_finished(&spec.window_observation, Duration::from_secs(10));
+        if finished.is_err() {
+            end.recv_timeout(Duration::from_secs(10))
+                .expect("cancelled tracker stops");
+        }
+        let _ = shutdown.send(());
+        let requests = server.join().unwrap();
+        let mut player = slot.lock().unwrap().take().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !player.has_ended().unwrap() {
+            assert!(Instant::now() < deadline, "killed stand-in is reaped");
+            std::thread::yield_now();
+        }
+        std::fs::remove_dir_all(program.parent().unwrap()).unwrap();
+
+        assert!(reader_stopped);
+        assert_eq!(started.player, crate::player::PlayerKind::External);
+        assert_eq!(
+            launcher.asked.lock().unwrap().len(),
+            if fallback { 2 } else { 0 }
+        );
+        assert_eq!(
+            finished,
+            Ok((expected_position, true)),
+            "{name}: this launch's exit must reach the end callback before the connect timeout"
+        );
+        assert!(
+            elapsed < limit,
+            "the end must precede the five-second connection timeout"
+        );
+        requests
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn plex_tracking_receives_this_launchs_player_exit() {
+        let requests = early_exit_through_play("plex-exit", false, |base| {
+            ProgressTarget::Plex(TrackInfo {
+                server_base: base,
+                token: "test-token".into(),
+                client_identifier: "test-client".into(),
+                rating_key: "1".into(),
+                key: "/library/metadata/1".into(),
+                duration_ms: 60_000,
+            })
+        });
+        assert_eq!(
+            requests.len(),
+            2,
+            "the real Plex tracker sends both final reports"
+        );
+        assert!(
+            requests[0].starts_with("GET /:/timeline?") && requests[0].contains("state=stopped")
+        );
+        assert!(requests[1].starts_with("GET /:/progress?"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn jellyfin_tracking_receives_this_launchs_player_exit() {
+        let requests = early_exit_through_play("jellyfin-exit", false, |base| {
+            ProgressTarget::Jellyfin(JellyfinTrack {
+                base_url: base,
+                item_id: "item".into(),
+                media_source_id: "media".into(),
+                play_session_id: None,
+                headers: Vec::new(),
+            })
+        });
+        assert_eq!(
+            requests,
+            [
+                "POST /Sessions/Playing HTTP/1.1\r\n",
+                "POST /Sessions/Playing/Stopped HTTP/1.1\r\n",
+            ],
+            "the real Jellyfin tracker sends Start and Stopped before notifying"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_fallback_play_tracks_the_external_players_serial() {
+        let requests = early_exit_through_play("fallback-exit", true, |_| ProgressTarget::None);
+        assert!(requests.is_empty());
     }
 
     #[cfg(unix)]

@@ -5802,6 +5802,10 @@ fn automatic_manages(continues_automatic: bool, resolved: &str) -> bool {
     continues_automatic || resolved == config::PLAYBACK_QUALITY_AUTOMATIC
 }
 
+fn playback_certificate_checked(certificate_check_on: bool, url: &str) -> bool {
+    certificate_check_on && url.starts_with("https://")
+}
+
 async fn play_by_key(
     state: &AppState,
     request: PlayLaunchRequest<'_>,
@@ -6179,7 +6183,7 @@ async fn play_by_key_locked(
         // that ended before it was seen to start reported as one whose
         // certificate may have been refused; any other early end is
         // reported as it always was.
-        let certificate_checked = certificate_check_on && resolved.url.starts_with("https://");
+        let certificate_checked = playback_certificate_checked(certificate_check_on, &resolved.url);
         let spec = playback::PlaySpec {
             player: player_choice.kind,
             url: resolved.url,
@@ -7828,6 +7832,22 @@ mod run_over_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn playback_certificate_check_requires_both_https_and_the_setting() {
+        for (check_on, url, expected) in [
+            (true, "https://media.invalid/stream", true),
+            (true, "http://media.invalid/stream", false),
+            (false, "https://media.invalid/stream", false),
+            (false, "http://media.invalid/stream", false),
+        ] {
+            assert_eq!(
+                playback_certificate_checked(check_on, url),
+                expected,
+                "certificate checked: setting={check_on}, url={url}"
+            );
+        }
+    }
 
     fn linked_server(name: &str, machine_identifier: &str) -> PlexServer {
         PlexServer {

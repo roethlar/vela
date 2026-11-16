@@ -950,11 +950,28 @@ test('a report that does not say the run is over never leaves on its own', () =>
 });
 
 test("the tracker's report of an end names its session and says whether the run is over", () => {
+  const start = commands.indexOf('\nasync fn play_by_key_locked(');
+  assert.notEqual(start, -1, 'the launch path exists');
+  const play = commands.slice(start, commands.indexOf('\n}\n', start))
+    .replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.match(
+    play,
+    shape(`let certificate_checked = playback_certificate_checked(certificate_check_on, &resolved.url);
+      let spec = playback::PlaySpec {
+        player: player_choice.kind,
+        url: resolved.url,`),
+    'the payload uses the tested certificate rule on the setting and this launch URL',
+  );
+  assert.equal([...play.matchAll(/\bplayback_certificate_checked\b/g)].length, 1);
+  assert.equal(
+    [...play.matchAll(/\bcertificate_checked\b/g)].length, 2,
+    'the certificate decision is declared once and used only by the payload, without replacement',
+  );
   // The one emit of the tracker's end, whole: ids and flags, runOver from
   // the rule `end_is_run_over` (tested in Rust) on what the backend knows
   // there.
   assert.match(
-    commands,
+    play,
     shape(`let run_over = tracker_end_is_run_over(
         &app.state::<AppState>(),
         advance.saw_eof(&session_id),
