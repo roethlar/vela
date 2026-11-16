@@ -137,7 +137,7 @@ function settingsBackend(spec) {
   };
   if (spec.group === "path") state.path = spec.initial;
   else state[spec.group][spec.key] = spec.initial;
-  const backend = { holdLoads: false, holdWrites: false, refuse: false, failDisplay: false, loads: [], writes: [] };
+  const backend = { state, holdLoads: false, failLoads: false, holdWrites: false, refuse: false, failDisplay: false, loads: [], writes: [] };
   const mpv = () => ({
     available: true, path: state.path ?? "/automatic/mpv", configuredPath: state.path,
     canAutoInstall: true, installCommand: null, installDescription: "test installer", installUrl: "",
@@ -145,7 +145,10 @@ function settingsBackend(spec) {
   const profile = { widthPx: 1920, heightPx: 1080, hdr: "disabled", evidence: "native" };
   backend.value = () => (spec.group === "path" ? state.path : state[spec.group][spec.key]) ?? "";
   backend.invoke = (command, args) => {
-    if (command === "get_sources") return backend.holdLoads ? new Promise((resolve) => backend.loads.push(() => resolve([]))) : Promise.resolve([]);
+    if (command === "get_sources") {
+      if (backend.failLoads) return Promise.reject(new Error("initial load failed"));
+      return backend.holdLoads ? new Promise((resolve) => backend.loads.push(() => resolve([]))) : Promise.resolve([]);
+    }
     if (command === "check_mpv") return Promise.resolve(mpv());
     if (command === "get_mpv_advanced") return Promise.resolve(structuredClone(state.advanced));
     if (command === "get_continue_playing") return Promise.resolve(state.continuation.mode);
@@ -188,6 +191,125 @@ function settingsBackend(spec) {
 }
 
 const settingsTurn = () => new Promise((resolve) => setImmediate(resolve));
+
+const groupedSettings = [
+  { group: "advanced", first: "Use my own mpv config", second: "Black-bar cropping", sibling: "Advanced mpv options" },
+  { group: "preferences", first: "Duplicate playback source", second: "HDR override", sibling: "Resolution override" },
+];
+
+for (const { group, first, second, sibling } of groupedSettings) {
+  const firstSpec = settingsControls.find((control) => control.label === first);
+  const secondSpec = settingsControls.find((control) => control.label === second);
+  const siblingSpec = settingsControls.find((control) => control.label === sibling);
+
+  test(`Settings ${group}: grouped saves wait for the accepted initial load and preserve siblings`, async () => {
+    const backend = settingsBackend(siblingSpec);
+    const app = settingsApp()(backend);
+    backend.holdLoads = true;
+    const a = app.open();
+    const loadingA = a.load();
+    a.controls[first].edit(firstSpec.initial);
+    const saving = a.controls[first].leave();
+    a.close();
+    const b = app.open();
+    const loadingB = b.load();
+    await settingsTurn();
+    assert.equal(backend.writes.length, 0, "no grouped write may guess the unloaded siblings");
+    backend.loads.shift()();
+    await loadingA;
+    await settingsTurn();
+    assert.equal(backend.writes.length, 0, "an obsolete load must not release the waiting write");
+    backend.loads.shift()();
+    await loadingB;
+    await saving;
+    assert.equal(backend.state[group][firstSpec.key], firstSpec.initial);
+    assert.equal(backend.value(), siblingSpec.initial, "an untouched nondefault sibling survives");
+    assert.equal(b.controls[sibling].value, siblingSpec.initial);
+    b.close();
+  });
+
+  test(`Settings ${group}: queued sibling edits compose after success or refusal across openings`, async () => {
+    for (const reopen of [true, false]) for (const refuse of [false, true]) {
+      const backend = settingsBackend(siblingSpec);
+      const app = settingsApp()(backend);
+      const a = app.open();
+      await a.load();
+      backend.holdWrites = true;
+      a.controls[first].edit(firstSpec.initial);
+      const savingA = a.controls[first].leave();
+      await settingsTurn();
+      if (reopen) a.close();
+      const b = reopen ? app.open() : a;
+      if (reopen) await b.load();
+      b.controls[second].edit(secondSpec.initial);
+      const savingB = b.controls[second].leave();
+      await settingsTurn();
+      assert.equal(backend.writes.length, 1, "the next group waits for the preceding reply");
+      if (!refuse) backend.writes[0].apply();
+      backend.writes[0].deliver(refuse);
+      await savingA;
+      await settingsTurn();
+      assert.equal(backend.writes.length, 2);
+      assert.equal(backend.writes[1].args[firstSpec.key], backend.state[group][firstSpec.key],
+        `the sibling uses the latest confirmation (reopen=${reopen}, refuse=${refuse})`);
+      backend.writes[1].apply();
+      backend.writes[1].deliver();
+      await savingB;
+      assert.equal(backend.state[group][secondSpec.key], secondSpec.initial);
+      assert.equal(backend.value(), siblingSpec.initial);
+      assert.equal(b.controls[first].value, backend.state[group][firstSpec.key]);
+      b.close();
+    }
+  });
+
+  test(`Settings ${group}: a failed initial load refuses grouped saves without writing defaults`, async () => {
+    const backend = settingsBackend(siblingSpec);
+    const a = settingsApp()(backend).open();
+    backend.failLoads = true;
+    const loading = a.load();
+    a.controls[first].edit(firstSpec.initial);
+    await loading;
+    await a.controls[first].leave();
+    assert.equal(backend.writes.length, 0, "a failed load must never become a default-filled write");
+    assert.match(a.controls[first].error, /initial load failed/);
+    assert.equal(a.controls[first].busy, false);
+    backend.failLoads = false;
+    await a.load();
+    a.controls[first].edit(firstSpec.initial);
+    await a.controls[first].leave();
+    assert.equal(backend.state[group][firstSpec.key], firstSpec.initial);
+    assert.equal(backend.value(), siblingSpec.initial, "retry after a good load preserves siblings");
+    a.close();
+  });
+}
+
+test("Settings advanced: a choice does not submit unblurred text or resubmit refused text", async () => {
+  const spec = settingsControls.find((control) => control.key === "extraArgs");
+  const backend = settingsBackend(spec);
+  const a = settingsApp()(backend).open();
+  await a.load();
+  const text = a.controls[spec.label];
+  const choice = a.controls["Skip intros"];
+  text.edit(spec.choice);
+  choice.edit("off");
+  await choice.leave();
+  assert.equal(backend.value(), spec.initial, "text waits for blur even if a sibling changes");
+  assert.equal(text.value, spec.choice, "the unsubmitted text remains editable");
+  backend.holdWrites = true;
+  const savingText = text.leave();
+  await settingsTurn();
+  choice.edit("autoskip");
+  const savingChoice = choice.leave();
+  backend.writes[1].deliver(true);
+  await savingText;
+  await settingsTurn();
+  assert.equal(backend.writes[2].args.extraArgs, spec.initial, "a later choice must not retry rejected text");
+  backend.writes[2].apply();
+  backend.writes[2].deliver();
+  await savingChoice;
+  assert.equal(text.value, spec.initial);
+  a.close();
+});
 
 for (const spec of settingsControls) {
   test(`Settings ${spec.label}: drafts, refused saves and ordered replies`, async () => {
@@ -232,6 +354,7 @@ for (const spec of settingsControls) {
     control.edit(spec.choice);
     const saving = control.leave();
     control.edit(spec.newer);
+    await settingsTurn();
     backend.writes[index].apply();
     backend.writes[index].deliver();
     await saving;

@@ -44,12 +44,16 @@
     const status = $state({ pending: 0, saved: false });
     let savedTimer: ReturnType<typeof setTimeout> | undefined;
     const followers = new Set<(value: T) => void>();
+    const waitingForLoad = new Set<{ resolve: () => void; reject: (error: unknown) => void }>();
+    let loadError: { error: unknown } | undefined;
     let reads = 0;
     let tail: Promise<void> | undefined;
     function show(value: T) {
       confirmed.known = true;
       confirmed.value = value;
       for (const follower of [...followers]) follower(value);
+      for (const waiting of waitingForLoad) waiting.resolve();
+      waitingForLoad.clear();
     }
     return {
       confirmed,
@@ -58,9 +62,23 @@
         followers.add(show);
         return () => { followers.delete(show); };
       },
-      beginLoad() { return { read: ++reads, saves: confirmed.saves }; },
+      beginLoad() {
+        loadError = undefined;
+        return { read: ++reads, saves: confirmed.saves };
+      },
       loaded(value: T, ticket: { read: number; saves: number }) {
         if (ticket.read === reads && ticket.saves === confirmed.saves) show(value);
+      },
+      loadFailed(error: unknown, ticket: { read: number; saves: number }) {
+        if (ticket.read !== reads || ticket.saves !== confirmed.saves || confirmed.known) return;
+        loadError = { error };
+        for (const waiting of waitingForLoad) waiting.reject(error);
+        waitingForLoad.clear();
+      },
+      ready() {
+        if (confirmed.known) return Promise.resolve();
+        if (loadError) return Promise.reject(loadError.error);
+        return new Promise<void>((resolve, reject) => waitingForLoad.add({ resolve, reject }));
       },
       confirm(value: T) {
         confirmed.saves += 1;
@@ -99,7 +117,7 @@
     const value = $state({ ...setting.confirmed.value });
     const feedback = $state({ error: null as string | null });
     const edits = new Map<keyof T, number>();
-    let submittedEdits = new Map<keyof T, number>();
+    const submittedEdits = new Map<keyof T, number>();
     const dirty = new Set<keyof T>();
     const keys = Object.keys(value) as (keyof T)[];
     const unfollow = setting.follow((confirmed) => {
@@ -121,12 +139,16 @@
         }
         return true;
       },
-      capture(submit = true) {
-        if (submit) submittedEdits = new Map(edits);
-        return { value: { ...value }, edits: new Map(edits) };
+      capture(submit = true, fields = keys) {
+        const changes: Partial<T> = {};
+        for (const key of fields) {
+          changes[key] = value[key];
+          if (submit && edits.has(key)) submittedEdits.set(key, edits.get(key)!);
+        }
+        return { value: { ...value }, changes, fields, edits: new Map(edits) };
       },
-      finish(submitted: { edits: Map<keyof T, number> }, keepDraft?: keyof T) {
-        for (const key of keys) {
+      finish(submitted: { fields: (keyof T)[]; edits: Map<keyof T, number> }, keepDraft?: keyof T) {
+        for (const key of submitted.fields) {
           if (edits.get(key) !== submitted.edits.get(key)) continue;
           if (key === keepDraft && dirty.has(key) && value[key] !== setting.confirmed.value[key]) continue;
           dirty.delete(key);
@@ -137,12 +159,12 @@
   }
 
   function changeDraft<T extends object, K extends keyof T>(
-    draft: ReturnType<typeof createDraft<T>>, key: K, value: T[K], save: () => Promise<void>,
+    draft: ReturnType<typeof createDraft<T>>, key: K, value: T[K], save: (key: K) => Promise<void>,
   ) {
     // Svelte calls an explicit change handler before updating bind:value.
     draft.value[key] = value;
     draft.edit(key);
-    return save();
+    return save(key);
   }
 
   const playerWindowSetting = createSetting({ mode: "remember" as PlayerWindowMode });
@@ -477,6 +499,8 @@
       playbackSetting.loaded(playbackValues(playbackPrefs), playbackRead);
       videoPlayerSetting.loaded(player, videoPlayerRead);
     } catch (e) {
+      advancedSetting.loadFailed(e, advancedRead);
+      playbackSetting.loadFailed(e, playbackRead);
       if (seq === loadSeq) err = String(e);
     }
   }
@@ -594,12 +618,15 @@
     }
   }
 
-  async function saveMpvAdvanced() {
-    const submitted = advancedDraft.capture();
-    const options = submitted.value;
+  async function saveMpvAdvanced(key: keyof Omit<MpvAdvanced, "qualityTiers">) {
+    const submitted = advancedDraft.capture(true, [key]);
     let saved = false;
     try {
       await advancedSetting.queue(async () => {
+        // Only this action's field is queued. Siblings come from the accepted
+        // load and preceding confirmations, including other dialog openings.
+        await advancedSetting.ready();
+        const options = { ...advancedSetting.confirmed.value, ...submitted.changes };
         await invoke("set_mpv_advanced", options);
         // This setter acknowledges all fields, but returns no DTO. Its only
         // normalization is trimming the extra arguments.
@@ -673,11 +700,12 @@
     }
   }
 
-  async function savePlaybackPreferences() {
-    const submitted = playbackDraft.capture();
-    const { policy, resolutionOverride, hdrOverride } = submitted.value;
+  async function savePlaybackPreferences(key: "policy" | "resolutionOverride" | "hdrOverride") {
+    const submitted = playbackDraft.capture(true, [key]);
     try {
       await playbackSetting.queue(async () => {
+        await playbackSetting.ready();
+        const { policy, resolutionOverride, hdrOverride } = { ...playbackSetting.confirmed.value, ...submitted.changes };
         await invoke("set_playback_preferences", {
           policy, resolutionOverride: resolutionOverride || null, hdrOverride: hdrOverride || null,
         });
@@ -724,12 +752,12 @@
     advancedDraft.edit("extraArgs");
     const cur = advanced.extraArgs.trimEnd();
     advanced.extraArgs = (cur ? cur + "\n" : "") + args + "\n";
-    return saveMpvAdvanced();
+    return saveMpvAdvanced("extraArgs");
   }
 
   function blurMpvAdvanced() {
     if (advancedDraft.needsSave("extraArgs", (value) => String(value).trim())) {
-      return saveMpvAdvanced();
+      return saveMpvAdvanced("extraArgs");
     }
   }
 
