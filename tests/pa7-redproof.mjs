@@ -9,13 +9,14 @@ import { spawnSync } from 'node:child_process';
 const helper = 'tests/e2e/helpers.mjs';
 const judge = 'tests/e2e/judge.mjs';
 const scenario = 'tests/e2e/scenarios/multiplex.mjs';
+const unit = 'tests/e2e-judge.test.mjs';
 const good = 'a play held still is stopped where it was held';
 const near = 'a play is not held where it has been near';
 const frame = 'the measured hold has its own exclusion band';
 const callback = 'the held-position callback finishes before the stop';
 const finalCheck = 'the final recheck refuses each way';
 const wire = 'multiplex has its play held still before the stop';
-const retry = 'one identical final retry passes';
+const count = 'no stopped report, duplicate stops';
 const cases = [];
 const add = (id, file, test, before, after, reason) => cases.push({ id, file, test, edits: [[before, after]], reason });
 
@@ -58,16 +59,9 @@ add('W04-caller-position', scenario, wire, '        lastSeenMs = Math.round(seco
 add('W05-judge-wired', scenario, wire, '    assertPlexStopped(mockA.state.requests, lastSeenMs);', '', 'judges the stopped report against it');
 add('W06-ordinary-stop', helper, wire, '    else await stop();', '    else await stopStill(mpv, stop, { positionAtStop, furthestMs: beforeSeekMs });', 'playAndQuit stops the play once, held still first when asked');
 
-add('J01-missing-stop', judge, 'no stopped report, too many retries', 'if (stopped.length === 0) return [one];', 'if (stopped.length === 0) return [];', 'not 0');
-add('J02-correct-retry', judge, retry, 'stopped.length <= 2', 'stopped.length === 1', 'not 2');
-add('J03-retry-limit', judge, 'no stopped report, too many retries', 'stopped.length <= 2', 'true', 'not 3');
-for (const field of ['ratingKey', 'key', 'time', 'duration']) {
-  const before = "['ratingKey', 'key', 'time', 'duration'].every";
-  const after = `[${['ratingKey', 'key', 'time', 'duration'].filter((f) => f !== field).map((f) => `'${f}'`).join(', ')}].every`;
-  add(`J04-retry-${field}`, judge, retry, before, after, 'a retried stopped report repeats the same item');
-}
-add('J05-final-order', judge, 'no stopped report, too many retries', "if (!reports.slice(-stopped.length).every((q) => q.state === 'stopped'))", 'if (false)', 'the stopped report comes last');
-add('J06-before-retry', judge, retry, 'const earlier = reports.slice(0, -stopped.length);', 'const earlier = reports.slice(0, -1);', '"playing" reports, and only those');
+add('J01-missing-stop', judge, count, 'if (stopped.length === 0) return [one];', 'if (stopped.length === 0) return [];', 'not 0');
+add('J02-duplicate-stops', judge, count, 'stopped.length === 1', 'true', 'not 2');
+add('J05-final-order', judge, count, 'if (reports.at(-1) !== report)', 'if (false)', 'the stopped report comes last');
 add('J07-playing-before', judge, 'anything but "playing" reports before', 'if (!(earlier.length > 0 && earlier.every((q) => q.state === \'playing\')))', 'if (false)', '"playing" reports, and only those');
 add('J08-early-position', judge, 'a stopped report away from where', 'finalMs >= lastSeenMs - 500', 'finalMs >= lastSeenMs - 2000', '6458');
 add('J09-late-position', judge, 'a stopped report away from where', 'finalMs <= lastSeenMs + 500', 'finalMs <= lastSeenMs + 2000', '7959');
@@ -78,6 +72,11 @@ add('J13-duration', judge, "the stopped report's time and duration swapped", 'if
 add('J14-ratingKey', judge, 'a stopped report for another item fails', 'if (report.ratingKey !== ratingKey)', 'if (false)', 'by its ratingKey');
 add('J15-key', judge, 'a stopped report for another item fails', 'if (report.key !== key)', 'if (false)', 'by its key');
 add('J16-seek', judge, 'a stopped report short of the seek', 'finalMs >= seekMs && finalMs <= durationMs', 'finalMs <= durationMs', 'past the 6000 ms seek');
+
+// fr-14: duplicate the tracker's unconditional successful final send. The
+// scenario's judge must catch it through the held-play test, with no failure
+// or retry injected into the transport.
+add('T01-double-stop', unit, good, "      timeline('stopped', final(last));", "      timeline('stopped', final(last));\n      timeline('stopped', final(last));", 'the play sends exactly one stopped timeline report, not 2');
 
 const selected = process.argv[2] ? cases.filter(({ id }) => new RegExp(process.argv[2]).test(id)) : cases;
 assert.ok(selected.length > 0, 'at least one mutation selected');

@@ -324,9 +324,9 @@ export default {
       'Plex playback reporting must use the source token header',
     );
     // Row 2's final half (review finding pa-7): the stop itself reaches Plex,
-    // as a timeline report with state=stopped for this item, the last of the
-    // play's timeline reports, at the play's final position. playAndQuit
-    // seeks to 6 s, a moment later holds the play paused at 9 s, inside the
+    // as exactly one timeline report with state=stopped for this item, the
+    // last of the play's timeline reports, at the play's final position.
+    // playAndQuit seeks to 6 s, a moment later holds the play paused at 9 s, inside the
     // 10 s clip, and stops it there, so that position is between 6 and 10 s,
     // and no "playing" report may come later or say more. And it is where
     // the play stopped, not the item's end: no more than half a second from
@@ -337,9 +337,8 @@ export default {
     // positionAtStop above), and no report may say more than the stopped
     // one, the stopped report may in effect be no lower than that report:
     // when that report is exact the band is 0 ms below the hold and 500 ms
-    // above. One identical final retry is allowed (e50aa83). What this
-    // proves is the stop of a play that was paused when it was stopped;
-    // nothing here proves where Vela reports a play stopped
+    // above. What this proves is the stop of a play paused when it was
+    // stopped; nothing here proves where Vela reports a play stopped
     // while it was moving. The rules are plexStopProblems's (judge.mjs),
     // held by unit tests; this waits for the report and asks them through
     // assertPlexStopped, held by unit tests too.

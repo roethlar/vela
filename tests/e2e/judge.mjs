@@ -110,8 +110,8 @@ export function skipJumpVerdict(samples, { startS, rangeStart, rangeEnd, windowM
 // before it; `durationMs`,
 // `ratingKey` and `key` the item's. One sentence per broken rule, none when
 // all is well:
-// - one report says state=stopped, with at most one identical retry, last;
-// - before the stopped report(s) there is at least one report, all "playing";
+// - exactly one report says state=stopped, and it is the last;
+// - before the last there is at least one report, and all say "playing";
 // - the stopped report names the item (its ratingKey, and its key);
 // - its time is past the seek and inside the item;
 // - its time is where the play stopped: within 500 ms of lastSeenMs, either
@@ -129,20 +129,19 @@ export function skipJumpVerdict(samples, { startS, rangeStart, rangeEnd, windowM
 // waits for one): the stopped report may then be no lower than that report,
 // so its lower bound is that report's position (exactly the hold when that
 // report is exact), and its upper bound is 500 ms above the measured hold.
+// A retry after an idle pooled connection closes (e50aa83) reaches this mock
+// once: the failed attempt was never handled. The mock immediately answers
+// each timeline it handles; a second stopped arrival fails even if identical
+// (fr-14).
 export function plexStopProblems(reports, { lastSeenMs, durationMs, ratingKey, key, seekMs }) {
   const stopped = reports.filter((q) => q.state === 'stopped');
-  const one = `the play sends one stopped timeline report with at most one identical retry, not ${stopped.length}`;
+  const one = `the play sends exactly one stopped timeline report, not ${stopped.length}`;
   // With none there is nothing more to judge; with more, the first is judged.
   if (stopped.length === 0) return [one];
-  const problems = stopped.length <= 2 ? [] : [one];
+  const problems = stopped.length === 1 ? [] : [one];
   const report = stopped[0];
-  // e50aa83 retries a report once if its connection failed, including when
-  // the server received it but its answer was lost. Both copies can arrive.
-  if (!stopped.every((q) => ['ratingKey', 'key', 'time', 'duration'].every((field) => q[field] === report[field]))) {
-    problems.push('a retried stopped report repeats the same item, position and duration');
-  }
-  if (!reports.slice(-stopped.length).every((q) => q.state === 'stopped')) problems.push('the stopped report comes last');
-  const earlier = reports.slice(0, -stopped.length);
+  if (reports.at(-1) !== report) problems.push('the stopped report comes last');
+  const earlier = reports.slice(0, -1);
   if (!(earlier.length > 0 && earlier.every((q) => q.state === 'playing'))) {
     problems.push('"playing" reports, and only those, come before it');
   }

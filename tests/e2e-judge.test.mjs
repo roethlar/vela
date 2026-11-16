@@ -475,38 +475,21 @@ test('pa-7: a stopped report away from where the play stopped fails', () => {
   assert.deepEqual(judgeStop([report('playing', 4916), report('stopped', 10000)], 9700), [WHERE(10000, 9700)], "at the item's end");
 });
 
-test('pa-7: no stopped report, too many retries, or one that is not last fails', () => {
+test('pa-7: no stopped report, duplicate stops, or one that is not last fails', () => {
   assert.deepEqual(judgeStop([report('playing', 4916), report('playing', 7458)]), [
-    'the play sends one stopped timeline report with at most one identical retry, not 0',
+    'the play sends exactly one stopped timeline report, not 0',
   ]);
-  assert.deepEqual(judgeStop([report('playing', 4916), ...Array.from({ length: 3 }, () => report('stopped', 7458))]), [
-    'the play sends one stopped timeline report with at most one identical retry, not 3',
-  ]);
+  for (const count of [2, 3]) {
+    assert.deepEqual(judgeStop([report('playing', 4916), ...Array.from({ length: count }, () => report('stopped', 7458))]), [
+      `the play sends exactly one stopped timeline report, not ${count}`,
+      'the stopped report comes last',
+      '"playing" reports, and only those, come before it',
+    ]);
+  }
   assert.deepEqual(judgeStop([report('playing', 4916), report('stopped', 7458), report('playing', 7000)]), [
     'the stopped report comes last',
     '"playing" reports, and only those, come before it',
   ]);
-});
-
-test('pa-7: one identical final retry passes, but a changed retry or a report after the stop fails', (t) => {
-  t.mock.method(console, 'log', () => {});
-  const retries = [...GOOD, report('stopped', 7458)];
-  assert.deepEqual(judgeStop(retries), []);
-  assertPlexStopped(retries.map((query) => request('/:/timeline', query)), 7458);
-  for (const extra of [{ time: '7459' }, { duration: '9999' }, { ratingKey: '2' }, { key: '/library/metadata/2' }]) {
-    assert.deepEqual(judgeStop([...GOOD, report('stopped', 7458, extra)]), [
-      'a retried stopped report repeats the same item, position and duration',
-      ...(extra.time ? ['no report says the play got further than its final position'] : []),
-    ]);
-  }
-  for (const reports of [
-    [...retries, report('playing', 7000)],
-    [...GOOD, report('playing', 7000), report('stopped', 7458)],
-  ]) {
-    assert.deepEqual(judgeStop(reports), ['the stopped report comes last', '"playing" reports, and only those, come before it']);
-  }
-  // A retry does not cure a stale final position.
-  assert.deepEqual(judgeStop([report('playing', 4916), report('stopped', 6458), report('stopped', 6458)]), [WHERE(6458)]);
 });
 
 test('pa-7: anything but "playing" reports before the stopped one, or none, fails', () => {
@@ -586,6 +569,22 @@ test('pa-7: the multiplex scenario passes the reports of a play stopped where it
     `Plex A timeline reports: ${JSON.stringify([report('playing', 4916), report('stopped', 7458)])}`,
     `Plex A timeline reports: ${JSON.stringify([report('playing', 4916), report('stopped', 9800)])}`,
   ]);
+});
+
+test('pa-7: the multiplex scenario rejects two stopped reports even when they are identical', (t) => {
+  t.mock.method(console, 'log', () => {});
+  // These are arrivals at the mock, with no failed delivery to excuse a
+  // second one (fr-14). Changing any final-report field still fails by count.
+  for (const extra of [{}, { time: '7459' }, { duration: '9999' }, { ratingKey: '2' }, { key: '/library/metadata/2' }]) {
+    const requests = [...requestsOf(4916, 7458), request('/:/timeline', report('stopped', 7458, extra))];
+    assert.throws(
+      () => assertPlexStopped(requests, 7458),
+      (error) =>
+        error instanceof assert.AssertionError &&
+        error.actual.includes('the play sends exactly one stopped timeline report, not 2'),
+      `two stopped arrivals, with the second changed by ${JSON.stringify(extra)}`,
+    );
+  }
 });
 
 test('pa-7: the multiplex scenario fails the swap, and a stop away from the position it read', (t) => {

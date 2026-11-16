@@ -407,9 +407,11 @@ player's user (`runPlayer` says which player the run is in):
   mpv was told to end the file; fixed 2026-11-16). `multiplex` lets the stopped report be no lower than Vela's own
   "playing" report of the hold (plexStopProblems lets no report say the play
   got further). When that report is exact, the band is 0 ms below the hold
-  and 500 ms above. A final report may be retried once after a connection
-  failure (`e50aa83`); one identical retry is accepted. A changed retry,
-  more retries, or a timeline report after the final stop fails.
+  and 500 ms above. Exactly one stopped timeline report must arrive, last.
+  A retry after an idle pooled connection closes (`e50aa83`) still produces
+  one arrival: the mock never handled the failed attempt. The mock answers
+  each timeline it handles immediately; a second stopped arrival fails even
+  when identical.
 - `waitForPageUncovered(driver, what)`: the embedded player's view covers
   the page until a moment after its play has ended. A click made before
   then fails ("element not interactable" or "element click intercepted").
