@@ -1,5 +1,28 @@
 # Review status
 
+**Final round before the release of Vela 1.0.65, 2026-11-16 (open: repairs being written):** four codereview codex
+hunts, one per slice (called plainly; standard), over `7b17f63..c093289`
+(release engineering to `2ffbffe`): `findings` in each. Thirteen
+candidates, thirteen admitted, none declined. A fifth hunt, over the two
+commits that landed afterwards (`2ffbffe..c618d31`), is out. Record:
+`.agents/review/codereview-2026-11-16-release.md`.
+
+| ID    | Severity | Impact (one line) | Status | Commit | Reviewer |
+|-------|----------|-------------------|--------|--------|----------|
+| fr-1  | MEDIUM   | Changing one Settings control can save over another setting that is stored with it | `[ ]` | — | codex/default/standard |
+| fr-2  | MEDIUM   | A Settings save that is refused after the dialog has closed is never shown | `[ ]` | — | codex/default/standard |
+| fr-3  | MEDIUM   | The certificate checkbox can become usable while showing a value that was never loaded | `[ ]` | — | codex/default/standard |
+| fr-4  | LOW      | The Settings tests pass when a choice saves its previous value | `[ ]` | — | codex/default/standard |
+| fr-5  | LOW      | Settings and the guide say a change of player waits for a restart; going back to mpv's own window does not | `[ ]` | — | codex/default/standard |
+| fr-6  | MEDIUM   | A right-click, or a track chosen, while a wheel command is unanswered is dropped with "The player is busy" | `[ ]` | — | codex/default/standard |
+| fr-7  | MEDIUM   | A long wheel burst adds up to a seek the player refuses, and all of it is lost | `[ ]` | — | codex/default/standard |
+| fr-8  | LOW      | The volume can drift by one point near 0 and near 100 | `[ ]` | — | codex/default/standard |
+| fr-9  | LOW      | The view's tests pass with several of its rules removed | `[ ]` | — | codex/default/standard |
+| fr-10 | MEDIUM   | A Jellyfin start report whose answer was lost is sent again, and the server counts the play twice | `[ ]` | — | codex/default/standard |
+| fr-11 | MEDIUM   | A report's failure is logged with whatever the server put in its status line | `[ ]` | — | codex/default/standard |
+| fr-12 | MEDIUM   | CI compiles the macOS app for one of the two architectures the release builds | `[ ]` | — | codex/default/standard |
+| fr-13 | LOW      | The guide says any value of `WEBKIT_DISABLE_DMABUF_RENDERER` rules out the embedded player; `0` and empty do not | `[ ]` | — | codex/default/standard |
+
 **Player window review (mpv window state, size, the setting), 2026-11-14 (closed 2026-11-14):** three codereview codex
 hunts, one per slice (called plainly; the host's codex config resolves to
 gpt-6-astra @ max; standard), over `f1e0c9c..9815e10`: `findings` in each.
@@ -32,7 +55,7 @@ admitted, none declined. Record:
 | pa-4 | MEDIUM   | A timer started through Node's timer modules is not seen by the import watch | `[x]`  | `c294a09`, `be3f1f4`, `cc85c2d` | codex/default/standard esc:T5(ceiling); closed as it stands by the owner, 2026-11-14 |
 | pa-5 | MEDIUM   | The verdict takes a known failure that was skipped for one that failed | `[x]`  | `115cbaa`, `dbb91b4`, `0d8ccbd`, `bf86854` | codex/default/standard esc:T5(ceiling); closed as it stands by the owner, 2026-11-14 |
 | pa-6 | MEDIUM   | A run can say it built the app it ran when it built elsewhere and ran an older binary | `[x]`  | `f00cdc4`, `8cf3a05`, `3d2ecca` | codex/default/standard esc:T5(ceiling); the last repair: codex wrote it; reviewed by the agent |
-| pa-7 | MEDIUM   | Nothing checks that Plex is told the play has stopped                  | `[x]`  | `17d9a81`, `7e1dda5`, `f07fd8c`, `4906831`, `d504a1e` | codex/default/standard esc:T5(ceiling); closed as it stands by the owner, 2026-11-14 |
+| pa-7 | MEDIUM   | Nothing checks that Plex is told the play has stopped                  | `[x]`  | `17d9a81`, `7e1dda5`, `f07fd8c`, `4906831`, `d504a1e`, `c618d31` | codex/default/standard esc:T5(ceiling); closed as it stood by the owner, 2026-11-14; the last round's comments repaired 2026-11-16: codex wrote it; reviewed by the agent |
 | pa-8 | LOW      | A name every object has, such as toString, is accepted as a test-only route | `[x]`  | `ade0278` | codex/default/standard |
 
 **Embedded player, packaging review, 2026-11-14 (closed 2026-11-14, all six verified):** codereview codex

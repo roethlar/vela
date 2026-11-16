@@ -1,7 +1,7 @@
 # pw-7: when saving the Player window setting fails, the control goes on showing the choice that was not saved
 
 **Severity**: LOW — the control is bound to the value being saved, and a failed save only shows the error. The select keeps showing a choice the backend does not hold, and playback follows the old one until a save succeeds.
-**Status**: In progress
+**Status**: Verified — the last repair codex wrote; reviewed by the working agent, 2026-11-14
 **Branch**: —
 **Commit**: `ac25240`, `0ee2e0d` (repair), `1430f2e` (second repair)
 

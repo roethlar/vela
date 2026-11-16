@@ -1,7 +1,7 @@
 # pa-5: the verdict takes a known failure that was skipped for one that failed
 
 **Severity**: MEDIUM — for a scenario recorded as a known failure, the verdict compares the error text of any result that is not a pass. A result marked skipped that carries the recorded text is accepted, so the verdict can pass on a run in which the scenario never ran.
-**Status**: In progress
+**Status**: Closed as it stands by the owner, 2026-11-14 (the last round's comments are its known limits)
 **Branch**: —
 **Commit**: `115cbaa`, `dbb91b4` (repair), `0d8ccbd` (second repair), `bf86854` (third repair)
 

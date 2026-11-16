@@ -1,7 +1,7 @@
 # pa-4: a timer started through Node's timer modules is not seen by the watch on importing a scenario
 
 **Severity**: MEDIUM — the parity test says that importing a scenario does nothing, and that timers are among what it watches. It watches the global timer functions only. A scenario that imports `setTimeout` from `node:timers`, or awaits a delay from `node:timers/promises`, at import passes; a callback can then run later, in the runner or during another scenario.
-**Status**: In progress
+**Status**: Closed as it stands by the owner, 2026-11-14 (the last round's comments are its known limits)
 **Branch**: —
 **Commit**: `c294a09`, `be3f1f4` (repair), `cc85c2d` (second repair)
 

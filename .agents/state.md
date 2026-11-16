@@ -29,13 +29,21 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     fails at notarization: Apple answers 403, "A required agreement is
     missing or has expired", which only the owner can accept, in the
     Apple Developer account. The Windows leg builds and then fails at
-    the first signature: SignTool exit code 1 under the TrustedSigning
-    module 0.5.8. Tauri shows nothing a signing command says, so
-    `.github/scripts/azure-sign.ps1` now leaves its reason for the
-    workflow to print (`9e7554f`, `6b7dd7c`); the reason itself had not
-    been seen when this was written (run 43884461044). v1.0.60 was
-    signed by the same workflow on 2026-08-08, so both are most likely
-    something that lapsed in the owner's accounts since.
+    the first signature: the signing service answers 403 (Forbidden)
+    when the digest is submitted (run 43887131049; TrustedSigning module
+    0.5.8, client 1.0.95). The credentials are accepted and the signing
+    request is refused, which only the owner can look into, in the Azure
+    portal: the usual causes are the service principal no longer holding
+    the certificate profile's signer role, an identity validation or a
+    subscription that has lapsed, or an endpoint that is not the
+    account's region. Tauri shows nothing a signing command says, so
+    `.github/scripts/azure-sign.ps1` now signs in a child process and
+    leaves all it said for the workflow to print (`9e7554f`, `6b7dd7c`,
+    `2ffbffe`). v1.0.60 was signed by the same workflow and the same
+    secrets on 2026-08-08, so both failures are something that changed
+    in the owner's accounts since. Four runs were made by hand; each
+    sent the owner a failure e-mail, which the owner asked about and was
+    told to expect.
   - CI (`ci.yml`): the package-check tests run instead of skipping
     (`4ab145b`), and a job compiles the backend on macOS and Windows
     (`687d533`): the first compile off Linux since v1.0.60, 429 commits
@@ -48,21 +56,36 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     "Unreleased". The documents say that the Linux packages carry the
     library. Stale records the audit named are tidied (`2a4fa26`,
     `5c53c2c`, this rotation).
-  - Found on the way: an embedded play closed by its user reports a
-    final position about 180 ms before where it was (Blockers; verified
-    and traced 2026-11-16; a fix is being written by codex, worktree
-    `cx-embstop`). The test repair that shows it is `pa-7`'s, ported
-    onto `main`'s tests by codex the same day (worktree `cx-pa7port`,
-    reviewed by the agent: its 54 mutations all caught, external 7 of 7
-    and `multiplex` 3 of 3; in the embedded player `multiplex` fails 3
-    of 3 on that defect, so it lands after the fix).
-  - Left, in order: that fix and that test repair; the version (1.0.65,
-    by `scripts/bump.sh`, with the notes' heading: 1.0.64 is what the
-    package on `continuum` carries, built before later fixes); the full
-    check, both end-to-end suites with the parity verdict, and a package
-    built from the final commit; the final `codereview codex` round over
-    `7b17f63..` and its repairs; then the list for the owner. Nothing
-    since `013cee3` has had a full end-to-end run.
+  - Found on the way and fixed: an embedded play closed by its user
+    reported a final position about 180 ms before where it was
+    (`3e0a485`: a stop now asks mpv to quit before the renderer is
+    freed; the blocker's entry, with the trace, rotated to
+    `docs/history/state-archive.md` that day). The test repair that
+    showed it is `pa-7`'s, ported onto `main`'s tests and finished by
+    codex and landed at `c618d31` (its record).
+  - The version is 1.0.65 (`c093289`, by `scripts/bump.sh`, with the
+    notes' heading; 1.0.64 is what the package on `continuum` carries,
+    built before later fixes). No tag and no release: the owner's.
+  - The final review round is in
+    (`.agents/review/codereview-2026-11-16-release.md`): four codex
+    hunts, thirteen findings (`fr-1` to `fr-13`), all admitted. Their
+    repairs are being written by codex in four worktrees under
+    `~/dev/vela-agent-keep/wt/` on `continuum` (`cx-rvsettings`,
+    `cx-rvview`, `cx-rvfixes`, `cx-rvrelease`), each finding to land as
+    a commit of its own on the working agent's review. A fifth hunt,
+    over the stop fix and the test repair, is out.
+  - A mutation check of three window-state repairs that had landed
+    without one (three helper agents, 2026-11-16; the records of
+    `pw-1`, `pw-8` and `pw-9` have the results) found the first two
+    guarded throughout and twelve behaviours of `pw-9`'s second half
+    held by no test. No defect of the product was found. The tests are
+    being written by codex (`cx-pw9guards`). Also found and not yet
+    taken up: two unit tests of `pw-8` hang, not fail, when their rule
+    is removed.
+  - Left, in order: land those repairs and tests; the full check, both
+    end-to-end suites with the parity verdict, and a package built from
+    the final commit; then the list for the owner. Nothing since
+    `013cee3` has had a full end-to-end run.
 - THE EMBEDDED PLAYER IS OFFERED IN SETTINGS (2026-11-15). The owner
   ruled that day that what is built is to be usable from the app, and
   that the owner is Vela's only user (`.agents/decisions.md`; read it
@@ -363,34 +386,6 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   - Until then: an embedded run that fails the verdict on `completionhub`
     alone is this race until shown otherwise; run the scenario again by
     itself before reading it as a regression.
-- An embedded play closed by its user reports a final position about
-  180 ms early (a helper reported it during the `pa-7` repair work on
-  2026-11-14; VERIFIED and traced by the working agent on 2026-11-16; a
-  fix is being written). The embedded player alone: the external player
-  reports the true position.
-  - Seen: a play held paused at 9.000 s, which Vela had already reported
-    to Plex as "playing" at 9000 ms, was closed with the view's Close
-    control, and the stopped report said 8822, 8819 and 8822 ms in three
-    runs (`multiplex` with the `pa-7` test repair, which fails on it 3 of
-    3 embedded and passes 3 of 3 external).
-  - Why, from what mpv sent on its socket through the stop: on a stop
-    the play's thread leaves its loop at once and tears down in field
-    order (`Live`, `src-tauri/src/player/embedded/session.rs`): the
-    renderer is freed first, and only then is mpv told to quit
-    (`mpv_terminate_destroy`). Freeing the renderer while the file is
-    loaded makes mpv give up its video output (`video-reconfig`,
-    `current-vo` gone); with no video its position falls back to the
-    audio's (`time-pos` 8.819179, equal to `audio-pts`), and it reports
-    that change before `end-file`. Vela's reader keeps the last
-    `time-pos` it is told (`spawn_position_reader`,
-    `src-tauri/src/playback.rs`).
-  - Effect: the final report and the saved resume point are a fraction
-    of a second early; nothing is lost. A file that ends by itself, or a
-    quit sent over mpv's socket, ends the file before the renderer is
-    freed and is not affected.
-  - The fix wanted: on a stop, ask mpv to end the file without waiting
-    on it, keep the loop going until mpv has shut playback down or a
-    bound passes, and only then tear down.
 - The `refresh` E2E flake remains recorded (1.0.59 full Linux run, 36/39,
   with `continueon` and `playverbs`). A candidate cause, seen 2026-11-15:
   `refresh.mjs` and `watchposition.mjs` scrolled the grid with the helper

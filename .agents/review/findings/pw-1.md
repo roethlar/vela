@@ -491,3 +491,33 @@ the compositor with no limit of its own.
 Orchestrator's acceptance: schema-valid payload, verdict in the enum, both
 SHAs equal the pins, both booleans literally true. Accepted. The fix is
 on `main`; the finding is closed.
+
+### Mutation check of round 3, 2026-11-16 (the release's test pass)
+
+Round 3 (`c9e7245` to `79384d9`) landed on 2026-11-14 without red-proofs of
+its own: the owner had set work on tests aside that day. With a release in
+view they were made. A helper agent (Opus 5.5, under the multi-agent workflow the owner switched on
+for this session, in a git worktree of its own) injected regressions into
+the product code one at a time, restored the file from git after each, and
+ran the guards against each.
+The guards: 52 Rust tests (`cargo +stable test --locked --lib`, the sixteen
+named guards and the modules around them) and the Node test "a Compatible
+play is shown on the screen its copy was ranked for, any other on the one
+its launch decides".
+
+Result: every regression made its guard fail on the intended assertion
+(the helper counts 28 injections; its table lists 26, each "fails for the
+right reason"). No guard of round 3 is vacuous. `pw-2`'s part of round 3 is
+covered by the same run.
+
+Held only by a pin on the source text (`tests/player-window-ui.test.mjs`),
+with the Rust tests green under the mutation: the transform read from the
+Geometry event reaching the list; the empty-`WAYLAND_DISPLAY` check being
+wired into `platform_outputs`; `platform_outputs` treating an unreadable
+compositor list as incomplete; the launch deciding the screen for mpv's own
+window; the session not being shadowed; the launch playing `resolved.url`.
+Each pin fails on its mutation, but a rewrite with the same wrong effect in
+other words would pass. This is the gap already recorded above: the play
+path needs a running app. Not claimed as guarded and not tested: the HDR
+query's fallback by size still matches the unrotated mode, and the macOS
+name translation (Known gaps).

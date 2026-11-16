@@ -4,6 +4,44 @@ Entries rotated verbatim out of `.agents/state.md` when they stopped being
 live (handoff pruning rule). Newest rotation first; each block keeps its
 original wording and internal chronology.
 
+## Rotated 2026-11-16 (the embedded player's early final position, fixed at `3e0a485`)
+
+Context for readers: the entry below stood under `## Blockers` for a few
+hours on 2026-11-16 and rotates here verbatim. The fix it asks for landed
+the same day at `3e0a485`: a stop asks mpv to quit through
+`mpv_command_async`, the play's loop goes on until mpv says it has shut
+down (or 250 ms have passed), and only then is the renderer freed. With
+it `multiplex` reports 9000 ms in the embedded player, 3 runs of 3.
+
+- An embedded play closed by its user reports a final position about
+  180 ms early (a helper reported it during the `pa-7` repair work on
+  2026-11-14; VERIFIED and traced by the working agent on 2026-11-16; a
+  fix is being written). The embedded player alone: the external player
+  reports the true position.
+  - Seen: a play held paused at 9.000 s, which Vela had already reported
+    to Plex as "playing" at 9000 ms, was closed with the view's Close
+    control, and the stopped report said 8822, 8819 and 8822 ms in three
+    runs (`multiplex` with the `pa-7` test repair, which fails on it 3 of
+    3 embedded and passes 3 of 3 external).
+  - Why, from what mpv sent on its socket through the stop: on a stop
+    the play's thread leaves its loop at once and tears down in field
+    order (`Live`, `src-tauri/src/player/embedded/session.rs`): the
+    renderer is freed first, and only then is mpv told to quit
+    (`mpv_terminate_destroy`). Freeing the renderer while the file is
+    loaded makes mpv give up its video output (`video-reconfig`,
+    `current-vo` gone); with no video its position falls back to the
+    audio's (`time-pos` 8.819179, equal to `audio-pts`), and it reports
+    that change before `end-file`. Vela's reader keeps the last
+    `time-pos` it is told (`spawn_position_reader`,
+    `src-tauri/src/playback.rs`).
+  - Effect: the final report and the saved resume point are a fraction
+    of a second early; nothing is lost. A file that ends by itself, or a
+    quit sent over mpv's socket, ends the file before the renderer is
+    freed and is not affected.
+  - The fix wanted: on a stop, ask mpv to end the file without waiting
+    on it, keep the loop going until mpv has shut playback down or a
+    bound passes, and only then tear down.
+
 ## Rotated 2026-11-16 (the account of the run of 2026-11-12 to 14; the CI package-check blocker)
 
 Context for readers: the two entries below stood under `## Now` and are the

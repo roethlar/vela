@@ -1,7 +1,7 @@
 # pc-2: a play that ends in an error leaves Vela's window in fullscreen for 50 seconds
 
 **Severity**: MEDIUM — after an embedded play in fullscreen ends in an error, the player view goes and the library stays fullscreen until a 50-second backstop, with no successor coming.
-**Status**: In progress
+**Status**: Verified — the last repair codex wrote; reviewed by the working agent, 2026-11-14
 **Branch**: —
 **Commit**: `4118fea`, `c872dad`, `060a5fd`
 

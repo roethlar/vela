@@ -1,7 +1,7 @@
 # pa-6: a run can say it built the app it ran when it built somewhere else and ran an older binary
 
 **Severity**: MEDIUM — the results file records `built` whenever `--skip-build` was not given. The build honours `CARGO_TARGET_DIR` from the environment (and a Cargo configuration's target directory), while the runner always starts `src-tauri/target/debug/vela`. With the build redirected, an older binary at that path is run, recorded as built from the checked-out commit, and accepted by the verdict.
-**Status**: In progress
+**Status**: Verified — the last repair codex wrote; reviewed by the working agent, 2026-11-14
 **Branch**: —
 **Commit**: `f00cdc4`, `8cf3a05` (repair)
 

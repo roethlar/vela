@@ -275,3 +275,42 @@ Known gaps:
 Orchestrator's acceptance: schema-valid payload, verdict in the enum, both
 SHAs equal the pins, both booleans literally true. Accepted. The fix is
 on `main`; the finding is closed.
+
+### Mutation check of round 2, 2026-11-16 (the release's test pass)
+
+Round 2 (`0ae5b64` to `bb3b84e`) was accepted by codex on 2026-11-14 with
+the red-proofs of the day; with a release in view the guards were checked
+again, one behaviour at a time. A helper agent (Opus 5.5, under the multi-agent workflow the owner switched on
+for this session, in a git worktree of its own) injected regressions into
+the product code one at a time, restored the file from git after each, and
+ran the guards against each.
+
+Result: seventeen mutations in its table. Sixteen fail a guard for the
+right reason: the wait for the reader before the hand-over, its place
+before the window is read, its giving up at the limit, the save after
+giving up, the wait being inside the two-second hand-over, the exit order
+in `lib.rs` (kill, hand over, stop flag), a reader given up on not being
+waited for twice and still ending as finished, the guard living to the end
+of the reader's thread, only the last play in mpv's own window being
+waited for, no wait for a finished reader, the record's lock not held
+during the wait, the 500 ms value, and the real limit being passed.
+
+Two things it found, neither repaired here:
+
+- With the wait made limitless, two unit tests in `playback.rs`
+  (`a_running_reader_is_waited_for_only_so_long`,
+  `a_reader_given_up_on_is_not_waited_for_again`) HANG instead of failing:
+  their wait runs on the test's own thread. They hold the behaviour, but a
+  regression would stop the suite, not fail it (an unfiltered `cargo test`
+  hung past 900 s). Two tests in `commands.rs` fail properly on the same
+  mutation.
+- "A reader thread that cannot be started is still marked finished" is
+  caught only through a race: with the guard moved into the thread, the
+  test fails because its wait ran before the thread had marked itself
+  reading. The spawn failure itself is never driven (the commit said so).
+
+Held only by pins on the source text (`tests/player-window-ui.test.mjs`):
+the exit order in `lib.rs`, the 500 ms value, and the production call
+passing the real limits. Still not covered, as the commit said: the real
+exit handler running twice, and a wrapper `mpv_path` whose kill does not
+end the real mpv.

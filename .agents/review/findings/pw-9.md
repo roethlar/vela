@@ -1,9 +1,9 @@
 # pw-9: when mpv ends before Vela has connected to it, the play's end is held back five seconds, and the next play of a full-screen run opens windowed
 
 **Severity**: MEDIUM — a play whose mpv ends within about a tenth of a second of starting (a stream the server refuses at once, say) is not seen to have ended for five seconds: its Stopped report, its recents stamp, the page's "playback ended" and the next play of a run all wait. And such a play hands on only its size, so the next play of a run that was full screen opens windowed.
-**Status**: In progress (the first half is fixed; the second waits for the owner)
+**Status**: Verified — codex wrote both halves; reviewed by the working agent, 2026-11-14
 **Branch**: —
-**Commit**: `0b313a2` (first half)
+**Commit**: `0b313a2` (first half), `c861796` (second half)
 
 ## Evidence
 
@@ -182,3 +182,47 @@ may go to codex") this review closes the finding.
 
 Not checked: Windows and macOS (not compiled here); a real server that
 refuses a stream.
+
+### Mutation check of the second half, 2026-11-16 (the release's test pass)
+
+The second half (`c861796`) made no red-proofs of its own: the owner had
+set work on tests aside that day. With a release in view they were made.
+A helper agent (Opus 5.5, under the multi-agent workflow the owner switched on
+for this session, in a git worktree of its own) injected regressions into
+the product code one at a time, restored the file from git after each, and
+ran the guards against each.
+The guards: the whole Rust library suite and `tests/player-view.test.mjs`.
+
+Result: 21 mutations (its table lists 20). Eight fail a guard for the
+right reason, six of them one Rust test,
+`a_play_ending_before_its_socket_exists_finishes_without_the_connect_timeout`,
+which holds the headline behaviour (without the confirmed-exit break it
+fails with a timeout), a live player not counting as an exit, `ReaderDone`
+setting `done` on the path where no connection was made, and the serial
+captured at launch being wired through; the other two the Node test of the
+payload's expression.
+
+TWELVE left every test green. Nothing holds:
+
+- in `PlayerExit::confirmed`: that another player in the slot (another
+  serial) is no evidence; that a busy slot is no evidence; that an error
+  from the exit query is no evidence;
+- that `done` is set when the reader's thread panics (the test
+  `a_reader_that_panics_is_finished` drives another guard, and never this
+  one), and on the stop-before-connect way out;
+- in `PositionReader::end`: that a play Vela stopped did not fail to
+  start, and that a play seen to start did not; and that a position
+  confirms the start;
+- that the certificate notice is raised only for an https stream, and
+  only with certificate checking on;
+- that the Plex and the Jellyfin tracker are given this launch's
+  `PlayerExit`.
+
+Not tried: the serial captured where a play falls back from the embedded
+player to the external one.
+
+The tests for all thirteen are being written by codex as a coding task
+(worktree `~/dev/vela-agent-keep/wt/cx-pw9guards` on `continuum`), each to
+be shown red under the mutation above; this section is added to when they
+land. No defect of the product was found by the check: the behaviours are
+there, unguarded.

@@ -1,9 +1,9 @@
 # pa-7: nothing checks that Plex is told the play has stopped
 
 **Severity**: MEDIUM — row 2 includes the final stop. For Plex, `multiplex` waits for any timeline request and any progress request. With the final "stopped" timeline never sent, the periodic "playing" ones still satisfy it; the other scenario of row 2, `watchstate`, is Jellyfin's and cannot see it.
-**Status**: In progress
+**Status**: Verified — closed as it stood by the owner on 2026-11-14; the last round's two comments repaired on 2026-11-16 (codex ported and finished the repair; reviewed by the working agent)
 **Branch**: —
-**Commit**: `17d9a81`, `7e1dda5`, `f07fd8c`, `4906831`, `d504a1e` (repair)
+**Commit**: `17d9a81`, `7e1dda5`, `f07fd8c`, `4906831`, `d504a1e` (repair), `c618d31` (repair, round 3)
 
 ## Evidence
 
@@ -262,3 +262,61 @@ stopped), was being written when the owner said so. It was not reviewed and
 not landed, and exists only on the local branch `pa7-r3`
 (worktree `~/dev/vela-agent-keep/wt/pa7-r3`) on `continuum`, not pushed; it may
 not be there later.
+
+### Repair (round 3), `c618d31`, 2026-11-16: the release's test pass
+
+On 2026-11-16 the owner asked for the release to be made ready, which
+ended the setting-aside of tests (`.agents/decisions.md`, that date). The
+repair parked on the branch `pa7-r3` was taken up: codex ported it onto
+`main`'s tests (twenty files had moved under it) and finished it (worktree
+`cx-pa7port`); the working agent reviewed and landed it.
+
+What it does, against the two comments of verification round 2:
+
+- "The last reading still need not represent the stop." A play whose
+  final position is asked for is no longer read while it moves. It is held
+  still first (`stopStill`, `tests/e2e/helpers.mjs`): paused; moved, still
+  paused, to 9 s, a position it has not been within half a second of
+  (checked against how far it had got, and against the position it
+  actually lands on); waited on until mpv says, three reads running, that
+  it is there, paused and not seeking. `multiplex` then waits until Plex
+  has had Vela's "playing" report of that position (`untilPlexSawHeld`),
+  the play is checked to be still held, and only then stopped. A paused
+  play does not move, so where it stopped depends neither on when it was
+  read nor on how long the stop took to act. `plexStopProblems` judges the
+  stopped report against the position the play was held at.
+- "The no-late-reading assertion snapshots the count [too late]."
+  `positionsWhile` and its guard are gone. The test of what replaced it
+  ("the held-position callback finishes before the stop, including an
+  outstanding read") checks inside the callback that nothing is handed
+  over once the stop has been asked.
+
+Also: the judge accepts one identical copy of the stopped report, because
+`e50aa83` sends a report again when its connection failed and both copies
+can arrive; a copy that differs in item, position or duration, a third
+copy, or any report after the stop fails.
+
+Guard proof: `node tests/pa7-redproof.mjs` (in the tree, not part of
+`npm run check`) injects 54 regressions one at a time into the helper, the
+judge and the scenario, runs the named test, and puts the file back byte
+for byte. Run by codex and again by the working agent: 54 of 54 fail their
+test for the reason expected. `npm run check`: 591 tests, none skipped.
+
+End to end (the working agent, on `continuum`): in the external player
+`multiplex` passed 3 of 3 and the other scenarios that use the helper 7 of
+7 and 4 of 4. In the embedded player `multiplex` FAILED 3 of 3, on a
+defect of the product it was built to see: the stopped report said 8822,
+8819 and 8822 ms after a "playing" report at the held 9000 ms. That is the
+observation a helper had reported on 2026-11-14 and nobody had verified.
+It was traced (a stop freed the renderer before mpv was told to end the
+file, and mpv reported the audio's position as the play's last) and fixed
+at `3e0a485`; with the fix `multiplex` passed 3 of 3 in the embedded
+player with a stopped report at 9000 ms, and sixteen embedded scenarios
+that stop a play passed 16 of 16.
+
+What this proves is the final report of a play that was paused when it
+was stopped. Nothing here proves where Vela reports a play stopped while
+it was moving; that cannot be judged to half a second from outside.
+
+Closed on the working agent's review, the repair being codex's (owner's
+decision of 2026-11-14). No further codex verification was dispatched.
