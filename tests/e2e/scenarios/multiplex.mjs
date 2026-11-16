@@ -11,6 +11,7 @@ import {
   playAndQuit,
   pollUntil,
   seedConfig,
+  STILL_TOLERANCE_MS,
   waitForPageUncovered,
 } from '../helpers.mjs';
 import { createMockPlexTls, mockPlexSource, startMockPlex } from '../mockplex.mjs';
@@ -37,11 +38,37 @@ function readConnections(configRoot) {
   );
 }
 
+// Before the play is stopped (review finding pa-7): it is held paused at
+// `heldAtMs` (helpers.mjs, stopStill), and Vela must have seen it there
+// first, or a stopped report of an earlier position would be no fault of
+// Vela's. Vela's position reader (spawn_position_reader in
+// src-tauri/src/playback.rs) learns a position only from mpv's time-pos
+// change events, and keeps it to itself; the one state outside Vela that
+// shows what it learned is the "playing" timeline report its Plex tracker
+// sends every five seconds or so, paused or not, with the reader's position
+// (start_tracking_plex). So this waits until Plex A has had a "playing"
+// report within STILL_TOLERANCE_MS of `heldAtMs`, a band no earlier position
+// of the play lies in (stopStill checks that). `requests()` gives the
+// requests Plex A has received so far. Exported for tests/e2e-judge.test.mjs.
+export async function untilPlexSawHeld(requests, heldAtMs, { timeoutMs = 12000, intervalMs = 100 } = {}) {
+  await pollUntil(
+    () =>
+      requests().some(
+        (request) =>
+          request.path === '/:/timeline' &&
+          request.query.state === 'playing' &&
+          Math.abs(Number(request.query.time) - heldAtMs) <= STILL_TOLERANCE_MS,
+      ),
+    `a "playing" timeline report at the play's held position (${heldAtMs} ms) to reach Plex A before the stop`,
+    { timeoutMs, intervalMs },
+  );
+}
+
 // The check of Plex A's timeline reports once the play has stopped (review
 // finding pa-7): of all the requests Plex A received, its /:/timeline ones,
 // printed, must break no rule of plexStopProblems (judge.mjs) for the item
-// played and `lastSeenMs`, mpv's position as last read while the play was
-// being stopped. Exported for
+// played and `lastSeenMs`, the position the play was held at, paused, when it
+// was stopped. Exported for
 // tests/e2e-judge.test.mjs, which calls it on recorded requests, so that what
 // the scenario hands the rules is held as well as the rules.
 export function assertPlexStopped(requests, lastSeenMs) {
@@ -241,11 +268,13 @@ export default {
           assert.ok(!/x-plex-token/i.test(text), `the player's ${what} must carry no token header`);
         }
       },
-      // Where the play is as it is stopped, read all through the stop: the
-      // last reading is the one the stopped report's position is checked
-      // against below.
-      positionAtStop: (seconds) => {
+      // The play is held still, paused, before it is stopped (stopStill):
+      // where it is held is where it stops, and the stopped report's
+      // position is checked against it below. Vela must have seen it there
+      // before the stop.
+      positionAtStop: async (seconds) => {
         lastSeenMs = Math.round(seconds * 1000);
+        await untilPlexSawHeld(() => mockA.state.requests, lastSeenMs);
       },
     });
     // On the wire: the player fetched the stream itself (GET; Vela's own
@@ -297,13 +326,21 @@ export default {
     // Row 2's final half (review finding pa-7): the stop itself reaches Plex,
     // as a timeline report with state=stopped for this item, the last of the
     // play's timeline reports, at the play's final position. playAndQuit
-    // seeks to 6 s and stops a moment later, inside the 10 s clip, so that
-    // position is between 6 and 10 s, and no "playing" report may come later
-    // or say more. And it is where the play stopped, not the item's end: no
-    // more than half a second from mpv's position as last read while the play
-    // was being stopped (lastSeenMs), either way, and before the 10 s clip
-    // ends, so a report at the item's full duration (which tells Plex it was
-    // watched to the end) fails. The rules are plexStopProblems's (judge.mjs),
+    // seeks to 6 s, a moment later holds the play paused at 9 s, inside the
+    // 10 s clip, and stops it there, so that position is between 6 and 10 s,
+    // and no "playing" report may come later or say more. And it is where
+    // the play stopped, not the item's end: no more than half a second from
+    // where it was held (lastSeenMs), a band no earlier position of the play
+    // lies in, and before the 10 s clip ends, so a report at the item's full
+    // duration (which tells Plex it was watched to the end) fails. Since
+    // Vela's "playing" report of the hold came before the stop (the wait in
+    // positionAtStop above), and no report may say more than the stopped
+    // one, the stopped report may in effect be no lower than that report:
+    // when that report is exact the band is 0 ms below the hold and 500 ms
+    // above. One identical final retry is allowed (e50aa83). What this
+    // proves is the stop of a play that was paused when it was stopped;
+    // nothing here proves where Vela reports a play stopped
+    // while it was moving. The rules are plexStopProblems's (judge.mjs),
     // held by unit tests; this waits for the report and asks them through
     // assertPlexStopped, held by unit tests too.
     await pollUntil(

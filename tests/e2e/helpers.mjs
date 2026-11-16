@@ -445,37 +445,97 @@ export async function openDetailAndPlay(driver, cardSelector) {
   await driver.click(play);
 }
 
-// Runs `action()` and, while it runs, reads the play's position every
-// `everyMs` and hands each reading (seconds) to `onPosition`, so that the
-// last one handed over is where the play was when the action ended, however
-// long it took. A read that fails, or does not answer within `readMs` (mpv
-// has gone), hands nothing over; nothing is handed over once the action has
-// ended. Returns what the action returns, and throws what it throws.
-export async function positionsWhile(mpv, action, onPosition, { everyMs = 50, readMs = 300 } = {}) {
-  const read = () =>
-    Promise.race([
-      mpv.getProp('time-pos').catch(() => null),
-      new Promise((resolve) => setTimeout(() => resolve(null), readMs)),
-    ]);
-  // One reading before the action begins: an action that ends the play at
-  // once (the external player's stop is mpv's own quit, and this connection
-  // is closed with it) leaves no time for another.
-  const first = await read();
-  if (typeof first === 'number') onPosition(first);
-  let running = true;
-  const watching = (async () => {
-    while (running) {
-      await new Promise((resolve) => setTimeout(resolve, everyMs));
-      const t = await read();
-      if (running && typeof t === 'number') onPosition(t);
+// Where stopStill puts a play, paused, before it is stopped (seconds), and
+// how far either way from there a report of where it stopped may be (ms):
+// plexStopProblems's (judge.mjs) 500 ms. No position the play was at before
+// may lie inside that band, so a report of any earlier one fails. Downward
+// the band is narrower in effect: multiplex waits, before the stop, for a
+// "playing" report at the held position, and plexStopProblems lets no report
+// say the play got further than the stopped one, so the stopped report may
+// be no lower than Vela's own "playing" report of the hold. When that
+// report is exact, the band is 0 ms below the hold and 500 ms above it.
+export const STILL_AT_S = 9;
+export const STILL_TOLERANCE_MS = 500;
+
+// Holds a running play still and then stops it (`stop()`), so that where it
+// stopped does not depend on when anything reads it, however long the stop
+// takes to act (review finding pa-7, verification round 2: a play that kept
+// running while a stop took 900 ms to act was reported correctly and judged
+// against a position read before it, and failed). In order:
+// - pauses the play and waits, on mpv's own state, until mpv says it is
+//   paused, not seeking, at one position, on `steadyReads` reads in a row;
+// - moves it, still paused, to `atS`, a position it has not been at: further
+//   on than any it reached (`furthestMs`, the furthest the caller knows it
+//   got before, and where the pause held it), by more than `toleranceMs`;
+// - waits the same way until mpv says it is paused, not seeking, and at
+//   `atS` (within 50 ms), on `steadyReads` reads in a row;
+// - hands that position (seconds) to `positionAtStop` and awaits it: the
+//   caller waits there until Vela has shown that it saw the play there;
+// - checks the play is still paused there, and stops it.
+// A paused play does not move, so however late the stop acts, mpv holds the
+// play where `positionAtStop` was told until the stop acts. That is mpv's
+// position, not what Vela is then told: `multiplex` judges that. With this
+// hold it found the embedded player reporting about 180 ms short of it (a
+// stop freed the renderer before mpv was told to end the file, and mpv then
+// reported the audio's position as the play's last); fixed 2026-11-16.
+// Returns that position.
+export async function stopStill(
+  mpv,
+  stop,
+  { positionAtStop, furthestMs, atS = STILL_AT_S, toleranceMs = STILL_TOLERANCE_MS, steadyReads = 3, everyMs = 50, timeoutMs = 5000 },
+) {
+  const read = async () => ({
+    pause: await mpv.getProp('pause'),
+    seeking: await mpv.getProp('seeking'),
+    t: await mpv.getProp('time-pos'),
+  });
+  // Resolves with the position once `steadyReads` reads in a row find the
+  // play paused, not seeking, at one position that `fits`.
+  const steady = async (fits, what) => {
+    let run = [];
+    let last = null;
+    try {
+      return await pollUntil(
+        async () => {
+          last = await read();
+          const still = last.pause === true && last.seeking === false && typeof last.t === 'number' && fits(last.t);
+          run = still && (run.length === 0 || run[0] === last.t) ? [...run, last.t] : still ? [last.t] : [];
+          return run.length >= steadyReads ? last.t : null;
+        },
+        what,
+        { timeoutMs, intervalMs: everyMs },
+      );
+    } catch (err) {
+      err.message += ` (mpv last said ${JSON.stringify(last)})`;
+      throw err;
     }
-  })();
-  try {
-    return await action();
-  } finally {
-    running = false;
-    await watching;
-  }
+  };
+  await mpv.setProp('pause', true);
+  const pausedAt = await steady(() => true, 'mpv to hold the play paused');
+  const atMs = Math.round(atS * 1000);
+  const furthest = Math.max(furthestMs, Math.round(pausedAt * 1000));
+  assert.ok(
+    furthest < atMs - toleranceMs,
+    `the play is held at ${atMs} ms, which it has not been near: it got no further than ${furthest} ms before, ` +
+      `more than ${toleranceMs} ms short of it`,
+  );
+  await mpv.setProp('time-pos', atS);
+  const heldAt = await steady((t) => Math.abs(Math.round(t * 1000) - atMs) <= 50, `mpv to hold the play paused at ${atS} s`);
+  // A seek may land on a nearby frame. The exclusion must hold against
+  // the position actually handed to the caller, not just the requested one.
+  assert.ok(
+    furthest < Math.round(heldAt * 1000) - toleranceMs,
+    `the held position (${Math.round(heldAt * 1000)} ms) is more than ${toleranceMs} ms beyond the earlier ${furthest} ms`,
+  );
+  await positionAtStop(heldAt);
+  const now = await read();
+  assert.deepEqual(
+    now,
+    { pause: true, seeking: false, t: heldAt },
+    `the play is still held at ${heldAt} s, paused, as it is stopped`,
+  );
+  await stop();
+  return heldAt;
 }
 
 // Run `start()` (whatever triggers playback), then drive the resulting mpv
@@ -484,11 +544,12 @@ export async function positionsWhile(mpv, action, onPosition, { everyMs = 50, re
 // control), and prove the stop acted. Returns the first time-pos sample
 // observed after load (the resume-position evidence).
 // `during(mpv)`, if given, runs once the play has progressed, before the seek.
-// `positionAtStop(seconds)`, if given, is handed the play's position as it
-// is read all through the stop (positionsWhile), so that the last value it
-// gets is where the play was when the stop acted, however long the stop
-// took: in the embedded player the view's controls can take seconds to come
-// up, and the play goes on meanwhile.
+// `positionAtStop(seconds)`, if given, asks for the position at the stop: the
+// play is then held still, paused at STILL_AT_S, before it is stopped
+// (stopStill), and `positionAtStop` is handed that position and awaited
+// before the stop. The play then stops there however long the stop takes (in
+// the embedded player the view's controls can take seconds to come up). Such
+// a play is stopped while paused, never while it moves.
 export async function playAndQuit(driver, start, { key = null, during = null, positionAtStop = null } = {}) {
   const before = mpvSocketSnapshot();
   await start();
@@ -515,10 +576,12 @@ export async function playAndQuit(driver, start, { key = null, during = null, po
     // play also has player::report::spawn_reporter for its view's state.
     await velaConnected(socketPath, runPlayer === 'embedded' ? 4 : 3);
     if (during) await during(mpv);
+    // The furthest the play is known to have got before the seek.
+    const beforeSeekMs = Math.round((await mpv.getProp('time-pos')) * 1000);
     await mpv.setProp('time-pos', 6);
     await new Promise((r) => setTimeout(r, 1500)); // let Vela observe ≥6s
     const stop = () => stopPlayAsUser(driver, mpv, socketPath, 'the play', { key });
-    if (positionAtStop) await positionsWhile(mpv, stop, positionAtStop);
+    if (positionAtStop) await stopStill(mpv, stop, { positionAtStop, furthestMs: beforeSeekMs });
     else await stop();
   } finally {
     mpv.close();

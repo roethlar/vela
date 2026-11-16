@@ -5,16 +5,17 @@
 // scenario is seen to act on the verdict, not only the verdict to be right.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import net from 'node:net';
 import test from 'node:test';
 import ts from 'typescript';
 import { acceptedConnections, plexStopProblems, skipJumpVerdict } from './e2e/judge.mjs';
-import { velaConnected } from './e2e/helpers.mjs';
+import { pollUntil, stopStill, velaConnected } from './e2e/helpers.mjs';
 import { proveSkippedPast } from './e2e/scenarios/markers.mjs';
-import { assertPlexStopped } from './e2e/scenarios/multiplex.mjs';
+import { assertPlexStopped, untilPlexSawHeld } from './e2e/scenarios/multiplex.mjs';
 import { play as playInWindowsetting, setFullscreen as setFullscreenInWindowsetting } from './e2e/scenarios/windowsetting.mjs';
 import { MpvIpc } from './e2e/mpv.mjs';
+import { Driver } from './e2e/driver.mjs';
 import { EventEmitter } from 'node:events';
-import { positionsWhile } from './e2e/helpers.mjs';
 
 // markers.mjs's rule: the play resumed from 1 s ahead of a range at 2-12 s,
 // a 5000 ms window, a 1 s margin past the range's start.
@@ -443,7 +444,7 @@ const GOOD = [report('playing', 4916), report('stopped', 7458)];
 const judgeStop = (reports, lastSeenMs = 7458) => plexStopProblems(reports, { ...ITEM, lastSeenMs });
 // (lastSeenMs is 7458 unless given, undefined included.)
 const WHERE = (time, ...seen) =>
-  `the stopped report's position (${time} ms) is where the play stopped: mpv was last seen at ${seen.length > 0 ? seen[0] : 7458} ms ` +
+  `the stopped report's position (${time} ms) is where the play stopped: mpv held it at ${seen.length > 0 ? seen[0] : 7458} ms ` +
   'as it was stopped, and the item ends at 10000 ms';
 
 test('pa-7: the reports of a play stopped where it was seen pass', () => {
@@ -474,19 +475,38 @@ test('pa-7: a stopped report away from where the play stopped fails', () => {
   assert.deepEqual(judgeStop([report('playing', 4916), report('stopped', 10000)], 9700), [WHERE(10000, 9700)], "at the item's end");
 });
 
-test('pa-7: no stopped report, two, or one that is not last fails', () => {
+test('pa-7: no stopped report, too many retries, or one that is not last fails', () => {
   assert.deepEqual(judgeStop([report('playing', 4916), report('playing', 7458)]), [
-    'the play sends exactly one stopped timeline report, not 0',
+    'the play sends one stopped timeline report with at most one identical retry, not 0',
   ]);
-  assert.deepEqual(judgeStop([report('playing', 4916), report('stopped', 7458), report('stopped', 7458)]), [
-    'the play sends exactly one stopped timeline report, not 2',
-    'the stopped report comes last',
-    '"playing" reports, and only those, come before it',
+  assert.deepEqual(judgeStop([report('playing', 4916), ...Array.from({ length: 3 }, () => report('stopped', 7458))]), [
+    'the play sends one stopped timeline report with at most one identical retry, not 3',
   ]);
   assert.deepEqual(judgeStop([report('playing', 4916), report('stopped', 7458), report('playing', 7000)]), [
     'the stopped report comes last',
     '"playing" reports, and only those, come before it',
   ]);
+});
+
+test('pa-7: one identical final retry passes, but a changed retry or a report after the stop fails', (t) => {
+  t.mock.method(console, 'log', () => {});
+  const retries = [...GOOD, report('stopped', 7458)];
+  assert.deepEqual(judgeStop(retries), []);
+  assertPlexStopped(retries.map((query) => request('/:/timeline', query)), 7458);
+  for (const extra of [{ time: '7459' }, { duration: '9999' }, { ratingKey: '2' }, { key: '/library/metadata/2' }]) {
+    assert.deepEqual(judgeStop([...GOOD, report('stopped', 7458, extra)]), [
+      'a retried stopped report repeats the same item, position and duration',
+      ...(extra.time ? ['no report says the play got further than its final position'] : []),
+    ]);
+  }
+  for (const reports of [
+    [...retries, report('playing', 7000)],
+    [...GOOD, report('playing', 7000), report('stopped', 7458)],
+  ]) {
+    assert.deepEqual(judgeStop(reports), ['the stopped report comes last', '"playing" reports, and only those, come before it']);
+  }
+  // A retry does not cure a stale final position.
+  assert.deepEqual(judgeStop([report('playing', 4916), report('stopped', 6458), report('stopped', 6458)]), [WHERE(6458)]);
 });
 
 test('pa-7: anything but "playing" reports before the stopped one, or none, fails', () => {
@@ -615,99 +635,593 @@ test("pa-7: a position of mpv's that was not read, or a time that is no number, 
   ]);
 });
 
-// The position the stopped report is held to is read all through the stop
-// (helpers.mjs, positionsWhile; review finding pa-7, verification round 1).
-// A stand-in for mpv whose play goes on at one second per second from
-// `fromMs`, and which can stop answering.
-function playingStandIn(fromMs, { goneAfterMs = Infinity } = {}) {
-  const started = Date.now();
-  return {
+// The play is held still, paused, before it is stopped (helpers.mjs,
+// stopStill; review finding pa-7, verification round 2), so that where it
+// stopped does not depend on when anything reads it, however late the stop
+// acts. A stand-in for one play in mpv: it plays on at one second per second
+// from `fromMs` until it is paused or reaches the item's end; a pause or a
+// seek asked for takes effect `latencyMs` later (mpv answers the command at
+// once and acts a moment after), and the play goes on meanwhile, though its
+// `pause` reads true at once (mpv's `pause` is the option as set, not the
+// play halted), so only a position that holds still says it has halted; it tells its
+// observers its position on every frame while it plays and when a seek lands
+// (mpv's time-pos change events), and that it has gone when it ends; once it
+// has ended it answers nothing. `stop(ms)` ends it `ms` after it is asked.
+// A seek goes as it does in mpv (player/command.c mp_property_time_pos,
+// player/playloop.c, mpv 0.42): setting time-pos only queues it, so for
+// `queuedMs` the play says it is not seeking and is where it was; once the
+// seek runs, for `seekMs` it says it is seeking and time-pos reads the
+// target (get_current_time gives last_seek_pts while playback_pts is unset),
+// and it tells its observers so; then it lands there. The stand-in makes the
+// queued time longer than mpv's, so that a wait that takes the play as held
+// before its seek has run is caught. `stalled` plays never advance (a play
+// waiting for its cache: mpv's pause still reads as it was set).
+function standInPlay({ fromMs = 7458, durationMs = 10000, latencyMs = 150, queuedMs = 150, seekMs = 250, frameMs = 42, stalled = false } = {}) {
+  let anchorMs = fromMs;
+  let anchorAt = Date.now();
+  let paused = false;
+  let pauseOption = false;
+  let seeking = false;
+  let ended = false;
+  const observers = [];
+  const play = { pausedAtMs: null, endedAtMs: null };
+  let seekTargetMs = null;
+  const position = () =>
+    seekTargetMs !== null
+      ? seekTargetMs
+      : paused || ended || stalled
+        ? anchorMs
+        : Math.min(durationMs, anchorMs + (Date.now() - anchorAt));
+  const tell = (ms) => observers.forEach((observer) => observer(ms));
+  const end = () => {
+    if (ended) return;
+    anchorMs = position();
+    ended = true;
+    play.endedAtMs = anchorMs;
+    clearInterval(frames);
+    tell(null);
+  };
+  const frames = setInterval(() => {
+    if (paused) return;
+    if (position() >= durationMs) end();
+    else tell(position());
+  }, frameMs);
+  const later = (apply) => setTimeout(() => ended || apply(), latencyMs);
+  play.state = () => ({ paused, seeking, ms: position() });
+  play.observe = (observer) => observers.push(observer);
+  play.stop = (ms) => new Promise((resolve) => setTimeout(() => resolve(end()), ms));
+  play.mpv = {
     getProp(name) {
-      assert.equal(name, 'time-pos');
-      const elapsed = Date.now() - started;
-      if (elapsed > goneAfterMs) return new Promise(() => {});
-      return Promise.resolve((fromMs + elapsed) / 1000);
+      if (ended) return Promise.reject(new Error('mpv: the play has ended'));
+      const value = { 'time-pos': position() / 1000, pause: pauseOption, seeking }[name];
+      assert.notEqual(value, undefined, `the stand-in has no ${name}`);
+      return Promise.resolve(value);
+    },
+    setProp(name, value) {
+      if (ended) return Promise.reject(new Error('mpv: the play has ended'));
+      if (name === 'pause') {
+        pauseOption = value;
+        later(() => {
+          anchorMs = position();
+          anchorAt = Date.now();
+          paused = value;
+          if (paused) play.pausedAtMs = anchorMs;
+        });
+      } else if (name === 'time-pos') {
+        setTimeout(() => {
+          if (ended) return;
+          anchorMs = position();
+          anchorAt = Date.now();
+          seeking = true;
+          seekTargetMs = Math.round(value * 1000);
+          tell(seekTargetMs);
+          setTimeout(() => {
+            if (ended) return;
+            anchorMs = seekTargetMs;
+            anchorAt = Date.now();
+            seekTargetMs = null;
+            seeking = false;
+            tell(anchorMs);
+          }, seekMs);
+        }, queuedMs);
+      } else {
+        assert.fail(`the stand-in cannot set ${name}`);
+      }
+      return Promise.resolve();
     },
   };
+  return play;
+}
+
+// A stand-in for Vela's Plex tracker of that play (start_tracking_plex): its
+// reader learns each position the play tells, `lagMs` late, and keeps the
+// last; every `everyMs` it reports "playing" with it, paused or not; when the
+// play has gone it reports "stopped" with `final(last)`. The reports are kept
+// as Plex A's mock records them. `done` settles after the stopped report.
+function standInVela(play, { lagMs = 30, everyMs = 250, final = (last) => last } = {}) {
+  const requests = [];
+  let last = 0;
+  let finished;
+  const done = new Promise((resolve) => (finished = resolve));
+  const timeline = (state, time) => requests.push({ path: '/:/timeline', query: report(state, time), tokenPresent: true, tokenMatches: true });
+  const tick = setInterval(() => timeline('playing', last), everyMs);
+  play.observe((ms) =>
+    setTimeout(() => {
+      if (ms !== null) {
+        last = Math.trunc(ms);
+        return;
+      }
+      clearInterval(tick);
+      timeline('stopped', final(last));
+      finished();
+    }, lagMs),
+  );
+  return { requests, done };
+}
+
+// One play held still and stopped by stopStill, the stop acting `stopMs`
+// after it is asked, Vela reporting as `vela` says: what the play and Vela
+// did. The caller's wait is multiplex's (untilPlexSawHeld).
+async function holdAndStop(stopMs, vela = {}) {
+  const play = standInPlay();
+  // Vela learns each position 600 ms late here, later than stopStill takes
+  // to see the move land, so that the caller's wait for Vela is a real wait
+  // (a stop asked before that wait is over is caught).
+  const { requests, done } = standInVela(play, { lagMs: 600, ...vela });
+  await after(600); // the play runs, and Vela reports it playing
+  let heldMs = null;
+  let atStop = null;
+  let waited = false;
+  let waitedAtStop = null;
+  try {
+    const returned = await stopStill(
+      play.mpv,
+      () => {
+        atStop = play.state();
+        waitedAtStop = waited;
+        return play.stop(stopMs);
+      },
+      {
+        furthestMs: 5000,
+        positionAtStop: async (seconds) => {
+          heldMs = Math.round(seconds * 1000);
+          await untilPlexSawHeld(() => requests, heldMs, { timeoutMs: 3000, intervalMs: 20 });
+          waited = true;
+        },
+      },
+    );
+    // Where the play had ended when stopStill returned: stopStill awaits the
+    // stop, so the play has ended by then, or playAndQuit would close its
+    // connection while the stop is still in flight, and the proof that the
+    // stop acted would run on detached.
+    const endedOnReturn = play.endedAtMs;
+    await done;
+    return { play, requests, heldMs, atStop, waitedAtStop, returned, endedOnReturn };
+  } finally {
+    // A play stopStill failed to stop would run (or wait paused) for ever.
+    await play.stop(0);
+  }
 }
 const after = (ms, value) => new Promise((resolve) => setTimeout(() => resolve(value), ms));
+const STOP_DELAYS = [0, 300, 900, 2250, 4000];
+// The stopped report replaced with one at `time`.
+const restopped = (requests, time) =>
+  requests.map((r) => (r.query.state === 'stopped' ? { ...r, query: report('stopped', time) } : r));
 
-test('pa-7: the position is read all through a stop that takes long, and the report is held to the last reading', async (t) => {
+test('pa-7: a play held still is stopped where it was held, however late the stop acts, and a correct report passes', async (t) => {
   t.mock.method(console, 'log', () => {});
-  // The reviewer's case: the play is at 7458 ms when the stop begins, the
-  // embedded view's controls take 2250 ms to come up, and the play is
-  // stopped, correctly, about 9700 ms in.
-  const readings = [];
-  const result = await positionsWhile(playingStandIn(7458), () => after(2250, 'stopped'), (seconds) => readings.push(Math.round(seconds * 1000)));
-  assert.equal(result, 'stopped', 'what the action returns is returned');
-  const last = readings.at(-1);
-  assert.ok(readings.length >= 20, `it read all through: ${readings.length} readings`);
-  assert.ok(readings[0] < 7600, `from the start of the stop: the first reading is ${readings[0]}`);
-  assert.ok(last >= 9558 && last <= 9758, `to its end: the last reading is ${last}, within 150 ms of where the stop acted`);
-  // A correct report at the stop passes against the last reading, and would
-  // not against a reading taken before the stop began.
-  assertPlexStopped(requestsOf(4916, 9717), last);
-  assert.throws(() => assertPlexStopped(requestsOf(4916, 9717), 7458), assert.AssertionError);
+  const runs = await Promise.all(STOP_DELAYS.map((ms) => holdAndStop(ms)));
+  runs.forEach(({ play, requests, heldMs, atStop, waitedAtStop, returned, endedOnReturn }, i) => {
+    const what = `a stop that acts ${STOP_DELAYS[i]} ms late`;
+    assert.equal(heldMs, 9000, `${what}: the play is held at STILL_AT_S`);
+    assert.equal(waitedAtStop, true, `${what}: the stop is asked only once the caller's wait for Vela is over`);
+    assert.equal(returned, 9, `${what}: and stopStill says so`);
+    assert.equal(endedOnReturn, 9000, `${what}: stopStill returns only once the stop has acted`);
+    assert.deepEqual(atStop, { paused: true, seeking: false, ms: 9000 }, `${what}: the stop is asked of a play paused there`);
+    assert.equal(play.endedAtMs, 9000, `${what}: the play ended where it was held`);
+    assert.ok(play.pausedAtMs < 8500, `${what}: it was paused (at ${play.pausedAtMs}) short of the band around 9000`);
+    // Vela's correct report: where its reader last saw the play.
+    assertPlexStopped(requests, heldMs);
+  });
 });
 
-test('pa-7: reading the position ends with the stop, when mpv has gone, and when the stop fails', async () => {
-  // mpv stops answering 300 ms in; the stop takes 800 ms: the readings end
-  // where mpv was last heard, and the wait is the stop's, not a read's.
-  const readings = [];
-  const started = Date.now();
-  await positionsWhile(playingStandIn(7000, { goneAfterMs: 300 }), () => after(800), (seconds) => readings.push(Math.round(seconds * 1000)));
-  const took = Date.now() - started;
-  assert.ok(readings.length >= 3 && readings.at(-1) <= 7300, `the readings end where mpv was last heard: ${readings.at(-1)}`);
-  assert.ok(took < 1500, `the wait is the stop's (800 ms), not a read's: ${took} ms`);
-  // Nothing is handed over once the action has ended.
-  const late = [];
-  await positionsWhile(playingStandIn(7000), () => after(120), (seconds) => late.push(seconds));
-  const count = late.length;
-  await after(200);
-  assert.equal(late.length, count, 'no reading arrives after the action has ended');
-  // A stop that ends the play at once, and the connection with it (the
-  // external player's: mpv's own quit), still has the reading taken before
-  // it began.
-  let gone = false;
-  const startedAt = Date.now();
-  const quits = {
-    getProp: () => (gone ? new Promise(() => {}) : Promise.resolve((7458 + (Date.now() - startedAt)) / 1000)),
-  };
-  const atOnce = [];
-  await positionsWhile(
-    quits,
-    () => {
-      gone = true;
-      return after(100);
-    },
-    (seconds) => atOnce.push(Math.round(seconds * 1000)),
+test('pa-7: a stale stopped report of a play held still fails, however late the stop acts', async (t) => {
+  t.mock.method(console, 'log', () => {});
+  const runs = await Promise.all(STOP_DELAYS.map((ms) => holdAndStop(ms)));
+  runs.forEach(({ play, requests, heldMs }, i) => {
+    const what = `a stop that acts ${STOP_DELAYS[i]} ms late`;
+    const before = requests.filter((r) => r.query.state === 'playing' && Number(r.query.time) <= play.pausedAtMs).at(-1);
+    assert.ok(before, `${what}: a periodic report was sent before the play was moved`);
+    for (const [stale, time] of [
+      ['the position before the move', play.pausedAtMs],
+      ['the last periodic report before the move', Number(before.query.time)],
+      ['position 0', 0],
+    ]) {
+      assert.throws(
+        () => assertPlexStopped(restopped(requests, time), heldMs),
+        (error) =>
+          error instanceof assert.AssertionError &&
+          error.actual.includes(
+            `the stopped report's position (${time} ms) is where the play stopped: mpv held it at ${heldMs} ms as it was stopped, and the item ends at 10000 ms`,
+          ),
+        `${what}: a stopped report of ${stale} (${time} ms)`,
+      );
+    }
+  });
+});
+
+test('pa-7: a play is not held where it has been near, and the wait for Vela is for a report at the held position', async (t) => {
+  // The play got to 8600 ms before: 9000 ms is no position it has not been near.
+  const play = standInPlay();
+  // Each ends, however the test ends (a play left running keeps the run alive).
+  t.after(() => play.stop(0));
+  await assert.rejects(
+    stopStill(play.mpv, () => play.stop(0), { furthestMs: 8600, positionAtStop: async () => {} }),
+    (error) => error instanceof assert.AssertionError && /it got no further than 8600 ms before, more than 500 ms short of it/.test(error.message),
   );
-  assert.deepEqual(atOnce.length, 1, `one reading, taken before the stop began: ${JSON.stringify(atOnce)}`);
-  assert.ok(atOnce[0] >= 7458 && atOnce[0] < 7558, `where the play was then: ${atOnce[0]}`);
-  // A stop that fails is not swallowed, and the reading stops with it.
-  await assert.rejects(positionsWhile(playingStandIn(7000), () => after(50).then(() => Promise.reject(new Error('the stop failed'))), () => {}), /the stop failed/);
+  // Exactly 500 ms short is not more than 500 ms short.
+  const edge = standInPlay();
+  t.after(() => edge.stop(0));
+  await assert.rejects(
+    stopStill(edge.mpv, () => edge.stop(0), { furthestMs: 8500, positionAtStop: async () => {} }),
+    (error) => error instanceof assert.AssertionError && /it got no further than 8500 ms before, more than 500 ms short of it/.test(error.message),
+    'a play that got to 8500 ms is not held at 9000 ms',
+  );
+  const edgeOk = standInPlay(); // made now, so that it has not played on past 8499 ms
+  t.after(() => edgeOk.stop(0));
+  assert.equal(
+    await stopStill(edgeOk.mpv, () => edgeOk.stop(0), { furthestMs: 8499, positionAtStop: async () => {} }),
+    9,
+    'a play that got to 8499 ms is held at 9000 ms',
+  );
+  // Running at 8420 ms when it is paused: the pause lands 150 ms later, past
+  // 8500 ms, inside the band, and that is where the play got to.
+  const late = standInPlay({ fromMs: 8420 });
+  t.after(() => late.stop(0));
+  await assert.rejects(
+    stopStill(late.mpv, () => late.stop(0), { furthestMs: 5000, positionAtStop: async () => {} }),
+    (error) =>
+      error instanceof assert.AssertionError &&
+      /it got no further than (\d+) ms before/.test(error.message) &&
+      Number(error.message.match(/no further than (\d+) ms/)[1]) >= 8500 &&
+      late.pausedAtMs >= 8500,
+    'where the pause held the play counts, read once the pause has landed',
+  );
+  await play.stop(0);
+  // A play that moves again while the caller waits is not stopped.
+  const moving = standInPlay();
+  t.after(() => moving.stop(0));
+  let stopped = false;
+  await assert.rejects(
+    stopStill(
+      moving.mpv,
+      () => {
+        stopped = true;
+        return moving.stop(0);
+      },
+      {
+        furthestMs: 5000,
+        positionAtStop: async () => {
+          await moving.mpv.setProp('pause', false);
+          await after(300);
+        },
+      },
+    ),
+    (error) => error instanceof assert.AssertionError && /^the play is still held at 9 s, paused, as it is stopped/.test(error.message),
+  );
+  assert.equal(stopped, false, 'and it is not stopped');
+  await moving.stop(0);
+  // multiplex's wait: a "playing" report within 500 ms of the held position;
+  // not one further off, and not a stopped one.
+  const timeline = (state, time) => ({ path: '/:/timeline', query: report(state, time) });
+  await untilPlexSawHeld(() => [timeline('playing', 7458), timeline('playing', 8500)], 9000, { timeoutMs: 100, intervalMs: 10 });
+  await untilPlexSawHeld(() => [timeline('playing', 7458), timeline('playing', 9500)], 9000, { timeoutMs: 100, intervalMs: 10 });
+  for (const requests of [
+    [timeline('playing', 7458), timeline('playing', 8499)],
+    [timeline('playing', 7458), timeline('playing', 9501)],
+    [timeline('playing', 7458), timeline('stopped', 9000)],
+    [{ path: '/:/progress', query: report('playing', 9000) }],
+  ]) {
+    await assert.rejects(
+      untilPlexSawHeld(() => requests, 9000, { timeoutMs: 100, intervalMs: 10 }),
+      /timed out waiting for a "playing" timeline report at the play's held position \(9000 ms\) to reach Plex A before the stop/,
+    );
+  }
 });
 
-// And the wiring: playAndQuit reads through its stop when asked, and
-// multiplex asks.
-test('pa-7: multiplex has the position read through the stop of its play', () => {
+// The move to the held position is waited for until it has landed: not
+// taken while it is queued (the play still says it is not seeking, paused
+// where the pause held it, here within a second of 9 s), and not while it
+// runs (time-pos already reads 9 s, but the play says it is seeking). The
+// caller does not wait here, so only stopStill's own waiting stands between
+// the move and the stop.
+test('pa-7: a play is taken as held only once its move has landed', async (t) => {
+  const play = standInPlay({ fromMs: 8100, queuedMs: 250, seekMs: 250 });
+  t.after(() => play.stop(0));
+  let atStop = null;
+  const returned = await stopStill(
+    play.mpv,
+    () => {
+      atStop = play.state();
+      return play.stop(0);
+    },
+    { furthestMs: 5000, positionAtStop: async () => {} },
+  );
+  assert.ok(play.pausedAtMs > 8000 && play.pausedAtMs < 8500, `the pause held the play at ${play.pausedAtMs}, within a second of 9000`);
+  assert.equal(returned, 9, 'the play is held at 9 s');
+  assert.deepEqual(atStop, { paused: true, seeking: false, ms: 9000 }, 'and the stop is asked once the move has landed');
+});
+
+// A play is held only while mpv says it is paused there. A play that stands
+// still because it is waiting for its cache, and that someone resumes just
+// after stopStill paused it, is not taken as held: stopStill waits for mpv
+// to say it is paused, and is never moved or stopped. And a play the
+// caller's wait moves elsewhere, still paused, is not stopped.
+test('pa-7: a play is held only while mpv says it is paused there, from the first wait to the stop', async (t) => {
+  const stalled = standInPlay({ stalled: true });
+  const moved = standInPlay();
+  t.after(() => Promise.all([stalled.stop(0), moved.stop(0)]));
+  const asked = [];
+  const resumed = {
+    getProp: (name) => stalled.mpv.getProp(name),
+    async setProp(name, value) {
+      asked.push(`${name}=${value}`);
+      await stalled.mpv.setProp(name, value);
+      if (name === 'pause' && value === true) await stalled.mpv.setProp('pause', false);
+    },
+  };
+  let stopped = false;
+  await assert.rejects(
+    stopStill(
+      resumed,
+      () => {
+        stopped = true;
+        return stalled.stop(0);
+      },
+      { furthestMs: 5000, positionAtStop: async () => {}, timeoutMs: 600 },
+    ),
+    /^Error: timed out waiting for mpv to hold the play paused \(mpv last said \{"pause":false,"seeking":false,"t":7\.458\}\)$/,
+  );
+  assert.deepEqual(asked, ['pause=true'], 'the play is not moved');
+  assert.equal(stopped, false, 'nor stopped');
+  stopped = false;
+  await assert.rejects(
+    stopStill(
+      moved.mpv,
+      () => {
+        stopped = true;
+        return moved.stop(0);
+      },
+      {
+        furthestMs: 5000,
+        positionAtStop: async () => {
+          await moved.mpv.setProp('time-pos', 8);
+          await after(600);
+        },
+      },
+    ),
+    (error) =>
+      error instanceof assert.AssertionError &&
+      /^the play is still held at 9 s, paused, as it is stopped/.test(error.message) &&
+      error.actual.t === 8 &&
+      error.actual.pause === true,
+  );
+  assert.equal(stopped, false, 'a play moved while the caller waits is not stopped');
+});
+
+// No sampling task survives into the stop. In particular, a pending read
+// must finish before the callback, and that callback must finish before the
+// stop starts. Check the action's state INSIDE the callback: the old
+// positionsWhile test counted callbacks only after its watcher had joined,
+// which could never see a callback delivered late (pa-7, round 2).
+test('pa-7: the held-position callback finishes before the stop, including an outstanding read', async () => {
+  let position = 7.458;
+  let heldReads = 0;
+  let releaseRead;
+  let releaseStop;
+  let stopStarted = false;
+  let stopEnded = false;
+  let returned = false;
+  let callbacks = 0;
+  const mpv = {
+    async setProp(name, value) {
+      if (name === 'time-pos') position = value;
+    },
+    async getProp(name) {
+      assert.equal(stopStarted, false, 'no position read may outlive the hold and run during/after the stop');
+      if (name === 'pause') return true;
+      if (name === 'seeking') return false;
+      assert.equal(name, 'time-pos');
+      if (position === 9 && ++heldReads === 3) return new Promise((resolve) => { releaseRead = () => resolve(position); });
+      return position;
+    },
+  };
+  const stopping = stopStill(mpv, () => {
+    assert.equal(callbacks, 1, 'the stop follows the position callback');
+    stopStarted = true;
+    return new Promise((resolve) => { releaseStop = resolve; });
+  }, {
+    furthestMs: 7458,
+    everyMs: 0,
+    positionAtStop: async (seconds) => {
+      assert.equal(stopEnded, false, 'no callback after the action ended');
+      assert.equal(stopStarted, false, 'no callback during the stop');
+      assert.equal(seconds, 9);
+      callbacks++;
+    },
+  }).then(() => { returned = true; });
+  await pollUntil(() => releaseRead, 'the outstanding held-position read', { intervalMs: 1 });
+  assert.equal(callbacks, 0, 'a pending read is not a position');
+  assert.equal(stopStarted, false, 'the stop cannot overtake the pending read');
+  releaseRead();
+  await pollUntil(() => releaseStop, 'the stop after the read and callback', { intervalMs: 1 });
+  await after(20);
+  assert.equal(returned, false, 'the stop must finish before stopStill returns');
+  stopEnded = true; // action completion, not helper completion
+  releaseStop();
+  await stopping;
+  await after(100); // a detached watcher would call back against stopEnded
+  assert.equal(callbacks, 1, 'the measured position is handed over once');
+
+  stopStarted = false;
+  position = 7.458;
+  await assert.rejects(stopStill(mpv, () => { stopStarted = true; }, {
+    furthestMs: 7458, everyMs: 0,
+    positionAtStop: async () => { throw new Error('Vela did not see the hold'); },
+  }), /Vela did not see the hold/);
+  assert.equal(stopStarted, false, 'a failed caller wait must not stop the play');
+  position = 7.458;
+  await assert.rejects(stopStill(mpv, async () => { throw new Error('stop failed'); }, {
+    furthestMs: 7458, everyMs: 0, positionAtStop: async () => {},
+  }), /stop failed/);
+});
+
+test('pa-7: the final recheck refuses each way the caller can invalidate the hold', async () => {
+  for (const change of [{ pause: false }, { seeking: true }, { t: 8 }]) {
+    let state = { pause: true, seeking: false, t: 7.458 };
+    let stopped = false;
+    const mpv = {
+      async setProp(name, value) { if (name === 'time-pos') state.t = value; },
+      async getProp(name) { return state[name === 'time-pos' ? 't' : name]; },
+    };
+    await assert.rejects(stopStill(mpv, async () => { stopped = true; }, {
+      furthestMs: 7458, everyMs: 0,
+      positionAtStop: async () => { state = { ...state, ...change }; },
+    }), /the play is still held at 9 s, paused, as it is stopped/);
+    assert.equal(stopped, false, `the invalid hold is not stopped: ${JSON.stringify(change)}`);
+  }
+});
+
+// A nearby frame is legitimate, but an earlier position must remain outside
+// the report band around the ACTUAL frame. Changes within the landing band
+// still reset the steady-read count.
+test('pa-7: the measured hold has its own exclusion band and needs consecutive steady readings', async () => {
+  const drive = async (landings, furthestMs) => {
+    let seeking = false;
+    let reads = 0;
+    let callbackReads = null;
+    const mpv = {
+      async setProp(name) { if (name === 'time-pos') seeking = true; },
+      async getProp(name) {
+        if (name === 'pause') return true;
+        if (name === 'seeking') return false;
+        assert.equal(name, 'time-pos');
+        return seeking ? landings[Math.min(reads++, landings.length - 1)] : 7.458;
+      },
+    };
+    const held = await stopStill(mpv, async () => {}, {
+      furthestMs, everyMs: 0, timeoutMs: 200,
+      positionAtStop: async () => { callbackReads = reads; },
+    });
+    return { held, callbackReads };
+  };
+  await assert.rejects(drive([8.96], 8460), /the held position \(8960 ms\) is more than 500 ms beyond the earlier 8460 ms/);
+  assert.equal((await drive([8.96], 8459)).held, 8.96);
+  for (const position of [8.95, 9.05]) assert.equal((await drive([position], 8000)).held, position);
+  for (const position of [8.949, 9.051]) await assert.rejects(drive([position], 8000), /timed out waiting for mpv to hold the play paused at 9 s/);
+  assert.deepEqual(await drive([8.96, 9.04, 9, 9, 9], 8000), { held: 9, callbackReads: 5 });
+});
+
+// Reproduce the reviewer's lost-observation interval through the real stop
+// helper, Driver.waitFor and MpvIpc. Only the page and IPC transport are
+// stand-ins; no display, socket or network is opened. Closing our IPC must
+// precede the simulated engine's delayed end, while Vela observes separately.
+for (const player of ['external', 'embedded']) {
+  test(`pa-7: ${player} user stop preserves the hold through delayed controls and termination`, async (t) => {
+    t.mock.method(console, 'log', () => {});
+    const previous = process.env.VELA_E2E_PLAYER;
+    let stopPlayAsUser;
+    try {
+      process.env.VELA_E2E_PLAYER = player;
+      ({ stopPlayAsUser } = await import(`./e2e/helpers.mjs?pa7-stop=${player}`));
+    } finally {
+      if (previous === undefined) delete process.env.VELA_E2E_PLAYER;
+      else process.env.VELA_E2E_PLAYER = previous;
+    }
+    const play = standInPlay();
+    t.after(() => play.stop(0));
+    const vela = standInVela(play);
+    let closed = false;
+    let endedWhenClosed;
+    let controlsAt = null;
+    let stopRequested = null;
+    const requestStop = () => { stopRequested = Date.now(); void play.stop(900); };
+    const socket = new EventEmitter();
+    socket.write = (line) => {
+      assert.equal(closed, false, 'no IPC command after the connection closes');
+      const { command, request_id } = JSON.parse(line);
+      if (command[0] === 'quit') return requestStop();
+      const answer = command[0] === 'get_property'
+        ? play.mpv.getProp(command[1]) : play.mpv.setProp(command[1], command[2]);
+      void answer.then((data) => socket.emit('data', JSON.stringify({ request_id, error: 'success', data }) + '\n'));
+    };
+    socket.destroy = () => { if (!closed) endedWhenClosed = play.endedAtMs; closed = true; };
+    const mpv = new MpvIpc(socket);
+    t.after(() => mpv.close());
+    t.mock.method(net, 'createConnection', () => {
+      const probe = new EventEmitter();
+      probe.destroy = () => {};
+      queueMicrotask(() => probe.emit(play.endedAtMs === null ? 'connect' : 'error', new Error('ended')));
+      return probe;
+    });
+    const driver = {
+      waitFor: Driver.prototype.waitFor,
+      async exec(script) {
+        if (script.includes('const bar')) return Date.now() - controlsAt >= 2250;
+        if (script.includes('const reacts')) return [10, 10];
+        if (script.includes('const deepest')) return null;
+        if (script.includes('return !document')) return play.endedAtMs !== null;
+        return play.endedAtMs === null;
+      },
+      async movePointer() { controlsAt ??= Date.now(); },
+      async find() { return 'close'; },
+      async click() { requestStop(); },
+    };
+    const held = await stopStill(mpv, () => stopPlayAsUser(driver, mpv, 'stand-in', 'the held play'), {
+      furthestMs: 7458,
+      positionAtStop: (seconds) => untilPlexSawHeld(() => vela.requests, Math.round(seconds * 1000)),
+    });
+    await vela.done;
+    assert.equal(closed, true);
+    assert.equal(endedWhenClosed, null, 'the scenario loses its IPC before the play ends');
+    assert.ok(Date.now() - stopRequested >= 900, 'the real helper waits for delayed termination');
+    if (player === 'embedded') assert.ok(stopRequested - controlsAt >= 2250, 'the real control wait precedes the close');
+    assert.equal(play.endedAtMs, 9000, 'the engine still ends at the measured hold');
+    assertPlexStopped(vela.requests, Math.round(held * 1000));
+  });
+}
+
+// And the wiring: playAndQuit holds its play still before the stop when its
+// caller asks for the position at the stop, and multiplex asks, waits there
+// for Vela, and judges against it.
+test('pa-7: multiplex has its play held still before the stop, and judged against where it was held', () => {
   const helpers = fs.readFileSync(new URL('./e2e/helpers.mjs', import.meta.url), 'utf8');
   const quit = helpers.slice(helpers.indexOf('export async function playAndQuit('), helpers.indexOf('\n}\n', helpers.indexOf('export async function playAndQuit(')));
   assert.equal(
     quit.split(
       "    const stop = () => stopPlayAsUser(driver, mpv, socketPath, 'the play', { key });\n" +
-        '    if (positionAtStop) await positionsWhile(mpv, stop, positionAtStop);\n' +
+        '    if (positionAtStop) await stopStill(mpv, stop, { positionAtStop, furthestMs: beforeSeekMs });\n' +
         '    else await stop();\n',
     ).length,
     2,
-    'playAndQuit stops the play once, reading its position through the stop when asked',
+    'playAndQuit stops the play once, held still first when asked',
   );
   assert.equal(quit.split('stopPlayAsUser(').length, 2, 'and stops it nowhere else');
+  assert.equal(
+    quit.split("    const beforeSeekMs = Math.round((await mpv.getProp('time-pos')) * 1000);\n    await mpv.setProp('time-pos', 6);\n").length,
+    2,
+    'and tells stopStill how far the play got before its seek',
+  );
   const multiplex = fs.readFileSync(new URL('./e2e/scenarios/multiplex.mjs', import.meta.url), 'utf8');
   assert.equal(
-    multiplex.split('      positionAtStop: (seconds) => {\n        lastSeenMs = Math.round(seconds * 1000);\n      },\n').length,
+    multiplex.split(
+      '      positionAtStop: async (seconds) => {\n' +
+        '        lastSeenMs = Math.round(seconds * 1000);\n' +
+        '        await untilPlexSawHeld(() => mockA.state.requests, lastSeenMs);\n' +
+        '      },\n',
+    ).length,
     2,
-    'multiplex keeps the last reading',
+    'multiplex keeps where the play was held, and waits for Vela to have seen it there',
   );
   assert.equal(multiplex.split('lastSeenMs = ').length, 3, 'and sets it nowhere else (its declaration apart)');
   assert.equal(multiplex.split('assertPlexStopped(mockA.state.requests, lastSeenMs);').length, 2, 'and judges the stopped report against it');

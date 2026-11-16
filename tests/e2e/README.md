@@ -395,7 +395,21 @@ player's user (`runPlayer` says which player the run is in):
   its user does: mpv's `quit` in the external player; in the embedded one
   the view's Close control, or a key of the view (`q`, Escape). Then it
   waits until the player stops answering and the page is the user's again.
-  `playAndQuit` stops its play this way.
+  `playAndQuit` stops its play this way. Asked for the position at the stop
+  (`positionAtStop`), it first holds the play still (`stopStill`): paused,
+  moved to 9 s, a position it has not been near, and waited on until mpv
+  says it is there, paused; the caller is handed that position and may wait
+  there (`multiplex` waits for Vela's "playing" report of it), and the play
+  is then stopped. A paused play does not move, so mpv holds it there
+  however long the stop takes to act; such a play is never stopped while it
+  moves. With this hold `multiplex` found the embedded player reporting a
+  final position about 180 ms short of it (a stop freed the renderer before
+  mpv was told to end the file; fixed 2026-11-16). `multiplex` lets the stopped report be no lower than Vela's own
+  "playing" report of the hold (plexStopProblems lets no report say the play
+  got further). When that report is exact, the band is 0 ms below the hold
+  and 500 ms above. A final report may be retried once after a connection
+  failure (`e50aa83`); one identical retry is accepted. A changed retry,
+  more retries, or a timeline report after the final stop fails.
 - `waitForPageUncovered(driver, what)`: the embedded player's view covers
   the page until a moment after its play has ended. A click made before
   then fails ("element not interactable" or "element click intercepted").

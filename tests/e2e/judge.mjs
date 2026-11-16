@@ -103,32 +103,46 @@ export function skipJumpVerdict(samples, { startS, rangeStart, rangeEnd, windowM
 // What is wrong with the timeline reports Plex received for one play that was
 // stopped (review finding pa-7; multiplex.mjs): `reports` are the query
 // objects of the play's /:/timeline requests, in the order they came;
-// `lastSeenMs` is the play's position as last read from mpv while it was
-// being stopped (the scenario reads it all through the stop);
-// `seekMs` the position the play was sent to before it; `durationMs`,
+// `lastSeenMs` is the play's position as read from mpv when it was stopped
+// (the scenario holds the play still, paused, at that position before it
+// stops it, helpers.mjs stopStill; Vela tells Plex "playing" while a play is
+// paused, start_tracking_plex); `seekMs` the position the play was sent to
+// before it; `durationMs`,
 // `ratingKey` and `key` the item's. One sentence per broken rule, none when
 // all is well:
-// - exactly one report says state=stopped, and it is the last;
-// - before the last there is at least one report, and all say "playing";
+// - one report says state=stopped, with at most one identical retry, last;
+// - before the stopped report(s) there is at least one report, all "playing";
 // - the stopped report names the item (its ratingKey, and its key);
 // - its time is past the seek and inside the item;
 // - its time is where the play stopped: within 500 ms of lastSeenMs, either
-//   way (the last reading is at most a moment before the stop acted; an
+//   way (the play does not move from there before the stop acts; an
 //   allowance of seconds once let a stop that took long fail and a report
-//   that was late pass, verification round 1),
+//   that was late pass, verification round 1; a reading taken while the
+//   play still moved let a correct report fail and a stale one pass,
+//   verification round 2),
 //   and before the item's end (a report at the full duration tells Plex it
 //   was watched to the end); lastSeenMs must have been read;
 // - it carries the item's duration;
 // - no report says the play got further than the stopped report's time.
+// The position and monotonicity rules are narrower than "500 ms either way" once a
+// "playing" report of the held position has come before the stop (multiplex
+// waits for one): the stopped report may then be no lower than that report,
+// so its lower bound is that report's position (exactly the hold when that
+// report is exact), and its upper bound is 500 ms above the measured hold.
 export function plexStopProblems(reports, { lastSeenMs, durationMs, ratingKey, key, seekMs }) {
   const stopped = reports.filter((q) => q.state === 'stopped');
-  const one = `the play sends exactly one stopped timeline report, not ${stopped.length}`;
+  const one = `the play sends one stopped timeline report with at most one identical retry, not ${stopped.length}`;
   // With none there is nothing more to judge; with more, the first is judged.
   if (stopped.length === 0) return [one];
-  const problems = stopped.length === 1 ? [] : [one];
+  const problems = stopped.length <= 2 ? [] : [one];
   const report = stopped[0];
-  if (reports.at(-1) !== report) problems.push('the stopped report comes last');
-  const earlier = reports.slice(0, -1);
+  // e50aa83 retries a report once if its connection failed, including when
+  // the server received it but its answer was lost. Both copies can arrive.
+  if (!stopped.every((q) => ['ratingKey', 'key', 'time', 'duration'].every((field) => q[field] === report[field]))) {
+    problems.push('a retried stopped report repeats the same item, position and duration');
+  }
+  if (!reports.slice(-stopped.length).every((q) => q.state === 'stopped')) problems.push('the stopped report comes last');
+  const earlier = reports.slice(0, -stopped.length);
   if (!(earlier.length > 0 && earlier.every((q) => q.state === 'playing'))) {
     problems.push('"playing" reports, and only those, come before it');
   }
@@ -147,7 +161,7 @@ export function plexStopProblems(reports, { lastSeenMs, durationMs, ratingKey, k
   }
   if (!(finalMs >= lastSeenMs - 500 && finalMs <= lastSeenMs + 500 && finalMs < durationMs)) {
     problems.push(
-      `the stopped report's position (${report.time} ms) is where the play stopped: mpv was last seen at ${lastSeenMs} ms ` +
+      `the stopped report's position (${report.time} ms) is where the play stopped: mpv held it at ${lastSeenMs} ms ` +
         `as it was stopped, and the item ends at ${durationMs} ms`,
     );
   }
