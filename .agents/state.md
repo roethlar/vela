@@ -49,16 +49,22 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   - HANDOFF, 2026-11-16 about 17:25 UTC (the session doing this work was
     at 98% of its weekly allowance and may have stopped here). In flight:
     1. The release workflow by hand, run 43914914442 at `dee0f8b`, for
-       the owner's macOS and Windows builds. When last looked at: both
-       audits and the libmpv job passed; the Linux, Windows and Arch
-       builds were running; the macOS build was waiting for a runner. To
-       read it: `gh run view 43914914442 --repo roethlar/vela --json jobs`.
-       Its packages are the run's artifacts (`vela-macos`, `vela-windows`,
-       `vela-linux`, `vela-arch`): `gh run download 43914914442 --repo
-       roethlar/vela`. Whether Apple's notarization now passes is NOT
-       known yet (the owner said the agreement "should be done"). Tell
-       the owner the result and where the builds are; the owner verifies
-       them before any tag.
+       the owner's macOS and Windows builds. Result (17:30 UTC): both
+       audits, the libmpv job, the Linux bundles, the Arch package and
+       the WINDOWS build passed; the Windows installers (unsigned) are
+       the run's artifact `vela-windows`, with `vela-linux` and
+       `vela-arch`: `gh run download 43914914442 --repo roethlar/vela`,
+       or the run's page under Artifacts. The MACOS build did not run:
+       GitHub cancelled the job while it waited for a runner, as it did
+       to several of CI's macOS jobs that day; nothing failed. So there
+       is no macOS build yet, and whether Apple's notarization now
+       passes is still NOT known (the owner said the agreement "should
+       be done"). The agent asked GitHub to run the cancelled jobs of
+       that run again (`gh run rerun 43914914442 --failed`) at about
+       17:30 UTC; its outcome is not recorded. To read it: `gh run view
+       43914914442 --repo roethlar/vela --json jobs`. When the macOS job
+       passes, its artifact is `vela-macos`. The owner verifies the
+       builds before any tag.
     2. The 1.0.66 package for `continuum` is built from `dee0f8b` and
        checked: `~/dev/vela-agent-keep/pkg/vela-1.0.66-1-x86_64.pkg.tar.zst`,
        sha256 `be81c99f348508ccdaed1c2e7e196f241826561cd92550215f6ce828ebf00e94`. Its package check passed and its own binary passed
@@ -92,8 +98,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
        both end-to-end suites; land it with a bump to 1.0.67 (packages
        and artifacts named 1.0.66 exist); a new package and a new run by
        hand for the owner. NOT landed, NOT verified.
-    4. CI on `main` should be green again from `dee0f8b` on (the audit
-       passes); not looked at since the merge.
+    4. CI on `main` is green again: `dee0f8b` and `545467c` passed every
+       job.
   - NOT verified by anyone: this version running on macOS or Windows (CI
     compiles it there, nothing more), and everything that takes eyes.
 - THE FRONT END IS PLAIN SVELTE 5 AND VITE SINCE 2026-11-16 (`dee0f8b`;
