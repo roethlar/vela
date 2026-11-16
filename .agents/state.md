@@ -78,10 +78,15 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
        was not acquired by Runner of type hosted even after multiple
        attempts", with GitHub's notice "Due to capacity constraints, jobs
        targeting macOS arm64 runners may experience longer queue times".
-       Not Vela's fault; re-running the job is the remedy, and it was
-       re-run at 18:08 UTC (`gh run rerun 43921694491 --repo
-       roethlar/vela --failed`); its result is not recorded here.
-    4. Then the owner: download the run's `vela-macos` and
+       Not Vela's fault; re-running the job is the remedy: re-run at
+       18:08 UTC (`gh run rerun 43921694491 --repo roethlar/vela
+       --failed`), it got a runner and PASSED: the app notarized
+       ("Accepted"), stapled, and accepted by Gatekeeper as "Notarized
+       Developer ID"; the inventory job then passed, so the run is green
+       with every artifact (`vela-macos`, `vela-windows`, `vela-linux`,
+       `vela-arch`, `vela-sha256sums`).
+    4. NOTHING IS LEFT FOR THE AGENT ON THE RELEASE. Told to the owner
+       at 18:16 UTC. Then the owner: download the run's `vela-macos` and
        `vela-windows` artifacts (`gh run download 43921694491 --repo
        roethlar/vela`), check them, install the 1.0.67 package on
        `continuum`, and tag `v1.0.67` when satisfied.
