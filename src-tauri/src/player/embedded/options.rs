@@ -132,20 +132,33 @@ pub(crate) fn steps(args: &[LaunchArg]) -> Vec<Step> {
 /// embedded player. The user's scripts folder, per-script option files and
 /// key bindings are not loaded: the first two would run before Vela's options
 /// could be asserted over them, and no key press reaches an embedded mpv.
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(any(target_os = "linux", target_os = "macos", test))]
 pub(crate) fn user_config_files(
     mpv_home: Option<&std::ffi::OsStr>,
     xdg_config_home: Option<&std::ffi::OsStr>,
     home: Option<&std::ffi::OsStr>,
 ) -> Vec<std::path::PathBuf> {
     use std::path::PathBuf;
+    if let Some(home) = mpv_home {
+        return mpv_home_config_files(home);
+    }
     let set = |value: Option<&std::ffi::OsStr>| value.filter(|v| !v.is_empty()).map(PathBuf::from);
-    let user_dir = set(mpv_home)
-        .or_else(|| set(xdg_config_home).map(|dir| dir.join("mpv")))
+    let user_dir = set(xdg_config_home)
+        .map(|dir| dir.join("mpv"))
         .or_else(|| set(home).map(|dir| dir.join(".config").join("mpv")));
     let mut files = vec![PathBuf::from("/etc/mpv/mpv.conf")];
     files.extend(user_dir.map(|dir| dir.join("mpv.conf")));
     files
+}
+
+/// mpv 0.42 options/path.c: MPV_HOME replaces every config directory;
+/// explicitly empty means no files, rather than ordinary discovery.
+fn mpv_home_config_files(home: &std::ffi::OsStr) -> Vec<std::path::PathBuf> {
+    if home.is_empty() {
+        Vec::new()
+    } else {
+        vec![std::path::PathBuf::from(home).join("mpv.conf")]
+    }
 }
 
 /// Windows mpv.conf files, lowest priority first, matching mpv 0.42's
@@ -158,8 +171,8 @@ fn windows_user_config_files(
     appdata_dir: Option<&std::path::Path>,
     mpv_home: Option<&std::ffi::OsStr>,
 ) -> Vec<std::path::PathBuf> {
-    if let Some(home) = mpv_home.filter(|value| !value.is_empty()) {
-        return vec![std::path::PathBuf::from(home).join("mpv.conf")];
+    if let Some(home) = mpv_home {
+        return mpv_home_config_files(home);
     }
     let mut files = Vec::new();
     if let Some(dir) = exe_dir {
@@ -484,7 +497,6 @@ mod tests {
         assert_eq!(steps(&[]), []);
     }
 
-    #[cfg(target_os = "linux")]
     #[test]
     fn the_users_own_configuration_is_found_where_mpv_looks_for_it() {
         use std::ffi::OsStr;
@@ -499,7 +511,10 @@ mod tests {
         let system = PathBuf::from("/etc/mpv/mpv.conf");
         assert_eq!(
             files(None, None, Some("/home/u")),
-            [system.clone(), PathBuf::from("/home/u/.config/mpv/mpv.conf")]
+            [
+                system.clone(),
+                PathBuf::from("/home/u/.config/mpv/mpv.conf")
+            ]
         );
         assert_eq!(
             files(None, Some("/home/u/.cfg"), Some("/home/u")),
@@ -507,14 +522,27 @@ mod tests {
         );
         assert_eq!(
             files(Some("/opt/mpvhome"), Some("/home/u/.cfg"), Some("/home/u")),
-            [system.clone(), PathBuf::from("/opt/mpvhome/mpv.conf")]
+            [PathBuf::from("/opt/mpvhome/mpv.conf")]
         );
-        // An empty variable counts as unset, as it does for mpv.
+        // An empty XDG_CONFIG_HOME counts as unset; MPV_HOME does not.
         assert_eq!(
-            files(Some(""), Some(""), Some("/home/u")),
-            [system.clone(), PathBuf::from("/home/u/.config/mpv/mpv.conf")]
+            files(None, Some(""), Some("/home/u")),
+            [
+                system.clone(),
+                PathBuf::from("/home/u/.config/mpv/mpv.conf")
+            ]
         );
         assert_eq!(files(None, None, None), [system]);
+    }
+
+    #[test]
+    fn empty_mpv_home_disables_unix_config_discovery() {
+        use std::ffi::OsStr;
+        for xdg in [None, Some(OsStr::new("/home/u/.cfg"))] {
+            for home in [None, Some(OsStr::new("/home/u"))] {
+                assert!(user_config_files(Some(OsStr::new("")), xdg, home).is_empty());
+            }
+        }
     }
 }
 
@@ -528,29 +556,38 @@ mod windows_tests {
     fn windows_nonportable_configs_load_global_exe_then_appdata() {
         let exe = Path::new("install");
         let appdata = Path::new("roaming");
-        for mpv_home in [None, Some(OsStr::new(""))] {
-            assert_eq!(
-                windows_user_config_files(Some(exe), false, Some(appdata), mpv_home),
-                [
-                    exe.join("mpv").join("mpv.conf"),
-                    exe.join("mpv.conf"),
-                    appdata.join("mpv").join("mpv.conf"),
-                ]
-            );
-        }
+        assert_eq!(
+            windows_user_config_files(Some(exe), false, Some(appdata), None),
+            [
+                exe.join("mpv").join("mpv.conf"),
+                exe.join("mpv.conf"),
+                appdata.join("mpv").join("mpv.conf"),
+            ]
+        );
     }
 
     #[test]
     fn windows_portable_configs_load_exe_then_portable() {
         let exe = Path::new("install");
-        for mpv_home in [None, Some(OsStr::new(""))] {
-            assert_eq!(
-                windows_user_config_files(Some(exe), true, Some(Path::new("roaming")), mpv_home),
-                [
-                    exe.join("mpv.conf"),
-                    exe.join("portable_config").join("mpv.conf"),
-                ]
-            );
+        assert_eq!(
+            windows_user_config_files(Some(exe), true, Some(Path::new("roaming")), None),
+            [
+                exe.join("mpv.conf"),
+                exe.join("portable_config").join("mpv.conf"),
+            ]
+        );
+    }
+
+    #[test]
+    fn empty_mpv_home_disables_windows_config_discovery() {
+        for portable_present in [false, true] {
+            assert!(windows_user_config_files(
+                Some(Path::new("install")),
+                portable_present,
+                Some(Path::new("roaming")),
+                Some(OsStr::new("")),
+            )
+            .is_empty());
         }
     }
 
