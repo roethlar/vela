@@ -23,4 +23,7 @@ answer is in that log and product code has replaced it.
   driven by a script in its page (`drive.js`), with screenshots; the set
   comes from CI's newest successful run on main. Hosted Macs give the
   software OpenGL renderer and no EDR screen.
+- `w2-vela`: the same on a hosted Windows runner (`run.ps1`; M2's hook,
+  page script and mock server), where the end-to-end suite cannot yet start
+  a WebDriver session. Hosted Windows draws Direct3D 11 with WARP.
 - `libmpv-macos`: build the pinned macOS 11+ universal set on `macos-latest`, load/play/audit both architectures (Intel under Rosetta), and retain build/configure/check logs, MANIFEST and every dylib's `otool -L`. Budget estimate: 30–60 minutes cold, unmeasured; the workflow allows 170 minutes.

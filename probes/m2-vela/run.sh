@@ -41,7 +41,7 @@ test -x "$bin" || fail "no debug binary at $bin"
 # The mock server and a throwaway home.
 root="${RUNNER_TEMP:-/tmp}/m2-root"
 home="${RUNNER_TEMP:-/tmp}/m2-home"
-node "$here/serve.mjs" "$root" "$home" > "$out/mock.log" 2>&1 &
+node "$here/serve.mjs" "$root" "$home/Library/Application Support/com.vela.vela" > "$out/mock.log" 2>&1 &
 mock=$!
 config="$home/Library/Application Support/com.vela.vela/config.json"
 for _ in $(seq 1 120); do [ -f "$config" ] && break; sleep 1; done
