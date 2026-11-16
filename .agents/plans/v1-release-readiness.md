@@ -377,9 +377,11 @@ What changed in how a release is made:
 - A package with the library names its licences (`c45fe51`).
 - CI compiles the backend on Windows and for both macOS architectures
   (`687d533`, `ceed9be`), and runs the package-check tests it used to skip.
-- A Windows signing failure now says why in the workflow's log
-  (`9e7554f`, `6b7dd7c`, `2ffbffe`); Tauri shows nothing a signing command
-  says.
+- The Windows installers are no longer signed (`fc991a8`, the owner's
+  decision of 2026-11-16 to drop Azure Trusted Signing). Three commits
+  before it (`9e7554f`, `6b7dd7c`, `2ffbffe`) had made a Windows signing
+  failure say why in the workflow's log, which is how the reason (a 403
+  from the signing service) was found; they went with the signing.
 
 Verification at `382acc8` (the last commit that changes code or tests; later
 commits are records), on `continuum`:
@@ -408,10 +410,13 @@ commits are records), on `continuum`:
 The release workflow was run by hand on `main` four times (runs
 43879587091, 43882137476, 43884461044, 43887131049; a run by hand creates
 no release). Every Linux job passes: the AppImage, deb, rpm and Arch
-package are built with the library and each passes its check. The macOS
-and Windows legs build and then fail at signing, for reasons in the
-owner's accounts (below). So no signed macOS or Windows artifact of this
-version exists yet, and the inventory job has not run.
+package are built with the library and each passes its check. In those
+four runs the macOS leg built and then failed at notarization (Apple: "A
+required agreement is missing or has expired") and the Windows leg built
+and then failed at signing (Azure: 403), both for reasons in the owner's
+accounts. So no macOS or Windows artifact of this version exists yet, and
+the inventory job has not run. Since then Azure signing is gone
+(`fc991a8`) and the owner has said the Apple agreement should be done.
 
 The final review (`.agents/review/codereview-2026-11-16-release.md`): five
 codex hunts, fourteen findings, all repaired and closed.

@@ -84,6 +84,7 @@ checks one of the release's two macOS architectures).
 | fr-12 | MEDIUM   | CI compiles the macOS app for one of the two architectures the release builds | `[x]` | `ceed9be` | codex/default/standard; codex wrote the repair; reviewed by the agent |
 | fr-13 | LOW      | The guide says any value of `WEBKIT_DISABLE_DMABUF_RENDERER` rules out the embedded player; `0` and empty do not | `[x]` | `5e48e11` | codex/default/standard; codex wrote the repair; reviewed by the agent |
 | fr-14 | MEDIUM   | The end-to-end judge let a play report its stop twice | `[x]` | `9171b2e` | codex/default/standard; codex wrote the repair; reviewed by the agent |
+| fr-15 | LOW      | The records still told whoever releases to repair Azure signing, and said a run by hand signs everything | `[x]` | `88092f8` | codex/default/standard; records only, corrected by the agent |
 
 ## The fifth hunt
 
@@ -101,6 +102,22 @@ checks one of the release's two macOS architectures).
   equal the dispatched pins; `capability_ok` is true. Verdict `findings`,
   one: `fr-14`, in the test repair. Nothing was found in the stop fix
   itself.
+
+## The sixth hunt
+
+- Range: base `67de4aa5b1eb9771b9b9765a9bcbb1e781c87820`, head `fc991a896dbc447284658ecb66454a9fefd78644`: one commit,
+  written by the working agent after the round had closed: the owner
+  dropped Azure Trusted Signing that afternoon and the release workflow
+  stopped signing the Windows installers. Code the agent writes is
+  reviewed by codex, so it got a hunt of its own.
+- Reviewer: codex / host default / host default / standard. Same harness
+  and call as the others; thread `01a1e52b-796f-7362-a464-3e7cb9f48dde`; the event stream ends in
+  `turn.completed`; dispatched 2026-11-16 16:23 UTC, finished 16:28 UTC.
+  T1: no changed path matches a sensitive-path glob.
+- Acceptance: the payload matches the schema; `reviewed_sha` and
+  `base_sha` equal the dispatched pins; `capability_ok` is true. Verdict
+  `findings`, one, LOW: `fr-15`, about records that still spoke of Azure
+  signing as in use. Nothing was found in the workflow change itself.
 
 ## Notes
 

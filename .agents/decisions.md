@@ -2410,7 +2410,8 @@ In the same message, on the order of the release steps the agent had
 listed (tag and publish before the look at the macOS and Windows builds):
 "I need to verify the windows and mac builds first. shouldn't this come
 after 5 and 6?" It should. Builds are verified BEFORE any tag: a run of the
-release workflow by hand builds, signs and checks everything, publishes
+release workflow by hand builds and checks everything, signs and notarizes
+the macOS app (the Windows installers come out unsigned), publishes
 nothing, and its artifacts can be downloaded from the run.
 
 Open, the owner's to choose:
