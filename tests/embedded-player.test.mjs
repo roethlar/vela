@@ -56,6 +56,24 @@ function functionBody(source, signature, what) {
   return source.slice(start, end);
 }
 
+test("the window's app id is the name of the desktop file every package installs", () => {
+  // On Wayland a desktop finds a window's desktop file, and so its icon, by
+  // the window's app id, which GTK takes from the program's name. Every
+  // package installs `Vela.desktop` (Tauri names it after the product name),
+  // and on KDE the title bar is KWin's, which shows that icon.
+  assert.match(code(lib), /\npub fn run\(\) \{\s+#\[cfg\(target_os = "linux"\)\]\s+gtk::glib::set_prgname\(Some\("Vela"\)\);\n/);
+  assert.equal(count(code(lib), 'set_prgname('), 1);
+  assert.equal(JSON.parse(read('src-tauri/tauri.conf.json')).productName, 'Vela');
+  assert.match(
+    read('packaging/arch/PKGBUILD'),
+    /install -Dm644 "\$repo\/packaging\/arch\/vela\.desktop" "\$pkgdir\/usr\/share\/applications\/Vela\.desktop"/,
+  );
+  // On X11 the app id is the window's class.
+  for (const file of ['packaging/arch/vela.desktop', 'src-tauri/bundle/linux/vela.desktop.hbs']) {
+    assert.match(read(file), /^StartupWMClass=Vela$/m, file);
+  }
+});
+
 test('server decorations are chosen first in setup and only on Linux', () => {
   assert.match(lib, /#\[cfg\(any\(target_os = "linux", test\)\)\]\nmod window_decorations;/);
   // Before publishing the handle, installing fullscreen tracking, spawning

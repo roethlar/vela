@@ -203,6 +203,15 @@ pub fn prepare_startup() -> bool {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // A window's app id is how a Wayland desktop finds its desktop file, and
+    // so its icon. GTK takes it from the program's name, "vela", while every
+    // Vela package installs `Vela.desktop`: KWin, which draws Vela's title bar
+    // on KDE (window_decorations), then shows a generic icon in it. Set before
+    // GTK starts. On X11 it is the window's class, which the desktop files'
+    // StartupWMClass names.
+    #[cfg(target_os = "linux")]
+    gtk::glib::set_prgname(Some("Vela"));
+
     let (registry, durable_gate) = match durable::load() {
         Ok(ready) => (ready.registry, durable::DurableGate::ready()),
         Err(failure) => (SourceRegistry::default(), failure.gate),
