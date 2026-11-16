@@ -9,64 +9,63 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Now
 
-- THE RELEASE IS HELD AT `npm audit` WHILE THE SVELTEKIT REMOVAL LANDS (it
-  becomes Vela 1.0.66; Blockers, first entry, says where that stands).
-  What follows was written for 1.0.65 and holds for everything but the
-  front end's build:
-- VELA 1.0.65 IS READY TO BE RELEASED, AS FAR AS THE AGENT CAN TAKE IT
-  (2026-11-16). It is NOT tagged and NOT published. The whole account,
-  with what was verified and the owner's steps in order, is
-  `.agents/plans/v1-release-readiness.md`, "Release candidate: Vela
-  1.0.65"; read that before doing anything about the release. In short:
-  - The owner's answers to the list, the same day (`.agents/decisions.md`,
-    last entry): the Apple agreement "should be done"; "no more azure
-    signing. I'm not paying monthly for that", so the release workflow no
-    longer signs the Windows installers (`fc991a8`) and they ship
-    unsigned, as before 1.0.60; "run it"; and the macOS and Windows builds
-    are to be verified by the owner BEFORE any tag. Whether Windows is
-    signed another way is open and the owner's (alternatives were given:
-    SignPath Foundation's free signing for open-source projects, a
-    certificate authority's certificate, staying unsigned).
-  - BLOCKED SINCE 2026-11-16, about 16:20 UTC, AT `npm audit` (Blockers,
-    first entry): the run by hand the owner asked for (43906795908, at
-    `fc991a8`) built nothing. Four SvelteKit advisories published that
-    afternoon make `npm audit --audit-level=moderate` fail, in the release
-    workflow and in CI's Frontend job alike, so every push to `github`
-    shows red until this is settled. The way out is the owner's choice
-    and was put to the owner that day.
-  - The change that took Azure out was written by the agent, so a codex
-    hunt over it is out (the sixth of the final round); its result is not
-    recorded yet.
-  - The owner's word that day: "you have permission to update whatever
-    you need to to get the release ready. then do a final round of
-    reviews with codex, then come to me with actions you cannot do"
+- VELA 1.0.66 IS READY TO BE RELEASED, AS FAR AS THE AGENT CAN TAKE IT
+  (2026-11-16). It is NOT tagged and NOT published; the owner verifies the
+  macOS and Windows builds first. The whole account, with what was
+  verified and the owner's steps in order, is
+  `.agents/plans/v1-release-readiness.md`, "Release candidate"; read that
+  before doing anything about the release. What happened that day, in
+  order:
+  - The owner's word: "you have permission to update whatever you need to
+    to get the release ready. then do a final round of reviews with
+    codex, then come to me with actions you cannot do"
     (`.agents/decisions.md`: the workflows are the agent's to edit under
     it; tagging and publishing, `sudo`, signing identities and by-eye
-    judgments stay the owner's; the 2026-11-14 rule that set tests aside
-    is superseded).
-  - Done: the Linux packages carry the embedded player's library and
-    each is checked in the release workflow (all four built and passing
-    on GitHub's runners); CI compiles the backend on Windows and for
-    both macOS architectures; the notes are written and headed "Vela
-    1.0.65"; the final review (five codex hunts, fourteen findings, all
-    repaired and closed: `.agents/review/codereview-2026-11-16-release.md`);
+    judgments stay the owner's; the rule that set tests aside is
+    superseded).
+  - Done as 1.0.65: the Linux packages carry the embedded player's
+    library and each is checked in the release workflow; CI compiles the
+    backend on Windows and for both macOS architectures; the release
+    notes; the final review (`.agents/review/codereview-2026-11-16-release.md`:
+    seven codex hunts by the end of the day, sixteen findings, all closed);
     a mutation check of three window-state repairs and the tests it
-    showed missing; a fault found on the way (an embedded play closed by
-    its user reported a final position about 180 ms early, `3e0a485`).
-  - Verified at `382acc8`, the last commit that changes code or tests: the
-    full check (727 Rust tests, 672 Node tests; `cargo audit` not
-    installed on `continuum`, run by CI); both end-to-end suites in full
-    with the parity verdict PASS (external 48 of 48, embedded 51 of 51,
-    at `8b16a46`, after which only unit-test code changed); the package
-    built from it for `continuum`
-    (`~/dev/vela-agent-keep/pkg/vela-1.0.65-1-x86_64.pkg.tar.zst`), whose
-    own binary passed in both players.
-  - NOT verified by anyone: this version running on macOS or Windows (it
-    is compiled there by CI, nothing more), and everything that takes
-    eyes (the plans' owner checks).
-  - Told to the owner on 2026-11-16, as the list of what only the owner
-    can do; whether and when to release is the owner's. Until the owner
-    says more, nothing is queued for the agent on the release.
+    showed missing; an embedded play closed by its user no longer reports
+    a position it was never at (`3e0a485`).
+  - The owner's answers to the first list of steps (`.agents/decisions.md`,
+    the entries of 2026-11-16): the Apple agreement "should be done"; "no
+    more azure signing. I'm not paying monthly for that", so the Windows
+    installers ship unsigned (`fc991a8`), with alternatives given and none
+    chosen; the builds are verified by the owner BEFORE any tag.
+  - Then the release stopped at `npm audit` on advisories against
+    SvelteKit, and the owner had the approved SvelteKit removal landed:
+    `dee0f8b`, Vela 1.0.66 (the entry after the next; the blocker's entry
+    rotated to `docs/history/state-archive.md`).
+  - Verified for 1.0.66, on the removal's branch before the merge: the
+    full check (727 Rust tests, 676 Node tests then, 732 at the merge),
+    both end-to-end suites in full with the parity verdict PASS (external
+    48 of 48, embedded 51 of 51, at `a13be71`), the plan's red-proofs, a
+    codex hunt over the whole change. `cargo audit` is not installed on
+    `continuum`; CI runs it.
+  - Running when this was written: the release workflow by hand at
+    `dee0f8b` (run 43914914442), which is where the owner's macOS and Windows
+    builds come from, and the build of the 1.0.66 package for `continuum`.
+    Their results are not recorded yet.
+  - NOT verified by anyone: this version running on macOS or Windows (CI
+    compiles it there, nothing more), and everything that takes eyes.
+  - Next for the agent, by the owner's word: the window's title bar. On
+    Wayland the windowing library Tauri uses (tao) gives the window a GTK
+    header bar of its own (`WlHeader::setup`), which is taller than KDE's
+    and which KDE's "no titlebar" rule cannot remove; the owner asked why
+    on 2026-11-16 and was told the agent would make Vela leave the title
+    bar to KWin, as its own change, with a check that the embedded
+    player's video still lines up. Not started.
+- THE FRONT END IS PLAIN SVELTE 5 AND VITE SINCE 2026-11-16 (`dee0f8b`;
+  plan `.agents/plans/remove-sveltekit.md`, whose last log entry has the
+  landing; decisions of 2026-10-23 and 2026-11-16). SvelteKit and
+  adapter-static are gone; `index.html` loads `src/main.ts`, which mounts
+  `src/App.svelte` (what records before that date call
+  `src/routes/+page.svelte`). Left for the owner: the plan's visual checks
+  on the Mac.
 - THE EMBEDDED PLAYER IS OFFERED IN SETTINGS (2026-11-15). The owner
   ruled that day that what is built is to be usable from the app, and
   that the owner is Vela's only user (`.agents/decisions.md`; read it
@@ -169,46 +168,6 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   43265242786 at `f2c6449` passed every job
   (Frontend, Rust, cargo audit). Windows was not exercised. Awaiting owner
   confirmation.
-- SvelteKit removal, 2026-10-23. The owner approved
-  `.agents/plans/remove-sveltekit.md` and ruled G1 "rename"; the decision is
-  `.agents/decisions.md` 2026-10-23. Slices 1-4 are implemented on branch
-  `remove-sveltekit`, which is NOT merged to `main`. The branch is at
-  version 1.0.62, and on 2026-10-24 it merged the reconciled `main`
-  (`bc12bc5`, 1.0.61) without a rebase; the plan's 2026-10-24 amendment
-  carries the consequences. The approved plan text, that amendment, the
-  implementation log and the 2026-10-23 decision entry exist only on the
-  branch; `main` carries the plan's pre-approval draft plus its "Obligation
-  recorded 2026-11-12" section.
-  - The frontend is plain Svelte 5 and Vite. Root `index.html` loads
-    `src/main.ts`, which mounts `src/App.svelte`. Static files are in
-    `public/`, and `$lib` is defined in tsconfig `paths`.
-    `npm run build` runs `scripts/check-frontend-build.mjs`, and
-    `tests/frontend-shell.test.mjs` guards the shell.
-  - Verified on the Windows host, in an LF worktree with npm 12.0.1: `npm ci`;
-    `npm audit` (0 vulnerabilities); `npm run check` (68 pass, 2 skipped;
-    svelte-check 295 files, 0 errors, 0 warnings); `npm run build`; and every
-    local guard red-proof (see the plan's implementation log).
-  - Re-verified after the 2026-10-24 merge of `main`, in an LF worktree with
-    Node 26.12.1/npm 12.0.2: `node scripts/check-js-toolchain.mjs`; `npm ci`;
-    `npm audit` (0 vulnerabilities); `npm run check` (68 pass, 0 fail, 6
-    skipped, all POSIX-bash build-script cases; svelte-check 295 files, 0
-    errors, 0 warnings); `npm run build` (B1-B6 passed); `node --test
-    tests/`. The lock differs from `main`'s by exactly the 11 removed Kit
-    packages.
-  - What blocks the merge moved to `## Blockers` on 2026-11-12: the list that
-    stood here had been overtaken by the branch's own record.
-  - GitHub CI passed on PR #2 (https://github.com/roethlar/vela/pull/2), run
-    40059537619 at `367bdf6`. Frontend: `npm ci`, `npm audit` (0
-    vulnerabilities), `npm run check` (70 pass; svelte-check 0 errors, 0
-    warnings), and `npm run build` (B1-B6 passed). Rust: the 1.89 MSRV check,
-    and stable check, clippy `-D warnings` and test. cargo audit also passed.
-    After the merge of `main`, run 40061360150 at `af96dc5` passed every job
-    on Node 26.12.1/npm 12.0.2: `npm audit` (0 vulnerabilities), `npm run
-    check` (77 pass, 0 skipped; svelte-check 0 errors, 0 warnings), `npm run
-    build` (B1-B6 passed), the 1.89 MSRV check, stable check, clippy, 364 Rust
-    tests, and cargo audit. (`main`'s npm audit gate is covered by decision
-    `.agents/decisions.md` 2026-11-02; this branch does not clear the
-    deepmerge advisory either, since it keeps vite-plugin-svelte.)
 - 2026-08-20 macOS AirPlay diagnostics selected an AVFoundation-first production
   path, now drafted at `.agents/plans/macos-airplay-sync.md`; implementation is
   not approved. The affected server-backed MKV/E-AC-3 play was physically about
@@ -322,76 +281,7 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Blockers
 
-- THE RELEASE GATE `npm audit` FAILS (2026-11-16, first seen about 16:20
-  UTC; it passed at about 15:50 UTC the same day). npm reports
-  `@sveltejs/kit` as HIGH for four advisories published that afternoon:
-  GHSA-pfhg-q3qv-9q6r (a redirect to an untrusted site through enhanced
-  form submission), GHSA-27mw-82g8-phjj (XSS through an untrusted
-  cache-control header in a prerendered page), GHSA-3r8g-jcqq-3p5j (denial
-  of service parsing a remote function's form data) and GHSA-6cf5-gc4q-fm3x
-  (collisions between private `query.batch` functions). Vela has the last
-  2.x release (2.70.4); the fix is in 3.2.0 only. The gate fails closed at
-  moderate and above by the owner's decision of 2026-11-02, which also
-  bans `npm audit fix --force`, overrides and per-advisory suppression, so
-  the agent does not go round it.
-  - Exposure, checked by search: Vela uses none of what the advisories
-    are about. `src/` imports nothing from `$app/*` or `@sveltejs/kit`,
-    has no form actions, no server routes, no remote functions and no
-    prerendered page; its three route files are `+layout.svelte`,
-    `+layout.ts` and `+page.svelte`, built by adapter-static into a static
-    page that Tauri serves from disk.
-  - Way 1, SvelteKit 3.2.0. Tried in a scratch worktree: the install is
-    clean and the audit passes, but the build stops at
-    `config_file_unsupported`, and SvelteKit's migration guide lists more
-    (configuration moves into `vite.config.js`; `$lib` becomes `#lib`
-    with file extensions, in every import; TypeScript 6; Svelte 5.57.1 or
-    newer). A migration of a framework the owner has already decided to
-    remove.
-  - Way 2, land the SvelteKit removal (`.agents/plans/remove-sveltekit.md`,
-    approved 2026-10-23, the last entry of this section). Tried in a
-    scratch worktree: `main` merges into the branch with ten conflicted
-    files, all of them versions and records (none under `src/`); with
-    `main`'s side taken for those and the two packages dropped, the audit
-    passes and the build passes the branch's own check. Still to do
-    there: `npm run check` must list `main`'s test files (it ran 152
-    tests, and its guard for that failed), and three test files still
-    name `+page.svelte`. Then everything the plan asks before a merge,
-    which includes checks only the owner can make.
-  - Way 3, an exception by the owner for these four advisories, on the
-    ground of no exposure. It needs the owner to change the rule of
-    2026-11-02.
-  - RULED by the owner on 2026-11-16: way 2. "and land the sveltkit
-    removal. I thought that was done. do it next." (`.agents/decisions.md`,
-    last entry.) IN PROGRESS, on the branch `remove-sveltekit` (local
-    only until it is merged; worktree `~/dev/vela-agent-keep/wt/rmkit-land`
-    on `continuum`):
-    - `334a8bf` merges `main` into the branch (ten conflicts, all
-      versions and records; `src/` merged by itself); `c8016b7` repoints
-      three of `main`'s newer tests at `src/App.svelte`; `a13be71` is
-      Vela 1.0.66 with the release notes. There: `npm audit` passes,
-      `npm run check` passes (676 tests), the build passes the branch's
-      own check, and every test file that reads the page fails when the
-      page is moved away.
-    - Running when this was written: both end-to-end suites in full at
-      `a13be71` (logs in `~/dev/vela-agent-keep/full-a13be71-e2e/`), the
-      full check, and the codex hunt the plan's Review step asks for
-      (the seventh of the day's round).
-    - Still to do, in order: the plan's three red-proofs that need this
-      venue (the font guard F1 and F2, and the webview that loads but
-      does not mount); read the hunt's verdict and repair what it finds;
-      merge the branch into `main` and push; the plan's Slice 4 records;
-      a package of 1.0.66 for `continuum`; the release workflow by hand
-      for the owner's macOS and Windows builds.
-    - The plan asked for its end-to-end gates on the Linux VM, which is
-      suspended; they run on `continuum`, which the owner was told when
-      the way was offered. The owner's look at the macOS build is the
-      plan's visual check on the Mac.
-  - One correction to what the owner was told that day: the agent said
-    "four advisories published today". Two of the four
-    (GHSA-pfhg-q3qv-9q6r, GHSA-27mw-82g8-phjj) are the ones the removal
-    plan was written against in October; what changed on 2026-11-16 is
-    that npm began to report them, and two new ones, against the version
-    Vela had been moved to.
+- No known product blocker.
 - E2E `completionhub` fails now and then in the embedded player. First seen
   2026-11-15: once in the full embedded run at `3505387` (which therefore
   failed the parity verdict: 48 of 50), then in 2 of 49 runs of the scenario
@@ -449,28 +339,6 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   `continuetv` and `continueon`). The harness now waits until mpv reports a
   position before any seek (`tests/e2e/mpv.mjs`). Whether that was the
   whole of the `continueon` and `playverbs` flakes is not established.
-- The SvelteKit removal (`## Now`) cannot merge as it stands. Its merge
-  blockers moved here on 2026-11-12, re-verified at `main` `aaa01c1` against
-  branch head `769d5a8`:
-  - GitHub reports PR #2 as `CONFLICTING` with `main`. `main` is 53 commits
-    past the branch's last merge of it and has used versions 1.0.62 and
-    1.0.63, so the branch must merge `main` again, carry the
-    server-identity edits into `src/App.svelte`, and re-bump
-    (`.agents/plans/remove-sveltekit.md`, "Obligation recorded
-    2026-11-12"). Every verification recorded for the branch predates that
-    merge.
-  - The branch's own state records the Mac's automated gates as passed on
-    2026-10-24 at `2767cbe`: the JS checks, `cargo +stable check --locked`,
-    `tauri build --debug`, the automated half of the desktop smoke, and
-    `tauri dev` with HMR. Still open there: every VM gate (Slice 0,
-    Slice 1's E2E run with its F1/F2 red-proofs, the full `npm run e2e`,
-    the webview-mount red-proof), the owner's visual checks on the Mac, and
-    the Review.
-  - Two things the branch recorded on 2026-10-24 have changed since: it
-    calls codex unavailable, and codex ran reviews on 2026-11-12
-    (`.agents/review/index.md`); its only E2E venue is the suspended VM, and
-    `continuum` has been one since 2026-11-12 (`.agents/machines.md`).
-    Whether the plan's VM gates may run on `continuum` is an owner decision.
 
 ## Verification
 
@@ -490,9 +358,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   `.agents/plans/show-last-episode-sort.md` (landed sorting baseline)
 - `.agents/plans/library-sort-direction.md` (landed at `c0d1412`, 1.0.59)
 - `.agents/plans/v1-release-readiness.md` (published-release evidence)
-- `.agents/plans/remove-sveltekit.md` (approved; implemented on unmerged
-  branch `remove-sveltekit`, which holds its current status and log; merge
-  blockers in `## Blockers`)
+- `.agents/plans/remove-sveltekit.md` (landed 2026-11-16 at `dee0f8b`, Vela
+  1.0.66; the owner's visual checks on the Mac are open)
 - `.agents/plans/macos-airplay-sync.md` (implemented for 1.0.61; packaged
   physical acceptance pending)
 - `README.md`, `RELEASE_NOTES.md`, `ISSUES.md`

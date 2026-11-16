@@ -85,6 +85,7 @@ checks one of the release's two macOS architectures).
 | fr-13 | LOW      | The guide says any value of `WEBKIT_DISABLE_DMABUF_RENDERER` rules out the embedded player; `0` and empty do not | `[x]` | `5e48e11` | codex/default/standard; codex wrote the repair; reviewed by the agent |
 | fr-14 | MEDIUM   | The end-to-end judge let a play report its stop twice | `[x]` | `9171b2e` | codex/default/standard; codex wrote the repair; reviewed by the agent |
 | fr-15 | LOW      | The records still told whoever releases to repair Azure signing, and said a run by hand signs everything | `[x]` | `88092f8` | codex/default/standard; records only, corrected by the agent |
+| fr-16 | LOW      | The guard of the page's mount target accepted `data-id="app"` | `[x]` | `1dc3f62` | codex/default/standard; codex wrote the repair; reviewed by the agent |
 
 ## The fifth hunt
 
@@ -118,6 +119,24 @@ checks one of the release's two macOS architectures).
   `base_sha` equal the dispatched pins; `capability_ok` is true. Verdict
   `findings`, one, LOW: `fr-15`, about records that still spoke of Azure
   signing as in use. Nothing was found in the workflow change itself.
+
+## The seventh hunt
+
+- Range: base `cce384837dcbb3b47fb3b33132020786ec22e0c0`, head `a13be713cba1bf8b5dc9ef8696dd5f0f33cf3b12`: the whole
+  change of the branch `remove-sveltekit` against `main`, which the branch
+  had just merged. This is the Review step of
+  `.agents/plans/remove-sveltekit.md`, owed since October; the owner told
+  the agent to land the removal on 2026-11-16.
+- Reviewer: codex / host default / host default / standard. Same harness
+  and call as the others, in a worktree with the branch's own
+  `node_modules`; thread `01a1e53b-38cb-7c03-9759-e48816e34b53`; the event stream ends in
+  `turn.completed`; dispatched 2026-11-16 16:40 UTC, finished 16:49 UTC.
+  T1: no changed path matches a sensitive-path glob.
+- Acceptance: the payload matches the schema; `reviewed_sha` and
+  `base_sha` equal the dispatched pins; `capability_ok` is true. Verdict
+  `findings`, one, LOW: `fr-16`, a guard of the page's shell that accepted
+  `data-id="app"` as the mount target. Nothing was found in the removal
+  itself or in how `main` was merged into it.
 
 ## Notes
 

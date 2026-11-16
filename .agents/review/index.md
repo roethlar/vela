@@ -8,7 +8,9 @@ each. Fourteen candidates, fourteen admitted, none declined, all repaired:
 codex wrote each repair and the working agent's review closed it. A sixth
 hunt, over the one commit that took Azure signing out of the release
 workflow (`67de4aa..fc991a8`, the agent's own): one LOW finding about
-records, corrected. Record:
+records, corrected. A seventh, the Review step of the SvelteKit removal,
+over that branch's whole change against `main` (`cce3848..a13be71`): one
+LOW finding in a test guard, repaired on the branch. Record:
 `.agents/review/codereview-2026-11-16-release.md`.
 
 | ID    | Severity | Impact (one line) | Status | Commit | Reviewer |
@@ -28,6 +30,7 @@ records, corrected. Record:
 | fr-13 | LOW      | The guide says any value of `WEBKIT_DISABLE_DMABUF_RENDERER` rules out the embedded player; `0` and empty do not | `[x]` | `5e48e11` | codex/default/standard; codex wrote the repair; reviewed by the agent |
 | fr-14 | MEDIUM   | The end-to-end judge let a play report its stop twice | `[x]` | `9171b2e` | codex/default/standard; codex wrote the repair; reviewed by the agent |
 | fr-15 | LOW      | The records still told whoever releases to repair Azure signing, and said a run by hand signs everything | `[x]` | `88092f8` | codex/default/standard; records only, corrected by the agent |
+| fr-16 | LOW      | The guard of the page's mount target accepted `data-id="app"` | `[x]` | `1dc3f62` | codex/default/standard; codex wrote the repair; reviewed by the agent |
 
 **Player window review (mpv window state, size, the setting), 2026-11-14 (closed 2026-11-14):** three codereview codex
 hunts, one per slice (called plainly; the host's codex config resolves to

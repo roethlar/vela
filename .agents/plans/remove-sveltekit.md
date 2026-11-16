@@ -2,11 +2,13 @@
 
 ## Status
 
-**APPROVED, revision 1 (owner, 2026-10-23). G1 ruled "rename". Slices 1-4 are
-implemented on branch `remove-sveltekit`, which is not merged. Before merge:
-Slice 0, the VM E2E proofs, the owner's visual checks of the Mac desktop smoke
-and HMR, and the Review step (see the implementation log). The Mac's automated
-gates passed on 2026-10-24.**
+**LANDED 2026-11-16: merged into `main` at `dee0f8b` as Vela 1.0.66 (PR #2
+merged). Approved, revision 1, by the owner on 2026-10-23; G1 ruled
+"rename". Left for the owner: the visual checks on the Mac (the app boots,
+text is in Geist, the saved theme applies with no flash, no CSP violation
+in the Web Inspector), to be made on the macOS build of the release
+workflow. The implementation log's last entry has what was verified and
+where.**
 
 - Approval: the owner answered "go with your rec" when the recommendation was
   to remove SvelteKit and keep Svelte 5 and Vite. The owner then set the
@@ -970,3 +972,77 @@ and substantial sidebar/menu edits in `src/routes/+page.svelte`, plus
 `+page.svelte` edits into `src/App.svelte` and repoint
 `tests/server-identity-ui.test.mjs` (it reads `src/routes/+page.svelte`) at
 the renamed file. `main` is also at 1.0.63, so this branch must re-bump.
+
+## Implementation log, 2026-11-16: landed
+
+Why now: the release of what was then 1.0.65 stopped at `npm audit`. npm had
+begun to report four advisories against `@sveltejs/kit` 2.70.4 (HIGH;
+GHSA-pfhg-q3qv-9q6r and GHSA-27mw-82g8-phjj, which this plan was written
+against, and GHSA-3r8g-jcqq-3p5j and GHSA-6cf5-gc4q-fm3x), fixed only in
+SvelteKit 3. Given the ways out, the owner: "and land the sveltkit removal.
+I thought that was done. do it next." (`.agents/decisions.md`, 2026-11-16,
+which also moves this plan's VM gates to `continuum`.)
+
+Venue: `continuum` (x86_64, KDE Wayland; the end-to-end venue since
+2026-11-12), Node 26.13.1, npm 12.2.2.
+
+- **The merge of `main`** (`334a8bf`): 427 commits. git carried `main`'s
+  changes into the renamed files: fourteen files under `src/` merged with no
+  conflict, `main`'s edits to `src/routes/+page.svelte` landing in
+  `src/App.svelte`. Ten files conflicted, none of them source: the seven
+  places the version is written and the build date (`main`'s), the `check`
+  script (`main`'s list plus `tests/frontend-shell.test.mjs`, without
+  `svelte-kit sync`), the lockfile (regenerated: against `main`'s it lost
+  exactly the eleven packages Slice 2 removed and gained none), and three
+  record files.
+- **`main`'s newer tests** (`c8016b7`): three test files read the page by
+  its old path and failed to load; repointed. `git grep -n "+page.svelte"
+  -- tests src scripts ISSUES.md` returns nothing. Slice 3's red-proof
+  again, with them: `git mv src/App.svelte src/Gone.svelte` makes all nine
+  test files that read the page fail.
+- **Version** (`a13be71`): 1.0.66. The branch's own bump to 1.0.62 had been
+  overtaken; 1.0.65 names the package built for the owner before this.
+- **A1**: `npm audit --audit-level=moderate` exits 0 on a clean `npm ci`
+  (two low findings, the deepmerge pair); `npm ls @sveltejs/kit
+  @sveltejs/adapter-static cookie` is empty.
+- **The full check** at `a13be71`: toolchain assertion, 676 Node tests with
+  none skipped, svelte-check 301 files with 0 errors and 0 warnings, the
+  build with "check-frontend-build: B1-B6 passed", `cargo +1.89.0 check`,
+  stable check, clippy with stable and 1.100, 727 Rust tests. `cargo audit`
+  is not installed on `continuum`; CI runs it.
+- **Slice 0's baseline**: `main`'s own full run of that morning at
+  `8b16a46`, on this venue: external 48 of 48, embedded 51 of 51, verdict
+  PASS, no known failure.
+- **The full end-to-end suites** at `a13be71`, each building its app, on a
+  clean checkout: external 48 of 48, embedded 51 of 51, parity verdict
+  PASS. `smoke` (footer `Vela v1.0.66`, the Geist guard) and `uifoundation`
+  are among them. Logs: `~/dev/vela-agent-keep/full-a13be71-e2e/`.
+- **Slice 1's red-proofs**, in a disposable worktree with its own `npm ci`,
+  each built into the app. F2 (the body's font set to `system-ui`): `smoke`
+  fails at "body must use the Geist UI font". F1 (the Geist import removed):
+  the build itself refuses first, at B2 ("no @font-face with font-family
+  Geist Variable in the linked CSS"), which did not exist when Slice 1 was
+  written; with the build's check taken out as well, `smoke` fails at "Geist
+  Variable font loaded". So both assertions bite, each on its own.
+- **The webview-mount red-proof**: with `getElementById("missing")` in
+  `src/main.ts`, `smoke` fails at "app render". Restored, `smoke` and
+  `uifoundation` pass.
+- **Review**: a `codereview` hunt by codex, called plainly, over the
+  branch's whole change against `main` (`cce3848..a13be71`). One finding,
+  LOW: S4 of `tests/frontend-shell.test.mjs` counted any attribute ending
+  in `id` as the mount target (`fr-16`). Repaired on the branch (`1dc3f62`,
+  written by codex, reviewed by the working agent); 732 Node tests then.
+- **Merged** into `main` at `dee0f8b` with no conflict and pushed to both
+  remotes; GitHub shows PR #2 as merged. On `main` after the merge: the
+  audit, `npm run check` (732), the build, clippy and the 727 Rust tests
+  pass.
+
+Not run, and whose they are:
+
+- The Mac desktop smoke's visual half and the HMR visual check (this
+  section's 2026-10-24 entry lists them): the owner's, on the macOS build
+  of the release workflow (run 43914914442 was started at `dee0f8b`).
+- WebView2 on Windows: no gate of this plan; the owner looks at the Windows
+  build of the same run.
+- Slice 0's re-alignment of the Linux VM's Node: not done and no longer
+  needed for this plan; the VM stays suspended and as it was.
