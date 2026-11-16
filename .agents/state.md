@@ -36,12 +36,16 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
       set from the pins (`ba677b7`, fixes `c60a6d3`, `485628c`,
       `ad65c4d`) built and played on a hosted Mac, natively and under
       Rosetta (probe run 43969988737); its CI job runs on every push.
-      Vela.app carries the set (`2181dcb`); no release run has proved it
-      yet.
-    - In progress: a release run by hand to prove the Mac app; codex
-      defect hunts over the HDR slice and over the Windows and macOS
-      packaging. The six findings of the earlier hunts are all closed
-      (`.agents/review/codereview-2026-11-16-platforms.md`).
+      Vela.app carries the set (`2181dcb`), proven by a release run by
+      hand (43974146432: signed, notarized, the set played from inside the
+      DMG's app on both architectures). Probe M2 (Vela's own embedded
+      player on a hosted Mac, `probes/m2-vela`) found the picture black:
+      nothing drives the layer's draws (the plan's Probe log); repair in
+      progress (codex, `mdraw`).
+    - In progress (codex, worktrees `~/dev/vela-agent-keep/wt/cx-<tag>`):
+      `mdraw` (above), `pl11` and `pl12` (review findings of the Windows
+      packaging; `.agents/review/codereview-2026-11-16-platforms.md`,
+      which records six hunts and thirteen findings).
   - Linux unchanged through all of it: both end-to-end suites in full at
     `6b206ec`, `623ec17`, `c49be2a` and `49f2c3c` (48 of 48, 51 of 51,
     parity PASS).

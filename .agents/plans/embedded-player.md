@@ -2344,6 +2344,24 @@ artifact keeps the probe's logs and screenshots.
   before mpv). Both virtual GPUs refused an accelerated OpenGL 3.2 pixel
   format, so the runs used Apple's software renderer; a real Mac's GPU
   gives the accelerated one.
+- **2026-11-16, M2, Vela's own embedded player on a hosted Mac: the picture
+  stays black, because nothing drives the layer's draws.** `probes/m2-vela`:
+  a debug Vela built with a probe-only hook (applied on the runner, never
+  committed) plays the end-to-end suite's mock Jellyfin clip in its own
+  window twice, driven by a script in its page; CI's set. Runs 43978656660
+  and 43980483724 (macOS 26.7.2, Apple's software renderer). Everything
+  around the picture works: the set loads and passes the dyld check, the
+  surface falls back from float to 8-bit to software as designed, standard
+  range is chosen and the colour switch completes, the page turns into the
+  player view and back twice, each play closes and releases its CGL
+  context, mpv's AVFoundation audio output opens. But the picture is black
+  and the clock crawls: Core Animation called the layer's `canDraw` only
+  after Vela's own `setNeedsDisplay` (6 calls in the first play's 8 s),
+  never at the display rate the layer's `asynchronous` mode was relied on
+  for, and mpv logged `mpv_render_context_render() not being called or
+  stuck.` every 250 ms. Probe M1 and mpv's own Cocoa layer drive their
+  draws from mpv's render update callback; the macOS host installed none.
+  Repair in progress (codex): the same, then M2 again.
 
 ### Design that follows (2026-11-16)
 
@@ -2412,5 +2430,12 @@ artifact keeps the probe's logs and screenshots.
   commit: 48 of 48, 51 of 51, parity PASS). Vela.app carries the set
   (`2181dcb`: Contents/Frameworks, signed with the app; the release
   workflow proves it from the finished DMG); not yet run in a release.
-  Next: a release run by hand proves the Mac app; then the owner's checks,
-  listed once with what each platform has and lacks.
+  The release workflow run by hand at `bffc3a4` (43974146432) built,
+  signed and notarized Vela.app with the set in `Contents/Frameworks`
+  (Gatekeeper: "Notarized Developer ID"), and the set loaded from inside
+  the app mounted from the finished DMG played natively and under Rosetta
+  with the image audit passing; every other job passed too. The six codex
+  hunts over the platform slices and their fixes are recorded in
+  `.agents/review/codereview-2026-11-16-platforms.md`. Probe M2 (above)
+  found the macOS picture black; its repair is next, then M2 again, then
+  the owner's checks, listed once with what each platform has and lacks.
