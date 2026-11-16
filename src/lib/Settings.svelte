@@ -42,6 +42,7 @@
   function createSetting<T>(initial: T) {
     const confirmed = { saves: 0, known: false, value: initial };
     const status = $state({ pending: 0, saved: false });
+    const feedback = $state({ error: null as string | null });
     let savedTimer: ReturnType<typeof setTimeout> | undefined;
     const followers = new Set<(value: T) => void>();
     const waitingForLoad = new Set<{ resolve: () => void; reject: (error: unknown) => void }>();
@@ -58,6 +59,7 @@
     return {
       confirmed,
       status,
+      feedback,
       follow(show: (value: T) => void) {
         followers.add(show);
         return () => { followers.delete(show); };
@@ -90,6 +92,9 @@
         status.pending += 1;
         const pending = tail ? tail.then(write) : write();
         const tracked = pending.then((value) => {
+          // Outcomes belong to the queue, so closing an opening cannot hide
+          // a refusal, and a later success clears it in every opening.
+          feedback.error = null;
           status.pending -= 1;
           if (status.pending === 0) {
             status.saved = true;
@@ -97,6 +102,7 @@
           }
           return value;
         }, (error) => {
+          feedback.error = String(error);
           status.pending -= 1;
           throw error;
         });
@@ -115,7 +121,6 @@
   // untouched fields; finishing our save settles only the edits it submitted.
   function createDraft<T extends object>(setting: ReturnType<typeof createSetting<T>>) {
     const value = $state({ ...setting.confirmed.value });
-    const feedback = $state({ error: null as string | null });
     const edits = new Map<keyof T, number>();
     const submittedEdits = new Map<keyof T, number>();
     const dirty = new Set<keyof T>();
@@ -125,7 +130,7 @@
     });
     return {
       value,
-      feedback,
+      feedback: setting.feedback,
       unfollow,
       edit(key: keyof T) {
         edits.set(key, (edits.get(key) ?? 0) + 1);
@@ -241,7 +246,7 @@
       tlsSetting.loaded({ skip: !verify }, read);
       playerTls.loaded = true;
     } catch {
-      tlsDraft.feedback.error = "Could not read the certificate setting. Close Settings and try again.";
+      tlsLoadError = "Could not read the certificate setting. Close Settings and try again.";
     }
   }
 
@@ -253,9 +258,8 @@
         const verify = await invoke<boolean>("set_mpv_tls_verify", { verify: !submitted.value.skip });
         tlsSetting.confirm({ skip: !verify });
       });
-      tlsDraft.feedback.error = null;
-    } catch (e) {
-      tlsDraft.feedback.error = String(e);
+    } catch {
+      // The queue exposes the refusal even after this opening closes.
     } finally {
       tlsDraft.finish(submitted);
     }
@@ -369,6 +373,7 @@
 
   const tlsDraft = createDraft(tlsSetting);
   const tls = tlsDraft.value;
+  let tlsLoadError = $state<string | null>(null);
   onDestroy(tlsDraft.unfollow);
 
   // Duplicate-copy selection and the display profile used by Compatible.
@@ -390,7 +395,7 @@
   );
   // A refused save is explained in its own section; the header says there is one.
   let notSaved = $derived(
-    [playbackDraft, continueDraft, videoPlayerDraft, playerWindowDraft, tlsDraft, mpvDraft, advancedDraft]
+    tlsLoadError !== null || [playbackDraft, continueDraft, videoPlayerDraft, playerWindowDraft, tlsDraft, mpvDraft, advancedDraft]
       .some((draft) => draft.feedback.error !== null),
   );
 
@@ -589,10 +594,7 @@
     const path = submitted.value.path.trim() || null;
     try {
       await writeMpv(() => invoke<MpvInfo>("set_mpv_path", { path }));
-      mpvDraft.feedback.error = null;
-    } catch (e) {
-      mpvDraft.feedback.error = String(e);
-    } finally {
+    } catch {} finally {
       mpvDraft.finish(submitted);
     }
   }
@@ -609,10 +611,7 @@
     const submitted = mpvDraft.capture(false);
     try {
       await writeMpv(() => invoke<MpvInfo>("install_mpv"));
-      mpvDraft.feedback.error = null;
-    } catch (e) {
-      mpvDraft.feedback.error = String(e);
-    } finally {
+    } catch {} finally {
       mpvDraft.finish(submitted);
       installingMpv = false;
     }
@@ -633,10 +632,7 @@
         advancedSetting.confirm({ ...options, extraArgs: options.extraArgs.trim() });
       });
       saved = true;
-      advancedDraft.feedback.error = null;
-    } catch (e) {
-      advancedDraft.feedback.error = String(e);
-    } finally {
+    } catch {} finally {
       // Keep the author's formatting after success, as before; rollback uses
       // the trimmed text actually stored. New edits always remain drafts.
       advancedDraft.finish(submitted, saved ? "extraArgs" : undefined);
@@ -652,10 +648,7 @@
         continuePlayingSetting.confirm({ mode: normalized });
         onContinuePlayingChanged?.(normalized);
       });
-      continueDraft.feedback.error = null;
-    } catch (e) {
-      continueDraft.feedback.error = String(e);
-    } finally {
+    } catch {} finally {
       continueDraft.finish(submitted);
     }
   }
@@ -676,10 +669,7 @@
           throw e;
         }
       });
-      videoPlayerDraft.feedback.error = null;
-    } catch (e) {
-      videoPlayerDraft.feedback.error = String(e);
-    } finally {
+    } catch {} finally {
       videoPlayerDraft.finish(submitted);
     }
   }
@@ -692,10 +682,7 @@
         const saved = await invoke<PlayerWindowMode>("set_mpv_window_mode", { mode });
         playerWindowSetting.confirm({ mode: saved });
       });
-      playerWindowDraft.feedback.error = null;
-    } catch (e) {
-      playerWindowDraft.feedback.error = String(e);
-    } finally {
+    } catch {} finally {
       playerWindowDraft.finish(submitted);
     }
   }
@@ -724,10 +711,7 @@
           throw e;
         }
       });
-      playbackDraft.feedback.error = null;
-    } catch (e) {
-      playbackDraft.feedback.error = String(e);
-    } finally {
+    } catch {} finally {
       playbackDraft.finish(submitted);
     }
   }
@@ -1005,7 +989,7 @@
           to mpv with <code>tls-ca-file</code> in Advanced options or your own mpv configuration.
           Applies to the next video; plain HTTP is unchanged.
         </p>
-        {@render saveError(tlsDraft.feedback.error)}
+        {@render saveError(tlsDraft.feedback.error ?? tlsLoadError)}
       </div>
       {#if mpv}
         <p class="muted small">

@@ -52,11 +52,15 @@ function settingsApp() {
   const source = fs.readFileSync("src/lib/Settings.svelte", "utf8");
   const ast = parse(source, { modern: true });
   const elements = [];
+  const errorRenders = [];
   function walk(node, label) {
     if (!node || typeof node !== "object") return;
     if (node.type === "RegularElement") {
       if (node.name === "label") label = node;
       elements.push({ node, label });
+    }
+    if (node.type === "RenderTag" && node.expression.callee?.name === "saveError") {
+      errorRenders.push(source.slice(node.expression.arguments[0].start, node.expression.arguments[0].end));
     }
     for (const [key, value] of Object.entries(node)) if (key !== "parent") walk(value, label);
   }
@@ -92,12 +96,14 @@ function settingsApp() {
       advanced: ["advancedSetting", "advancedDraft"],
       preferences: ["playbackSetting", "playbackDraft"],
     }[spec.group];
+    const errors = errorRenders.filter((expression) => expression.includes(`${draft}.feedback.error`));
+    assert.equal(errors.length, 1, `${spec.label} renders its error once`);
     return `${JSON.stringify(spec.label)}: {
       get value() { return ${bound}; },
       edit(value) { ${bound} = value; this.pending = (${edit})({ currentTarget: { value, checked: value } }); },
       leave() { return ${blur ? `(${blur})()` : "this.pending"}; },
       get busy() { return ${setting}.status.pending > 0; },
-      get error() { return ${draft}.feedback.error; }
+      get error() { return ${errors[0]}; }
     }`;
   });
   const program = ast.instance.content;
@@ -107,6 +113,15 @@ function settingsApp() {
     // Tests control when the opening's real load runs.
     return !(ts.isExpressionStatement(statement) && statement.expression.getText(instance) === "load()");
   });
+  const status = elements.find(({ node }) => text(attribute(node, "class")) === "save-status").node;
+  const statusTag = status.fragment.nodes.find((node) => node.type === "ExpressionTag");
+  const statusExpression = source.slice(statusTag.expression.start, statusTag.expression.end);
+  const statusValues = ["saving", "notSaved", "justSaved"].map((name) => {
+    const declaration = instance.statements.flatMap((statement) => statement.declarationList?.declarations ?? [])
+      .find((declaration) => declaration.name.getText(instance) === name);
+    assert.equal(declaration.initializer.expression.getText(instance), "$derived");
+    return `const ${name} = ${declaration.initializer.arguments[0].getText(instance)};`;
+  }).join("\n");
   const actions = ["browseMpv", "clearMpvPath", "installMpv"].map((name) => `${name}: ${expression(attribute(button(name), "onclick"))}`);
   const code = ts.transpileModule([
     source.slice(ast.module.content.start, ast.module.content.end),
@@ -114,6 +129,7 @@ function settingsApp() {
     "const destroyed = []; const onDestroy = (fn) => destroyed.push(fn);",
     ...statements.map((statement) => statement.getText(instance)),
     `return { load, ${actions.join(",")}, insertPreset, controls: { ${controls.join(",")} },`,
+    `get saveStatus() { ${statusValues} return ${statusExpression}; },`,
     "get err() { return err; }, get qualityTiers() { return qualityTiers; }, close() { destroyed.splice(0).forEach((fn) => fn()); } }; };",
   ].join("\n"), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
   return (backend) => ({
@@ -503,6 +519,60 @@ test("Settings saves edited text when it closes, and typing alone sends nothing"
     reopened.close();
   }
 });
+
+for (const spec of settingsControls) {
+  test(`Settings ${spec.label}: a save refused after closing reaches current and future openings`, async () => {
+    const backend = settingsBackend(spec);
+    const app = settingsApp()(backend);
+    const a = app.open();
+    await a.load();
+    backend.holdWrites = true;
+    a.controls[spec.label].edit(spec.choice);
+    // Text is submitted by teardown; choices have already submitted.
+    a.close();
+    await settingsTurn();
+    assert.equal(backend.writes.length, 1);
+    const b = app.open();
+    await b.load();
+    assert.equal(b.saveStatus, "Saving…");
+    backend.writes[0].deliver(true);
+    await settingsTurn();
+    assert.match(b.controls[spec.label].error, /save refused/, "the reopened section explains the refusal");
+    assert.equal(b.controls[spec.label].value, backend.value());
+    assert.equal(b.saveStatus, "Not saved");
+    b.close();
+    const c = app.open();
+    assert.match(c.controls[spec.label].error, /save refused/, "the outcome also survives reopening after the reply");
+    assert.equal(c.saveStatus, "Not saved");
+    c.close();
+  });
+
+  test(`Settings ${spec.label}: a later successful save clears the failure in every opening`, async () => {
+    const backend = settingsBackend(spec);
+    const app = settingsApp()(backend);
+    const a = app.open();
+    await a.load();
+    backend.refuse = true;
+    a.controls[spec.label].edit(spec.choice);
+    await a.controls[spec.label].leave();
+    assert.match(a.controls[spec.label].error, /save refused/);
+    backend.refuse = false;
+    const b = app.open();
+    await b.load();
+    const other = b.controls[spec.group === "continuation" ? "Video player" : "Continue Playing"];
+    other.edit(spec.group === "continuation" ? "embedded" : "off");
+    await other.leave();
+    assert.match(a.controls[spec.label].error, /save refused/, "a different setting's success does not erase the failure");
+    b.controls[spec.label].edit(spec.newer);
+    await b.controls[spec.label].leave();
+    assert.equal(a.controls[spec.label].error, null, "a later success clears the old opening's error");
+    assert.equal(b.controls[spec.label].error, null);
+    assert.equal(a.saveStatus, "Saved");
+    assert.equal(b.saveStatus, "Saved");
+    a.close();
+    b.close();
+  });
+}
 
 // The index of the brace that closes the one at `open`. Reads Rust well enough
 // to ignore the braces that are not code: those in comments, in string
