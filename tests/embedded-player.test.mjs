@@ -562,10 +562,14 @@ test('mpv is told what it draws for in one place, together with the surface', ()
   assert.ok(rust.includes('player/embedded/hdr.rs') && rust.length > 20);
   for (const file of rust) {
     if (file === 'player/embedded/hdr.rs') continue;
-    // macOS has fixed SDR targets, separately compiled from Linux's
+    // macOS has its own EDR/SDR policy, separately compiled from Linux's
     // negotiated targets. Keep the Linux rule everywhere it applied before.
     if (file === 'player/embedded/macos_options.rs') {
       assert.match(read('src-tauri/src/player/launch.rs'), /#\[cfg\(any\(target_os = "macos", test\)\)\]\s+#\[path = "embedded\/macos_options.rs"\]\s+mod macos;/);
+      continue;
+    }
+    if (file === 'player/embedded/macos_hdr.rs') {
+      assert.match(session, /#\[cfg\(any\(target_os = "macos", test\)\)\]\s+#\[path = "macos_hdr.rs"\]\s+pub\(super\) mod macos_hdr;/);
       continue;
     }
     assert.doesNotMatch(
@@ -574,28 +578,30 @@ test('mpv is told what it draws for in one place, together with the surface', ()
       `${file} must not name an mpv target option`,
     );
   }
-  // mpv: the one call that changes an option of the running player is the
-  // one `hdr` drives, and it does not wait (review finding hd-3). The
+  // mpv: each platform's policy drives a nonblocking setter. The
   // waiting setter is not even in the table.
   assert.doesNotMatch(libmpv, /set_property_string/);
   assert.equal(count(code(libmpv), 'symbol!("mpv_set_property_async")'), 1);
-  assert.equal(count(code(libmpv), '(self.lib.set_property_async)('), 1);
+  assert.equal(count(code(libmpv), '(self.lib.set_property_async)('), 2);
+  assert.match(libmpv, /#\[cfg\(target_os = "macos"\)\]\s+impl super::session::macos_hdr::TargetAccess for Player/);
   assert.match(
     libmpv,
     /impl super::hdr::Targetable for Player \{[\s\S]{0,600}fn ask\(&self, request: u64, option: &str, value: &str\) -> bool \{[\s\S]{0,600}let mut data: \*const c_char = c_value\.as_ptr\(\);[\s\S]{0,300}\(self\.lib\.set_property_async\)\(\s+self\.raw,\s+request,\s+c_option\.as_ptr\(\),\s+FORMAT_STRING,\s+\(&mut data as \*mut \*const c_char\)\.cast\(\),\s+\)\s+\};[\s\S]{0,120}code >= 0\s+\}\n/,
   );
   // mpv reports changes of its targets to the options `hdr` names, as text
   // (review finding hd-2): one observation call, made under the
-  // registration `hdr` gives, one call that drops a registration, and
-  // nothing in libmpv.rs names which options.
+  // registration its policy gives. macOS also observes video-params as
+  // one node snapshot, and has its own matching unobserve call.
   assert.equal(count(code(libmpv), 'symbol!("mpv_observe_property")'), 1);
-  assert.equal(count(code(libmpv), '(self.lib.observe_property)('), 1);
+  assert.equal(count(code(libmpv), '(self.lib.observe_property)('), 3);
+  assert.match(libmpv, /#\[cfg\(target_os = "macos"\)\]\s+pub\(crate\) fn observe_video_params/);
+  assert.match(libmpv, /fn observe_video_params[\s\S]{0,600}c"video-params"\.as_ptr\(\),\s+FORMAT_NODE,/);
   assert.match(
     libmpv,
     /fn observe\(&self, registration: u64, option: &str\) -> bool \{[\s\S]{0,300}\(self\.lib\.observe_property\)\(self\.raw, registration, c_option\.as_ptr\(\), FORMAT_STRING\)\s+\};\s+code >= 0\s+\}/,
   );
   assert.equal(count(code(libmpv), 'symbol!("mpv_unobserve_property")'), 1);
-  assert.equal(count(code(libmpv), '(self.lib.unobserve_property)('), 1);
+  assert.equal(count(code(libmpv), '(self.lib.unobserve_property)('), 2);
   assert.match(
     code(libmpv),
     /fn unobserve\(&self, registration: u64\) \{\s+unsafe \{ \(self\.lib\.unobserve_property\)\(self\.raw, registration\) \};\s+\}/,

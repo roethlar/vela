@@ -3,10 +3,9 @@
 Outcome: two codereview codex hunts, one per slice, each over one landed
 commit: the Windows host (`8c40ff8..6b206ec`) and the macOS host
 (`4fe60b8..623ec17`). **findings** in both: four candidates, four admitted
-(all MEDIUM), none declined. pl-1 and pl-2 are repaired and closed (codex
-wrote the repair as a coding task; the working agent's review closed it);
-pl-3 and pl-4 are open, their repair queued after the macOS HDR slice,
-which works on the same code.
+(all MEDIUM), none declined. pl-1, pl-2 and pl-3 are repaired and closed (codex
+wrote each repair as a coding task; the working agent's review closed
+it); pl-4 is open.
 
 ## Dispatch record
 
@@ -35,7 +34,7 @@ which works on the same code.
 |------|----------|--------------------------------------------------------------------------|--------|--------|
 | pl-1 | MEDIUM   | Windows: a user `gpu-context` survives the forced `gpu-api=d3d11`        | `[x]`  | this commit |
 | pl-2 | MEDIUM   | Windows: own-config mode skips `<exe dir>/mpv.conf`, which mpv reads     | `[x]`  | this commit |
-| pl-3 | MEDIUM   | macOS: a conditional mpv.conf profile can undo the protected SDR targets | `[ ]`  | queued |
+| pl-3 | MEDIUM   | macOS: a conditional mpv.conf profile can undo the protected SDR targets | `[x]`  | the HDR slice's commit |
 | pl-4 | MEDIUM   | macOS: in a launch that honours DYLD_*, a set dependency can be redirected past the load check | `[ ]` | queued |
 
 ### pl-1 (whost)
@@ -85,9 +84,11 @@ restore the protected colour properties during playback, using
 asynchronous updates and withholding mismatched frames until the targets
 agree with the layer."
 
-Admitted. Open: the macOS HDR slice (in progress) makes the targets
-change during a play on purpose; the repair (observe the colour targets,
-restore the ones the current range requires) goes with it.
+Admitted. Closed by the macOS HDR slice, which changes the targets during
+a play on purpose: the five targets are observed for the whole play and
+restored when anything rewrites them (a switch's black hold, asynchronous
+sets, fresh reports of every value before the layer follows); five
+restorations within ten seconds stop the play rather than flash forever.
 
 ### pl-4 (mhost)
 

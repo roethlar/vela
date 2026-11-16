@@ -5,30 +5,35 @@
 #![allow(deprecated)] // CAOpenGLLayer is the intentionally selected render API.
 
 use super::libmpv::{Player, Renderer};
+use super::session::macos_hdr::{choose_surface, Range, SurfaceFormat};
 use objc2::{
     define_class, msg_send,
     rc::{Allocated, Retained},
     runtime::AnyObject,
-    AnyThread, DefinedClass,
+    AnyThread, DefinedClass, MainThreadMarker,
 };
 use objc2_app_kit::NSColor;
 use objc2_core_foundation::CFTimeInterval;
-use objc2_core_graphics::{kCGColorSpaceSRGB, CGColorSpace};
+use objc2_core_graphics::{
+    kCGColorSpaceDisplayP3_PQ, kCGColorSpaceITUR_2100_PQ, kCGColorSpaceSRGB, CGColorSpace,
+};
 use objc2_core_video::CVTimeStamp;
 use objc2_open_gl::{
-    kCGLRendererGenericFloatID, CGLChoosePixelFormat, CGLContextObj, CGLContextParameter,
-    CGLCreateContext, CGLDescribePixelFormat, CGLError, CGLErrorString, CGLFlushDrawable,
-    CGLGetCurrentContext, CGLLockContext, CGLOpenGLProfile, CGLPixelFormatAttribute,
-    CGLPixelFormatObj, CGLReleaseContext, CGLReleasePixelFormat, CGLRetainContext,
-    CGLRetainPixelFormat, CGLSetCurrentContext, CGLSetParameter, CGLUnlockContext,
+    CGLChoosePixelFormat, CGLContextObj, CGLContextParameter, CGLCreateContext,
+    CGLDescribePixelFormat, CGLError, CGLErrorString, CGLFlushDrawable, CGLGetCurrentContext,
+    CGLLockContext, CGLPixelFormatAttribute, CGLPixelFormatObj, CGLReleaseContext,
+    CGLReleasePixelFormat, CGLRetainContext, CGLRetainPixelFormat, CGLSetCurrentContext,
+    CGLSetParameter, CGLUnlockContext,
 };
-use objc2_quartz_core::{CAAutoresizingMask, CAOpenGLLayer};
+use objc2_quartz_core::{
+    kCAContentsFormatRGBA16Float, kCAContentsFormatRGBA8Uint, CAAutoresizingMask, CAOpenGLLayer,
+};
 use std::{
     ffi::{c_char, c_int, c_void, CStr},
     marker::PhantomData,
     ptr::{self, NonNull},
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex, OnceLock,
     },
 };
@@ -89,10 +94,15 @@ fn check_cgl(code: CGLError, operation: &str) -> Result<(), String> {
 }
 
 struct GlContext {
+    format: SurfaceFormat,
     pixel_format: CGLPixelFormatObj,
     context: CGLContextObj,
     get_integer: unsafe extern "C" fn(u32, *mut c_int),
     get_string: unsafe extern "C" fn(u32) -> *const u8,
+    bind_framebuffer: unsafe extern "C" fn(u32, u32),
+    clear_color: unsafe extern "C" fn(f32, f32, f32, f32),
+    clear: unsafe extern "C" fn(u32),
+    disable: unsafe extern "C" fn(u32),
 }
 
 // SAFETY: these CGL objects may migrate between threads. Every use of GL state
@@ -106,18 +116,29 @@ impl GlContext {
         // SAFETY: the fields below supply the two OpenGL/gl3.h signatures.
         let get_integer = unsafe { gl_function(c"glGetIntegerv") }?;
         let get_string = unsafe { gl_function(c"glGetString") }?;
-        let (pixel_format, context) = match Self::create_context(false) {
-            Ok(pair) => pair,
-            Err(error) => {
-                eprintln!("vela: accelerated CGL setup failed: {error}; trying software");
-                Self::create_context(true)?
-            }
-        };
+        let bind_framebuffer = unsafe { gl_function(c"glBindFramebuffer") }?;
+        let clear_color = unsafe { gl_function(c"glClearColor") }?;
+        let clear = unsafe { gl_function(c"glClear") }?;
+        let disable = unsafe { gl_function(c"glDisable") }?;
+        let (format, (pixel_format, context)) = choose_surface(|format| {
+            Self::create_context(format).inspect_err(|error| {
+                eprintln!("vela: CGL {format:?} surface unavailable: {error}");
+            })
+        })?;
+        eprintln!(
+            "vela: embedded macOS surface: {format:?}, {} bits/channel",
+            format.depth()
+        );
         let gl = Self {
+            format,
             pixel_format,
             context,
             get_integer,
             get_string,
+            bind_framebuffer,
+            clear_color,
+            clear,
+            disable,
         };
         {
             let _current = gl.enter()?;
@@ -151,8 +172,8 @@ impl GlContext {
         Ok(gl)
     }
 
-    fn create_context(software: bool) -> Result<(CGLPixelFormatObj, CGLContextObj), String> {
-        let pixel_format = Self::choose_pixel_format(software)?;
+    fn create_context(format: SurfaceFormat) -> Result<(CGLPixelFormatObj, CGLContextObj), String> {
+        let pixel_format = Self::choose_pixel_format(format)?;
         let mut context = ptr::null_mut();
         // SAFETY: valid pixel format and output, no shared context requested.
         let code =
@@ -170,26 +191,14 @@ impl GlContext {
         Ok((pixel_format, context))
     }
 
-    fn choose_pixel_format(software: bool) -> Result<CGLPixelFormatObj, String> {
+    fn choose_pixel_format(kind: SurfaceFormat) -> Result<CGLPixelFormatObj, String> {
         use CGLPixelFormatAttribute as A;
-        let mut attributes = vec![
-            A::CGLPFAOpenGLProfile,
-            A(CGLOpenGLProfile::CGLOGLPVersion_3_2_Core.0),
-        ];
-        if software {
-            attributes.extend([A::CGLPFARendererID, A(kCGLRendererGenericFloatID)]);
-        } else {
-            attributes.push(A::CGLPFAAccelerated);
-        }
-        attributes.extend([A::CGLPFADoubleBuffer, A(0)]);
+        let mut attributes: Vec<_> = kind.attributes().into_iter().map(A).collect();
         let mut format = ptr::null_mut();
         let mut count = 0;
-        let kind = if software {
-            "software (GenericFloat)"
-        } else {
-            "accelerated"
-        };
-        eprintln!("CGLChoosePixelFormat: {kind}, OpenGL 3.2 core, double buffered; {attributes:?}");
+        eprintln!(
+            "CGLChoosePixelFormat: {kind:?}, OpenGL 3.2 core, double buffered; {attributes:?}"
+        );
         // SAFETY: zero-terminated attribute array and valid output pointers.
         let code = unsafe {
             CGLChoosePixelFormat(
@@ -203,7 +212,25 @@ impl GlContext {
                 unsafe { CGLReleasePixelFormat(format) };
             }
             check_cgl(code, "CGLChoosePixelFormat")?;
-            return Err(format!("no {kind} pixel format"));
+            return Err(format!("no {kind:?} pixel format"));
+        }
+        if kind == SurfaceFormat::Float {
+            let mut float = 0;
+            let mut size = 0;
+            let float_code = unsafe {
+                CGLDescribePixelFormat(format, 0, A::CGLPFAColorFloat, NonNull::from(&mut float))
+            };
+            let size_code = unsafe {
+                CGLDescribePixelFormat(format, 0, A::CGLPFAColorSize, NonNull::from(&mut size))
+            };
+            if float_code != CGLError::NoError
+                || size_code != CGLError::NoError
+                || float == 0
+                || size != 64
+            {
+                unsafe { CGLReleasePixelFormat(format) };
+                return Err("CGL did not supply 64-bit float colour".into());
+            }
         }
         let mut accelerated = 0;
         let mut renderer = 0;
@@ -222,7 +249,7 @@ impl GlContext {
                 NonNull::from(&mut renderer),
             );
         }
-        eprintln!("selected pixel format={format:p} kind={kind} count={count} accelerated={accelerated} renderer_id=0x{renderer:x}");
+        eprintln!("selected pixel format={format:p} kind={kind:?} count={count} accelerated={accelerated} renderer_id=0x{renderer:x}");
         Ok(format)
     }
 
@@ -297,6 +324,11 @@ pub(super) struct DrawingState {
     stopping: AtomicBool,
     failed: AtomicBool,
     redraw: AtomicBool,
+    // A nonzero generation means draw/consume mpv frames, but present black.
+    // No client API or main-thread dispatch is made while drawing is locked.
+    held: AtomicU64,
+    black: AtomicU64,
+    applied: AtomicU64,
 }
 
 impl DrawingState {
@@ -311,6 +343,9 @@ impl DrawingState {
             stopping: AtomicBool::new(false),
             failed: AtomicBool::new(false),
             redraw: AtomicBool::new(true),
+            held: AtomicU64::new(0),
+            black: AtomicU64::new(0),
+            applied: AtomicU64::new(0),
         }))
     }
 
@@ -326,6 +361,40 @@ impl DrawingState {
 
     pub(super) fn redraw(&self) {
         self.redraw.store(true, Ordering::Release);
+    }
+
+    pub(super) fn float_surface(&self) -> bool {
+        self.gl.format == SurfaceFormat::Float
+    }
+
+    pub(super) fn hold(&self, generation: u64) {
+        self.held.store(generation, Ordering::Release);
+        self.redraw();
+    }
+
+    pub(super) fn black_ready(&self, generation: u64) -> bool {
+        self.black.load(Ordering::Acquire) == generation
+    }
+
+    pub(super) fn still_holding(&self, generation: u64) -> bool {
+        !self.stopping.load(Ordering::Acquire) && self.held.load(Ordering::Acquire) == generation
+    }
+
+    /// Main only, after the colour transaction was submitted. An obsolete
+    /// queued change cannot release a newer hold or touch its completion.
+    pub(super) fn release(&self, generation: u64, _mtm: MainThreadMarker) {
+        if self
+            .held
+            .compare_exchange(generation, 0, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+        {
+            self.applied.store(generation, Ordering::Release);
+            self.redraw();
+        }
+    }
+
+    pub(super) fn applied(&self, generation: u64) -> bool {
+        self.applied.load(Ordering::Acquire) == generation
     }
 
     pub(super) fn failed(&self) -> bool {
@@ -407,15 +476,32 @@ impl DrawingState {
             drawing.last_fbo = fbo;
         }
         let renderer = drawing.renderer.as_ref().unwrap();
-        renderer.0.draw_into(drawing.last_fbo, width, height)?;
+        renderer
+            .0
+            .draw_into(drawing.last_fbo, width, height, self.gl.format.depth())?;
+        let held = self.held.load(Ordering::Acquire);
+        if held != 0 {
+            // mpv may leave FBO zero bound. Its documented post-render state
+            // has colour writes enabled; disable scissor and clear the whole
+            // CA target. Black has the same meaning under both colour tags.
+            unsafe {
+                (self.gl.bind_framebuffer)(0x8D40, drawing.last_fbo as u32); // GL_FRAMEBUFFER
+                (self.gl.disable)(0x0C11); // GL_SCISSOR_TEST
+                (self.gl.clear_color)(0.0, 0.0, 0.0, 1.0);
+                (self.gl.clear)(0x00004000); // GL_COLOR_BUFFER_BIT
+            }
+        }
         check_cgl(unsafe { CGLFlushDrawable(context) }, "CGLFlushDrawable")?;
         // Flush-time approximation, as in M1; not a presentation timestamp.
         renderer.0.frame_shown();
+        if held != 0 {
+            self.black.store(held, Ordering::Release);
+        }
         drawing.pending = false;
         Ok(())
     }
 
-    fn fail(&self, error: &str) {
+    pub(super) fn fail(&self, error: &str) {
         if !self.failed.swap(true, Ordering::AcqRel) {
             eprintln!("vela: embedded macOS drawing stopped: {error}");
         }
@@ -475,7 +561,11 @@ define_class!(
 );
 
 impl VideoLayer {
-    pub(super) fn new(state: Arc<DrawingState>) -> Retained<Self> {
+    pub(super) fn new(
+        state: Arc<DrawingState>,
+        mtm: MainThreadMarker,
+    ) -> Result<Retained<Self>, String> {
+        let float = state.float_surface();
         let this = Self::alloc().set_ivars(state);
         let layer: Retained<Self> = unsafe { msg_send![super(this), init] };
         layer.setAutoresizingMask(
@@ -483,16 +573,34 @@ impl VideoLayer {
         );
         layer.setBackgroundColor(Some(&NSColor::blackColor().CGColor()));
         layer.setOpaque(true);
-        // Standard-range sRGB matches the protected mpv targets. Never EDR.
-        if let Some(space) = unsafe { CGColorSpace::with_name(Some(kCGColorSpaceSRGB)) } {
-            layer.setColorspace(Some(&space));
-        }
-        layer.setWantsExtendedDynamicRangeContent(false);
+        layer.setContentsFormat(unsafe {
+            if float {
+                kCAContentsFormatRGBA16Float
+            } else {
+                kCAContentsFormatRGBA8Uint
+            }
+        });
+        layer.set_range(Range::Sdr, mtm)?;
         // Core Animation calls canDraw on its display cadence; update returns
         // frames, so idle/paused playback does not render continuously. Resize
         // forces one draw even when mpv has no fresh frame. No mpv callback
         // crosses into AppKit or acquires the drawing mutex.
         layer.setAsynchronous(true);
-        layer
+        Ok(layer)
+    }
+
+    pub(super) fn set_range(&self, range: Range, _mtm: MainThreadMarker) -> Result<(), String> {
+        let name = unsafe {
+            match range {
+                Range::Sdr => kCGColorSpaceSRGB,
+                Range::Pq2020 => kCGColorSpaceITUR_2100_PQ,
+                Range::PqP3 => kCGColorSpaceDisplayP3_PQ,
+            }
+        };
+        let space =
+            CGColorSpace::with_name(Some(name)).ok_or("the layer colour space is unavailable")?;
+        self.setColorspace(Some(&space));
+        self.setWantsExtendedDynamicRangeContent(range != Range::Sdr);
+        Ok(())
     }
 }

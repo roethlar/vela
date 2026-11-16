@@ -136,6 +136,16 @@ pub(crate) enum Event {
     None,
     /// The player has shut down: the file ended, or mpv was told to quit.
     Shutdown,
+    #[cfg(target_os = "macos")]
+    StartFile,
+    /// One atomic video-params snapshot; never mix a new transfer with an
+    /// old file's primaries. The macOS host alone needs the source colour.
+    #[cfg(target_os = "macos")]
+    VideoParams {
+        registration: u64,
+        transfer: Option<String>,
+        primaries: Option<String>,
+    },
     /// The answer to an ask ([`super::hdr::Targetable::ask`]) made with
     /// `request`: whether mpv took the value.
     Answer { request: u64, taken: bool },
@@ -159,6 +169,8 @@ fn classify(event_id: c_int, error: c_int, reply_userdata: u64) -> Event {
     match event_id {
         EVENT_NONE => Event::None,
         EVENT_SHUTDOWN => Event::Shutdown,
+        #[cfg(target_os = "macos")]
+        6 => Event::StartFile, // MPV_EVENT_START_FILE
         EVENT_SET_PROPERTY_REPLY => Event::Answer {
             request: reply_userdata,
             taken: error >= 0,
@@ -187,6 +199,15 @@ unsafe fn property_change(registration: u64, property: *const RawProperty) -> Ev
     let option = unsafe { CStr::from_ptr(property.name) }
         .to_string_lossy()
         .into_owned();
+    #[cfg(target_os = "macos")]
+    if option == "video-params" {
+        let (transfer, primaries) = unsafe { video_params(property) };
+        return Event::VideoParams {
+            registration,
+            transfer,
+            primaries,
+        };
+    }
     // A string's data is the address of a `char *` (client.h,
     // `MPV_FORMAT_STRING`); a property mpv cannot read has format 0 and no
     // data.
@@ -205,6 +226,73 @@ unsafe fn property_change(registration: u64, property: *const RawProperty) -> Ev
     }
 }
 
+// mpv_node / mpv_node_list, client.h. Only STRING and NODE_MAP are read;
+// the 64-bit union member preserves the size/alignment of all other cases.
+#[cfg(any(target_os = "macos", test))]
+const FORMAT_NODE: c_int = 6;
+#[cfg(any(target_os = "macos", test))]
+const FORMAT_NODE_MAP: c_int = 8;
+
+#[cfg(any(target_os = "macos", test))]
+#[repr(C)]
+union NodeData {
+    string: *const c_char,
+    list: *const NodeList,
+    _alignment: i64,
+}
+#[cfg(any(target_os = "macos", test))]
+#[repr(C)]
+struct Node {
+    data: NodeData,
+    format: c_int,
+}
+#[cfg(any(target_os = "macos", test))]
+#[repr(C)]
+struct NodeList {
+    count: c_int,
+    values: *const Node,
+    keys: *const *const c_char,
+}
+
+#[cfg(any(target_os = "macos", test))]
+unsafe fn video_params(property: &RawProperty) -> (Option<String>, Option<String>) {
+    let mut transfer = None;
+    let mut primaries = None;
+    // SAFETY: the event owns a node for FORMAT_NODE until next_event.
+    if property.format == FORMAT_NODE && !property.data.is_null() {
+        let node = unsafe { &*property.data.cast::<Node>() };
+        if node.format == FORMAT_NODE_MAP {
+            let list = unsafe { node.data.list.as_ref() };
+            if let Some(list) =
+                list.filter(|l| l.count > 0 && !l.values.is_null() && !l.keys.is_null())
+            {
+                for i in 0..list.count as usize {
+                    let key = unsafe { *list.keys.add(i) };
+                    let value = unsafe { &*list.values.add(i) };
+                    if key.is_null() || value.format != FORMAT_STRING {
+                        continue;
+                    }
+                    let text = unsafe { value.data.string };
+                    if text.is_null() {
+                        continue;
+                    }
+                    let slot = match unsafe { CStr::from_ptr(key) }.to_bytes() {
+                        b"gamma" => &mut transfer,
+                        b"primaries" => &mut primaries,
+                        _ => continue,
+                    };
+                    *slot = Some(
+                        unsafe { CStr::from_ptr(text) }
+                            .to_string_lossy()
+                            .into_owned(),
+                    );
+                }
+            }
+        }
+    }
+    (transfer, primaries)
+}
+
 type Callback = Option<unsafe extern "C" fn(ctx: *mut c_void)>;
 
 /// The loaded library and the functions Vela calls in it.
@@ -214,12 +302,12 @@ pub(crate) struct LibMpv {
     set_option_string:
         unsafe extern "C" fn(*mut RawHandle, *const c_char, *const c_char) -> c_int,
     initialize: unsafe extern "C" fn(*mut RawHandle) -> c_int,
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     set_property_async:
         unsafe extern "C" fn(*mut RawHandle, u64, *const c_char, c_int, *mut c_void) -> c_int,
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     observe_property: unsafe extern "C" fn(*mut RawHandle, u64, *const c_char, c_int) -> c_int,
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     unobserve_property: unsafe extern "C" fn(*mut RawHandle, u64) -> c_int,
     command: unsafe extern "C" fn(*mut RawHandle, *mut *const c_char) -> c_int,
     command_async: unsafe extern "C" fn(*mut RawHandle, u64, *mut *const c_char) -> c_int,
@@ -387,11 +475,11 @@ impl LibMpv {
             create: symbol!("mpv_create"),
             set_option_string: symbol!("mpv_set_option_string"),
             initialize: symbol!("mpv_initialize"),
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
             set_property_async: symbol!("mpv_set_property_async"),
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
             observe_property: symbol!("mpv_observe_property"),
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
             unobserve_property: symbol!("mpv_unobserve_property"),
             command: symbol!("mpv_command"),
             command_async: symbol!("mpv_command_async"),
@@ -597,6 +685,20 @@ impl Player {
         Some(value)
     }
 
+    #[cfg(target_os = "macos")]
+    pub(crate) fn observe_video_params(&self, registration: u64) -> bool {
+        // One map, rather than independently sampled gamma/primaries.
+        // observe_property only registers work; it does not wait on the core.
+        unsafe {
+            (self.lib.observe_property)(
+                self.raw,
+                registration,
+                c"video-params".as_ptr(),
+                FORMAT_NODE,
+            ) >= 0
+        }
+    }
+
     /// The next waiting event, or [`Event::None`]. Never waits, so it may be
     /// called on the thread that draws (render.h: `mpv_wait_event` with a
     /// timeout of zero is one of the calls allowed there).
@@ -713,6 +815,40 @@ impl super::hdr::Targetable for Player {
     fn unobserve(&self, registration: u64) {
         // SAFETY: a live handle. The count of registrations removed is of no
         // use here: none is not an error.
+        unsafe { (self.lib.unobserve_property)(self.raw, registration) };
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl super::session::macos_hdr::TargetAccess for Player {
+    fn ask(&self, request: u64, name: &str, value: &str) -> bool {
+        let (Ok(name), Ok(value)) = (
+            c_string("an option name", name),
+            c_string("an option value", value),
+        ) else {
+            return false;
+        };
+        let mut data = value.as_ptr();
+        // mpv copies the strings before this nonblocking call returns.
+        unsafe {
+            (self.lib.set_property_async)(
+                self.raw,
+                request,
+                name.as_ptr(),
+                FORMAT_STRING,
+                (&mut data as *mut *const c_char).cast(),
+            ) >= 0
+        }
+    }
+    fn observe(&self, registration: u64, name: &str) -> bool {
+        let Ok(name) = c_string("a property name", name) else {
+            return false;
+        };
+        unsafe {
+            (self.lib.observe_property)(self.raw, registration, name.as_ptr(), FORMAT_STRING) >= 0
+        }
+    }
+    fn unobserve(&self, registration: u64) {
         unsafe { (self.lib.unobserve_property)(self.raw, registration) };
     }
 }
@@ -844,7 +980,13 @@ impl Renderer {
     }
 
     #[cfg(target_os = "macos")]
-    pub(crate) fn draw_into(&self, target: i32, width: i32, height: i32) -> Result<(), String> {
+    pub(crate) fn draw_into(
+        &self,
+        target: i32,
+        width: i32,
+        height: i32,
+        mut depth: c_int,
+    ) -> Result<(), String> {
         let mut fbo = OpenGlFbo {
             fbo: target,
             w: width,
@@ -852,7 +994,6 @@ impl Renderer {
             internal_format: 0,
         };
         let mut flip: c_int = 1;
-        let mut depth: c_int = 8;
         let mut params = [
             RenderParam {
                 kind: RENDER_PARAM_OPENGL_FBO,
@@ -873,7 +1014,8 @@ impl Renderer {
         ];
         // SAFETY: a live render context whose OpenGL context is current, and
         // parameters that outlive the call.
-        self.lib.check(unsafe { (self.lib.render_context_render)(self.raw, params.as_mut_ptr()) })
+        self.lib
+            .check(unsafe { (self.lib.render_context_render)(self.raw, params.as_mut_ptr()) })
     }
 
     /// Tell mpv the frame it drew has been dealt with; it times the next one
@@ -1103,5 +1245,86 @@ mod macos_tests {
         }
         assert_eq!(set_directory(resources, true, Some("/dev/set".as_ref()))
             .join(MACOS_LIBRARY_FILE), Path::new("/dev/set/libmpv.2.dylib"));
+    }
+}
+
+#[cfg(test)]
+mod macos_colour_tests {
+    use super::*;
+
+    #[test]
+    fn video_colour_is_copied_from_one_map_not_printed_or_borrowed() {
+        // Wire values from mpv 0.42 client.h, deliberately independent of
+        // the decoder's constants: NODE=6, NODE_MAP=8, STRING=1.
+        let keys = [
+            c"primaries".as_ptr(),
+            c"gamma".as_ptr(),
+            c"irrelevant".as_ptr(),
+        ];
+        let values = [
+            Node {
+                data: NodeData {
+                    string: c"display-p3".as_ptr(),
+                },
+                format: FORMAT_STRING,
+            },
+            Node {
+                data: NodeData {
+                    string: c"hlg".as_ptr(),
+                },
+                format: FORMAT_STRING,
+            },
+            Node {
+                data: NodeData {
+                    string: c"not-a-colour".as_ptr(),
+                },
+                format: FORMAT_STRING,
+            },
+        ];
+        let list = NodeList {
+            count: 3,
+            values: values.as_ptr(),
+            keys: keys.as_ptr(),
+        };
+        let mut node = Node {
+            data: NodeData { list: &list },
+            format: 8,
+        };
+        let property = RawProperty {
+            name: c"video-params".as_ptr(),
+            format: 6,
+            data: (&mut node as *mut Node).cast(),
+        };
+        let result = unsafe { video_params(&property) };
+        assert_eq!(result, (Some("hlg".into()), Some("display-p3".into())));
+    }
+
+    #[test]
+    fn missing_or_non_string_video_colour_is_unknown() {
+        let mut property = RawProperty {
+            name: c"video-params".as_ptr(),
+            format: 0,
+            data: std::ptr::null_mut(),
+        };
+        assert_eq!(unsafe { video_params(&property) }, (None, None));
+        let keys = [c"gamma".as_ptr()];
+        let values = [Node {
+            data: NodeData {
+                string: c"pq".as_ptr(),
+            },
+            format: 0,
+        }];
+        let list = NodeList {
+            count: 1,
+            values: values.as_ptr(),
+            keys: keys.as_ptr(),
+        };
+        let mut node = Node {
+            data: NodeData { list: &list },
+            format: 8,
+        };
+        property.format = 6;
+        property.data = (&mut node as *mut Node).cast();
+        assert_eq!(unsafe { video_params(&property) }, (None, None));
     }
 }

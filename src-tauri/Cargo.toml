@@ -51,7 +51,7 @@ objc2-foundation = { version = "0.3", default-features = false, features = ["std
 
 objc2-core-foundation = { version = "=0.3.2", default-features = false, features = ["std", "CFCGTypes", "CFDate", "objc2"] }
 objc2-core-video = { version = "=0.3.2", default-features = false, features = ["std", "CVBase", "objc2"] }
-objc2-quartz-core = { version = "=0.3.2", default-features = false, features = ["std", "CALayer", "CAOpenGLLayer", "objc2-core-foundation", "objc2-core-graphics", "objc2-core-video", "objc2-open-gl"] }
+objc2-quartz-core = { version = "=0.3.2", default-features = false, features = ["std", "CALayer", "CAOpenGLLayer", "CATransaction", "objc2-core-foundation", "objc2-core-graphics", "objc2-core-video", "objc2-open-gl"] }
 objc2-open-gl = { version = "=0.3.2", default-features = false, features = ["std", "CGLTypes", "CGLCurrent", "CGLRenderers"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]

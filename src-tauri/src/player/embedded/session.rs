@@ -47,6 +47,10 @@ mod macos;
 #[cfg(target_os = "macos")]
 use macos::{set_up, Live};
 
+#[cfg(any(target_os = "macos", test))]
+#[path = "macos_hdr.rs"]
+pub(super) mod macos_hdr;
+
 /// Where the video is, in the window's own units, relative to the window.
 #[cfg(any(target_os = "linux", target_os = "macos", test))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -7,17 +7,18 @@
 use super::{
     macos_geometry::placement,
     macos_gl::{DrawingState, VideoLayer},
-    session::Rect,
+    session::{macos_hdr::Range, Rect},
 };
 use objc2::{rc::Retained, runtime::AnyClass, MainThreadMarker, MainThreadOnly, Message};
 use objc2_app_kit::{NSAutoresizingMaskOptions, NSView, NSWindow, NSWindowOrderingMode};
 use objc2_foundation::{NSObjectProtocol, NSPoint, NSRect, NSSize};
+use objc2_quartz_core::CATransaction;
 use std::{
     cell::RefCell,
     collections::HashMap,
     sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        Arc, Mutex,
     },
 };
 use tauri::{Emitter, Manager};
@@ -27,6 +28,12 @@ thread_local! {
 }
 static NEXT_VIEW: AtomicU64 = AtomicU64::new(1);
 
+#[derive(Default)]
+struct ScreenState {
+    queued: AtomicBool,
+    headroom: Mutex<(f64, f64)>, // potential, current; ratios, NOT nits
+}
+
 struct NativeVideo {
     video: Retained<NSView>,
     page: Retained<NSView>,
@@ -34,6 +41,7 @@ struct NativeVideo {
     layer: Retained<VideoLayer>,
     drawing: Arc<DrawingState>,
     reported: Option<Rect>,
+    screen: Arc<ScreenState>,
 }
 
 fn web_view(view: &NSView) -> Option<Retained<NSView>> {
@@ -49,6 +57,7 @@ impl NativeVideo {
         app: &tauri::AppHandle,
         drawing: Arc<DrawingState>,
         reported: Option<Rect>,
+        screen: Arc<ScreenState>,
     ) -> Result<Self, String> {
         let mtm = MainThreadMarker::new().ok_or("AppKit needs the main thread")?;
         let window = app
@@ -82,7 +91,7 @@ impl NativeVideo {
         };
         let parent = unsafe { page.superview() }.ok_or("Vela's page has no parent")?;
         let video = NSView::initWithFrame(NSView::alloc(mtm), page.frame());
-        let layer = VideoLayer::new(drawing.clone());
+        let layer = VideoLayer::new(drawing.clone(), mtm)?;
         video.setLayer(Some(&layer));
         video.setWantsLayer(true);
         parent.addSubview_positioned_relativeTo(&video, NSWindowOrderingMode::Below, Some(&page));
@@ -93,6 +102,7 @@ impl NativeVideo {
             layer,
             drawing,
             reported,
+            screen,
         };
         let installed = native.video.layer().ok_or("the video view has no layer")?;
         let expected: &objc2_quartz_core::CALayer = &native.layer;
@@ -104,6 +114,7 @@ impl NativeVideo {
     }
 
     fn resize(&self) {
+        self.sample_screen();
         let Some(window) = self.page.window() else {
             return;
         };
@@ -139,6 +150,28 @@ impl NativeVideo {
         self.layer.setContentsScale(scale);
         self.drawing.redraw();
         self.layer.setNeedsDisplay();
+    }
+
+    fn sample_screen(&self) {
+        // Query the window's screen anew: NSScreen's potential is immutable
+        // on an individual object. Do not cache an NSScreen across display
+        // reconfiguration. Periodic sampling also catches headroom changes
+        // with no move/resize event, including while a video is paused.
+        let headroom = self
+            .page
+            .window()
+            .and_then(|w| w.screen())
+            .map_or((1.0, 1.0), |screen| {
+                (
+                    screen.maximumPotentialExtendedDynamicRangeColorComponentValue(),
+                    screen.maximumExtendedDynamicRangeColorComponentValue(),
+                )
+            });
+        *self
+            .screen
+            .headroom
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = headroom;
     }
 }
 
@@ -176,6 +209,7 @@ impl PlacementTarget {
 pub(crate) struct Surface {
     target: PlacementTarget,
     pub(super) drawing: Arc<DrawingState>,
+    screen: Arc<ScreenState>,
 }
 
 impl Surface {
@@ -185,7 +219,8 @@ impl Surface {
         drawing: Arc<DrawingState>,
         reported: Option<Rect>,
     ) -> Result<Self, String> {
-        let native = NativeVideo::create(&app, drawing.clone(), reported)?;
+        let screen = Arc::new(ScreenState::default());
+        let native = NativeVideo::create(&app, drawing.clone(), reported, screen.clone())?;
         let id = NEXT_VIEW.fetch_add(1, Ordering::Relaxed);
         VIEWS.with_borrow_mut(|views| {
             views.insert(id, native);
@@ -193,11 +228,77 @@ impl Surface {
         Ok(Self {
             target: PlacementTarget { app, id },
             drawing,
+            screen,
         })
     }
 
     pub(super) fn placement_target(&self) -> PlacementTarget {
         self.target.clone()
+    }
+
+    pub(super) fn headroom(&self) -> (f64, f64) {
+        *self
+            .screen
+            .headroom
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+    }
+
+    pub(super) fn sample_screen(&self) {
+        if self.screen.queued.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        let id = self.target.id;
+        let screen = self.screen.clone();
+        if self
+            .target
+            .app
+            .run_on_main_thread(move || {
+                VIEWS.with_borrow(|views| {
+                    if let Some(view) = views.get(&id) {
+                        view.sample_screen();
+                    }
+                });
+                screen.queued.store(false, Ordering::Release);
+            })
+            .is_err()
+        {
+            self.screen.queued.store(false, Ordering::Release);
+        }
+    }
+
+    pub(super) fn set_range(&self, generation: u64, range: Range) -> bool {
+        let id = self.target.id;
+        self.target
+            .app
+            .run_on_main_thread(move || {
+                VIEWS.with_borrow(|views| {
+                    let Some(view) = views.get(&id) else {
+                        return;
+                    };
+                    if !view.drawing.still_holding(generation) {
+                        return;
+                    }
+                    let mtm = MainThreadMarker::new().expect("main-thread dispatch");
+                    // No CGL lock or drawing mutex here. Black was flushed before
+                    // mpv was changed, and stays black throughout this transaction.
+                    // Disable implicit animations so EDR and the colour tag change
+                    // together, then submit before letting CA show video again.
+                    CATransaction::begin();
+                    CATransaction::setDisableActions(true);
+                    let result = view.layer.set_range(range, mtm);
+                    CATransaction::commit();
+                    CATransaction::flush();
+                    match result {
+                        Ok(()) => {
+                            view.drawing.release(generation, mtm);
+                            view.layer.setNeedsDisplay();
+                        }
+                        Err(error) => view.drawing.fail(&error),
+                    }
+                });
+            })
+            .is_ok()
     }
 }
 
