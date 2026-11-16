@@ -406,6 +406,74 @@ fn refuse_unless_named(path: &Path, name: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Every loaded image named by the set must resolve inside that directory.
+/// The caller supplies canonical paths; retain the loader's original name
+/// too, since a dylib symlink can resolve to a differently named file. An
+/// unresolved set image fails closed, while unrelated system images (which
+/// can exist only in dyld's shared cache) need no filesystem counterpart.
+#[cfg(any(target_os = "macos", test))]
+fn refuse_images_outside_set(
+    canonical_directory: &Path,
+    dylib_names: &[std::ffi::OsString],
+    images: &[(PathBuf, Option<PathBuf>)],
+) -> Result<(), String> {
+    for (loaded, canonical) in images {
+        if loaded
+            .file_name()
+            .is_some_and(|name| dylib_names.iter().any(|own| own == name))
+            && canonical.as_deref().and_then(Path::parent) != Some(canonical_directory)
+        {
+            return Err(format!(
+                "{} was loaded from outside the set's directory",
+                loaded.file_name().unwrap_or_default().to_string_lossy()
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn refuse_redirected_macos_images(library: &Path) -> Result<(), String> {
+    use std::os::unix::ffi::OsStrExt;
+
+    unsafe extern "C" {
+        fn _dyld_image_count() -> u32;
+        fn _dyld_get_image_name(index: u32) -> *const c_char;
+    }
+
+    let unknown = || "the system's loader cannot say which file it came from".to_string();
+    let directory = library
+        .parent()
+        .ok_or_else(unknown)?
+        .canonicalize()
+        .map_err(|_| unknown())?;
+    let mut dylib_names = Vec::new();
+    for entry in std::fs::read_dir(&directory).map_err(|_| unknown())? {
+        let entry = entry.map_err(|_| unknown())?;
+        let path = entry.path();
+        // is_file follows symlinks, including the versioned dylib aliases.
+        if path.extension() == Some(std::ffi::OsStr::new("dylib")) && path.is_file() {
+            dylib_names.push(entry.file_name());
+        }
+    }
+
+    let mut images = Vec::new();
+    // SAFETY: dyld's image accessors take no pointers from us. Copy each
+    // non-NULL, NUL-terminated name while the library is still loaded.
+    for index in 0..unsafe { _dyld_image_count() } {
+        let name = unsafe { _dyld_get_image_name(index) };
+        if name.is_null() {
+            return Err(unknown());
+        }
+        let path = PathBuf::from(std::ffi::OsStr::from_bytes(
+            unsafe { CStr::from_ptr(name) }.to_bytes(),
+        ));
+        let canonical = path.canonicalize().ok();
+        images.push((path, canonical));
+    }
+    refuse_images_outside_set(&directory, &dylib_names, &images)
+}
+
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn last_loader_error() -> String {
     // SAFETY: dlerror returns NULL or a NUL-terminated string owned by the
@@ -447,6 +515,16 @@ impl LibMpv {
             let handle = unsafe { libc::dlopen(c_path.as_ptr(), flags) };
             if handle.is_null() {
                 return Err(last_loader_error());
+            }
+
+            // A development launch can honour DYLD_* redirects for a
+            // dependency even when mpv_create itself comes from our set.
+            #[cfg(target_os = "macos")]
+            if let Err(error) = refuse_redirected_macos_images(path) {
+                // SAFETY: release this dlopen reference before any function
+                // from the refused library is used or retained.
+                unsafe { libc::dlclose(handle) };
+                return Err(error);
             }
 
             handle
@@ -1264,6 +1342,102 @@ mod windows_tests {
     }
 }
 
+
+#[cfg(test)]
+mod macos_image_tests {
+    use super::*;
+
+    #[test]
+    fn set_images_must_resolve_inside_the_canonical_set_directory() {
+        let root = std::env::temp_dir();
+        let directory = root.join("vela-set");
+        let own = directory.join("libavcodec.62.dylib");
+        let other = root.join("other/libavcodec.62.dylib");
+        let names = ["libmpv.2.dylib".into(), "libavcodec.62.dylib".into()];
+        for (loaded, canonical, allowed) in [
+            (own.clone(), Some(own.clone()), true),
+            (other.clone(), Some(other.clone()), false),
+            // A system library in dyld's cache need not exist on disk.
+            (root.join("usr/lib/libSystem.B.dylib"), None, true),
+            // A symlinked set directory is compared by its canonical path.
+            (
+                root.join("set-link/libavcodec.62.dylib"),
+                Some(own.clone()),
+                true,
+            ),
+            // A versioned alias can resolve to a different basename.
+            (
+                own.clone(),
+                Some(directory.join("libavcodec.62.1.dylib")),
+                true,
+            ),
+            // A symlink inside the set must not conceal an outside image,
+            // even when the target has a different basename.
+            (
+                own.clone(),
+                Some(root.join("other/libavcodec.62.1.dylib")),
+                false,
+            ),
+            (
+                own.clone(),
+                Some(directory.join("nested/libavcodec.62.dylib")),
+                false,
+            ),
+            (own, None, false),
+        ] {
+            let images = [
+                (
+                    directory.join("libmpv.2.dylib"),
+                    Some(directory.join("libmpv.2.dylib")),
+                ),
+                (loaded.clone(), canonical),
+            ];
+            assert_eq!(
+                refuse_images_outside_set(&directory, &names, &images).is_ok(),
+                allowed,
+                "{loaded:?}"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn real_symlinks_accept_the_set_alias_and_reject_an_escaping_dylib() {
+        use std::os::unix::fs::symlink;
+
+        let root = std::env::temp_dir().join(format!("vela-images-{}", uuid::Uuid::new_v4()));
+        let directory = root.join("set");
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(directory.join("libavcodec.62.1.dylib"), []).unwrap();
+        symlink(
+            "libavcodec.62.1.dylib",
+            directory.join("libavcodec.62.dylib"),
+        )
+        .unwrap();
+        symlink(&directory, root.join("set-link")).unwrap();
+        std::fs::write(root.join("outside.dylib"), []).unwrap();
+        symlink("../outside.dylib", directory.join("libavformat.62.dylib")).unwrap();
+        let canonical_directory = root.join("set-link").canonicalize().unwrap();
+        let names = ["libavcodec.62.dylib".into(), "libavformat.62.dylib".into()];
+        let image = |path: PathBuf| {
+            let canonical = path.canonicalize().ok();
+            (path, canonical)
+        };
+        assert!(refuse_images_outside_set(
+            &canonical_directory,
+            &names,
+            &[image(root.join("set-link/libavcodec.62.dylib"))],
+        )
+        .is_ok());
+        let refused = refuse_images_outside_set(
+            &canonical_directory,
+            &names,
+            &[image(directory.join("libavformat.62.dylib"))],
+        );
+        std::fs::remove_dir_all(root).unwrap();
+        assert!(refused.is_err());
+    }
+}
 
 #[cfg(all(test, unix))]
 mod macos_tests {
