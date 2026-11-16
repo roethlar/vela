@@ -28,7 +28,7 @@ const hdr = read('src-tauri/src/player/embedded/hdr.rs');
 const embeddedMod = read('src-tauri/src/player/embedded/mod.rs');
 const cargo = read('src-tauri/Cargo.toml');
 const tauriConf = JSON.parse(read('src-tauri/tauri.conf.json'));
-const page = read('src/routes/+page.svelte');
+const page = read('src/App.svelte');
 
 const code = (source) =>
   source

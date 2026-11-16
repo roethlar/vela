@@ -6,13 +6,13 @@ import { fileURLToPath } from "node:url";
 import * as ts from "typescript";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const pageSource = fs.readFileSync(path.join(repoRoot, "src", "routes", "+page.svelte"), "utf8");
+const pageSource = fs.readFileSync(path.join(repoRoot, "src", "App.svelte"), "utf8");
 const scriptSource = /<script\b[^>]*>([\s\S]*?)<\/script>/.exec(pageSource)?.[1];
 
-assert.ok(scriptSource, "+page.svelte must contain its TypeScript script");
+assert.ok(scriptSource, "App.svelte must contain its TypeScript script");
 
 const sourceFile = ts.createSourceFile(
-  "+page.svelte.ts",
+  "App.svelte.ts",
   scriptSource,
   ts.ScriptTarget.Latest,
   true,
@@ -38,7 +38,7 @@ visitFunctions(sourceFile);
 
 function functionNamed(name) {
   const node = functions.get(name);
-  assert.ok(node, `+page.svelte must define ${name}`);
+  assert.ok(node, `App.svelte must define ${name}`);
   return node;
 }
 

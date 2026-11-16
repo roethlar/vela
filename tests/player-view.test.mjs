@@ -13,7 +13,7 @@ import * as playerControls from '../src/lib/playerControls.ts';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (file) => fs.readFileSync(path.join(repoRoot, file), 'utf8').replace(/\r\n/g, '\n');
-const page = read('src/routes/+page.svelte');
+const page = read('src/App.svelte');
 const view = read('src/lib/PlayerView.svelte');
 const css = read('src/app.css');
 const commands = read('src-tauri/src/commands.rs');
@@ -1096,7 +1096,7 @@ test('a play the backend replaces keeps fullscreen (case 8)', () => {
 // without a view of their own, one after another; the old play's own report,
 // clean or not; the dispatcher's report; the old view closing; the reaper; a
 // play that fell back to mpv's own window. Each event says whether anything
-// was playing or coming when it was sent. Replayed as `+page.svelte` takes
+// was playing or coming when it was sent. Replayed as `App.svelte` takes
 // them, through the real helpers: the page leaves the player's fullscreen at
 // a report once nothing plays or is coming, and never while something does.
 // What plays or is coming at each event is the Rust test's model (its

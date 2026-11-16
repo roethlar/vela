@@ -50,7 +50,7 @@ implementation trace; headings marked resolved are not an active queue.
 - Automatic playlist and Continue Playing successors now retain the completed
   mpv process's actual fullscreen and maximized state. Manual starts keep their
   configured defaults, and unknown state remains untouched. (Superseded in
-  1.0.65: every play of a run carries the window, manual starts included; see
+  1.0.66: every play of a run carries the window, manual starts included; see
   `docs/usage.md`, "Player behavior notes".) Implemented in Vela
   0.1.59 under `.agents/plans/playback-window-state-continuity.md`; eight
   production regressions were separately proven red/restored-green, the exact-
@@ -89,7 +89,7 @@ recorded in `.agents/decisions.md`.
 
 - Mark watched/unwatched does not remove an item from the Continue Watching
   hero, and the owner expects it to. Root causes (both required):
-  (a) `setWatched` (`src/routes/+page.svelte:707`) updates the card
+  (a) `setWatched` (`src/App.svelte:707`) updates the card
   in place and never re-fetches hubs, so the server-side continue hub row
   keeps its stale copy until the next full refresh; (b) the hero also merges
   Vela's own recents (`recents.rs`), and a recents entry only leaves via the
@@ -156,7 +156,7 @@ unchecked for these):
   the hero, played another video ~seconds, stopped — hero unchanged, "no
   arrows", no replacement). Diagnosis (code-traced): three stacked causes.
   (a) UX defect, real: the prev/next arrows are hover-revealed
-  (`+page.svelte` `.heroarrow` opacity 0 until `.heroframe:hover`), so a
+  (`App.svelte` `.heroarrow` opacity 0 until `.heroframe:hover`), so a
   single visible hero card shows no affordance at all — the approved plan's
   "proposed hover-reveal" default fails in practice. Fix direction: arrows
   (or an equivalent position indicator) always visible.

@@ -1,18 +1,8 @@
-// Tauri doesn't have a Node.js server to do proper SSR
-// so we use adapter-static with a fallback to index.html to put the site in SPA mode
-// See: https://svelte.dev/docs/kit/single-page-apps
-// See: https://v2.tauri.app/start/frontend/sveltekit/ for more info
-import adapter from "@sveltejs/adapter-static";
+// Read by @sveltejs/vite-plugin-svelte and svelte-check. Vela has no SvelteKit;
+// see vite.config.js for the app shell.
 import { vitePreprocess } from "@sveltejs/vite-plugin-svelte";
 
-/** @type {import('@sveltejs/kit').Config} */
-const config = {
+/** @type {import("@sveltejs/vite-plugin-svelte").SvelteConfig} */
+export default {
   preprocess: vitePreprocess(),
-  kit: {
-    adapter: adapter({
-      fallback: "index.html",
-    }),
-  },
 };
-
-export default config;

@@ -445,8 +445,8 @@ is manual: nothing automated compares the pins with an advisory database.
 
 ## Architecture
 
-- **Desktop shell:** Tauri 2 with a static SvelteKit/Svelte 5 frontend in
-  `src/` and a Rust backend in `src-tauri/`.
+- **Desktop shell:** Tauri 2 with a single-page Svelte 5 frontend (built by
+  Vite) in `src/` and a Rust backend in `src-tauri/`.
 - **Sources:** Plex and the shared Jellyfin/Emby client implement a common
   `MediaSource` interface behind a source registry. Item keys are namespaced by
   source, allowing unified browsing and cross-source playlists.

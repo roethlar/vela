@@ -2,8 +2,18 @@
 
 ## Status
 
-**DRAFT, revision 1 (2026-10-23). Awaiting the owner's plan approval and one
-ruling (gate G1 below). No implementation is authorized.**
+**APPROVED, revision 1 (owner, 2026-10-23). G1 ruled "rename". Slices 1-4 are
+implemented on branch `remove-sveltekit`, which is not merged. Before merge:
+Slice 0, the VM E2E proofs, the owner's visual checks of the Mac desktop smoke
+and HMR, and the Review step (see the implementation log). The Mac's automated
+gates passed on 2026-10-24.**
+
+- Approval: the owner answered "go with your rec" when the recommendation was
+  to remove SvelteKit and keep Svelte 5 and Vite. The owner then set the
+  standing direction "do everything in the most correct manner possible,
+  commit and push as needed."
+- G1: ruled "rename" (`src/routes/+page.svelte` becomes `src/App.svelte`), the
+  plan's recommendation. Slice 3 runs.
 
 Owner direction (2026-10-23): remove SvelteKit from Vela instead of upgrading
 it to Kit 3. Keep Svelte 5 and Vite. Node stays as a build and test tool; the
@@ -25,16 +35,199 @@ Record the owner's approval wording, and the G1 ruling when it lands, on this
 status line before Slice 0 starts. The `.agents/decisions.md` entry that
 carries the same wording lands in Slice 4.
 
-Owner gate pending:
+Owner gate (ruled "rename", 2026-10-23):
 
 - **G1, rename the root component.** Slice 3 runs only if the owner rules
   "rename". Slices 0, 1, 2 and 4 do not depend on G1. If the owner rules
   "keep", delete Slice 3 from this plan and drop the rename paragraph from the
   Slice 4 decision text.
 
-Implementation log:
+Amendment (2026-10-24, history reconciliation; no plan scope change):
 
-- (none yet)
+- `main` was reconciled with the Gitea history at `bc12bc5` (see
+  `.agents/state.md`), and this branch merged that `main` without a rebase.
+  The branch version stays 1.0.62, above `main`'s 1.0.61 (AirPlay audio).
+- The JS toolchain policy is now the range of decision `.agents/decisions.md`
+  2026-10-03 (amended 2026-10-24): `engines.node` `>=26.12.1 <27`,
+  `engines.npm` `>=12`, and no `packageManager` field. CI's baseline is Node
+  26.12.1 and npm 12.0.2. Wherever this plan says "pinned 12.0.1" or
+  `npx -y npm@12.0.1`, read "any npm >=12; use 12.0.2 to match CI". Slice 2's
+  "`packageManager` stays unchanged" is moot. On the Windows host the checker
+  passes once a scratch-prefix npm 12 is first on `PATH`.
+- Slice 0's recipe follows the restated `.agents/machines.md` Pending bullet;
+  installing npm 12.0.1 on the VM still satisfies the range. Slice 0's
+  pre-migration baseline is now `main` at `bc12bc5`, not `b365873`.
+- The Review step covers the branch's net diff against `main`
+  (`git diff main...<branch head>`), which includes how this merge was
+  resolved.
+
+Implementation log (2026-10-23, branch `remove-sveltekit` off `main`
+`b365873`):
+
+- Venue: the Windows authoring host, per Host constraints. All work ran in an
+  LF worktree (`git -c core.autocrlf=false worktree add`) with Node 26.12.1 and
+  `npx -y npm@12.0.1` for every npm command. Not run there:
+  `node scripts/check-js-toolchain.mjs` (the PATH npm is 11.20.0) and every
+  Cargo command (no MSVC build tools). `scripts/bump.sh` can't run (no
+  `python3`), so both bumps used a line-for-line Node port of its embedded
+  Python, kept outside the repo. Each bump diff touched only the seven version
+  fields (`package.json`, the two `package-lock.json` root copies,
+  `tauri.conf.json`, `Cargo.toml`, the `vela` entry in `Cargo.lock`, the
+  `PKGBUILD` `pkgver`) and `BUILD_DATE`, which became `2026-10-24` because the
+  script uses the UTC date.
+- Slice 0: NOT RUN. It needs the owner's Mac and the E2E VM. No E2E baseline
+  exists yet.
+- Slice 1 (`149f2c1`): the font assertions are in `smoke`. Only a syntax and
+  module-load check ran. The on-Kit green run and red-proofs F1 and F2 are NOT
+  RUN (VM only).
+- Slice 2 (`ecf0d9c`), base captures taken at `149f2c1`:
+  - A1: base `npm audit` exit 1, naming GHSA-pfhg-q3qv-9q6r and
+    GHSA-27mw-82g8-phjj. Head: exit 0 on a clean `npm ci`, "found 0
+    vulnerabilities". `npm ls @sveltejs/kit @sveltejs/adapter-static cookie`
+    is empty. `npm ls --all` shows no invalid, missing or peer errors; its
+    only change from the base is one fewer UNMET OPTIONAL entry, Kit's
+    `@opentelemetry/api`.
+  - Lock: exactly the 11 probe packages were removed. Nothing was added. The
+    only changed entry is the root `packages[""]`, which lost the two Kit
+    devDependencies.
+  - `npm run check`: node tests 68 pass, 2 skipped, 0 fail (base: 64 pass,
+    2 skipped). svelte-check went from `COMPLETED 303 FILES` to `295 FILES`,
+    0 errors, 0 warnings. The non-`node_modules` `tsc --listFilesOnly` set is
+    exactly `src/main.ts`, `src/lib/{errors,imageReveal,types}.ts` and
+    `vite.config.js`. `--showConfig` compiler options differ from the base
+    only in `paths` (re-based, `$app/types` dropped), the dropped `rootDirs`,
+    and the added `types`. `include`/`exclude` differ only in spelling; Kit's
+    service-worker excludes matched no file.
+  - `npm run build`: no warnings; the post-build check passes. The output is
+    `build/index.html`, `build/favicon.png`, and `build/assets/` with one `.js`,
+    one `.css` and five `.woff2`. There is no `build/_app`. The five woff2
+    sha256 values equal the base's.
+  - Dev server: `vite dev` bound 1420 and served `index.html` with the
+    `/src/main.ts` entry. A second `vite dev` exited 1 with "Port 1420 is
+    already in use". NOT RUN: HMR in a disposable worktree, `npm run tauri dev`,
+    the Mac desktop smoke (WKWebView), the VM `npm run e2e`, and
+    `cargo +stable check --locked`.
+  - `resolveConfig({ root, configFile }, "build", "production")` works under
+    `node --test`; `tests/frontend-shell.test.mjs` uses it, not the fallback.
+  - Red-proofs, in a disposable LF worktree at `ecf0d9c` with its own `npm ci`,
+    restored each time with `git checkout HEAD -- .` and shown green again:
+    - T1-T5: svelte-check reported `Type 'string' is not assignable to type
+      'number'` at `src/lib/Icon.svelte` 2:9, `src/routes/+page.svelte` 2:9,
+      `src/main.ts` 10:14, `src/lib/types.ts` 205:14, and `vite.config.js`
+      47:36.
+    - T6: `src/main.ts` 3:8, "Cannot find module or type declarations for
+      side-effect import of './app.css'".
+    - T7: `npm run check` stops first at S3 (`tsconfig paths["$lib"] must be
+      ["./src/lib"]`). svelte-check run directly reports `Cannot find module
+      '$lib/...'` for each `$lib` import. `npm run build` fails because
+      Rolldown can't resolve `$lib/EmptyState.svelte`.
+    - S1a, S1b and S1c each fail S1 on their own message (outDir/frontendDist,
+      emptyOutDir, post-build wiring). S2a and S2b each fail S2 (port,
+      strictPort). S3a fails S3, and `npm run build` then fails with the
+      misleading "failed to load virtual css module" message from the probe.
+      S4a fails S4 (`id="app"` count) and S4b fails S4 (import order).
+      `npm run check` exits 1 for every one of them.
+    - B1 fails B1 ("0 module scripts"). B2 also fails, because without an
+      entry Vite emits no stylesheet, and S4 fails. B2 fails B2 (no Geist
+      `@font-face`, no woff2 url). B3 fails B3 ("5 CSS url() values inline a
+      font as data:font"); B2's woff2-file assertion also fails, as it must
+      when every font is inlined. B4 and B5 each fail only their own
+      assertion, and B5 also fails `ui-foundation` ("first paint must accept
+      the complete theme catalog"). B6: `149f2c1` (Kit) was built in that
+      worktree, then the worktree was checked out at `ecf0d9c` with
+      `emptyOutDir: false`. The build check failed only at B6. After the
+      restore, the rebuild cleared `_app` and passed.
+    - Webview mount: the local half ran. `getElementById("missing")` fails S4.
+      The VM `smoke` half (`app render`) is NOT RUN.
+- Slice 3 (`7b01fae`): `git grep -n "+page.svelte" -- tests src scripts
+  ISSUES.md` returns nothing. `npm run check` is green, with svelte-check still
+  at 295 files. `npm run build` is green, including the post-build check.
+  Version 1.0.61 to 1.0.62. Red-proof at `7b01fae`: after
+  `git mv src/App.svelte src/Gone.svelte`, all six node test files fail.
+  `config-integrity`, `transcoding-ui` and `watch-edit-position` fail with
+  ENOENT on `src/App.svelte`. `image-reveal` (2 tests), `ui-foundation`
+  (5 tests) and `ui-motion` (4 tests) fail their assertions. Restored and
+  green. S4b was re-proven at `7b01fae`, because its import line changed. The
+  VM `smoke`/`uifoundation` runs are NOT RUN.
+- Review: NOT RUN. The Review section needs the owner to choose `codereview` or
+  `openreview` for the codex dispatch.
+- Push: the owner's standing direction ("commit and push as needed") covers
+  pushing this branch and opening a PR against `main`. Merging is not part of
+  that direction. GitHub CI on the PR is the first CI run of `npm run check` and
+  `npm run build` since the audit gate went red.
+- CI: PR #2 (https://github.com/roethlar/vela/pull/2), `ci.yml` run
+  40059537619 at `367bdf6`, passed every job:
+  - Frontend: `npm ci`, `npm audit` ("found 0 vulnerabilities"),
+    `npm run check` (70 pass, 0 fail; svelte-check 0 errors, 0 warnings), and
+    `npm run build` ("check-frontend-build: B1-B6 passed");
+  - Rust: the 1.89 MSRV check, and stable check, clippy `-D warnings` and
+    test;
+  - cargo audit.
+
+  The release workflow's `npm-audit` job wasn't run, because no release was
+  dispatched.
+
+Implementation log, 2026-10-24: Mac gates, at branch head `2767cbe`.
+
+- Venue: the owner's Mac (macOS 27.0.1, arm64), reached over SSH while its
+  console was locked. Work ran in a scratch clone outside `~/Dev/vela`,
+  detached at `2767cbe`, with Homebrew Node 26.12.1 and a scratch-prefix npm
+  12.0.2 first on `PATH` (`.agents/machines.md`, macOS dev host). The other
+  sessions' worktrees were not touched.
+- Pinned toolchain, LF checkout:
+  - `node scripts/check-js-toolchain.mjs` passed, and `npm ci` passed.
+  - `npm audit` exited 0 with "found 0 vulnerabilities".
+  - `npm ls @sveltejs/kit @sveltejs/adapter-static cookie` printed `(empty)`.
+  - `npm ls --all` showed no invalid, missing or peer errors.
+  - `npm run check`: 77 tests, 77 pass, 0 fail, 0 skipped. svelte-check found
+    0 errors and 0 warnings.
+  - `npm run build`: `check-frontend-build: B1-B6 passed`. The output is
+    `build/index.html`, `build/favicon.png`, and in `build/assets/` one `.js`,
+    one `.css` and the five Geist woff2 files with the same content-hash names
+    as the probe (`DjL33-gN`, `BEAKL7Jp`, `DC-KSUi6`, `BgDaEnEv`, `6IgcOCM7`).
+    There is no `build/_app`.
+- Cargo: `cargo +stable check --locked` (rustc 1.99.1) passed from
+  `src-tauri/`. `npm run tauri -- build --debug --no-bundle` passed, and its
+  `beforeBuildCommand` build check passed again. The binary embeds the same
+  `/assets/index-*.js` and `.css` names that the build wrote. Clippy, tests,
+  the 1.89 MSRV check and cargo audit were not re-run on the Mac. GitHub CI
+  runs 40059537619 and 40061360150 are their evidence.
+- Mac desktop smoke (WKWebView). The automated part ran; the visual part did
+  NOT. The debug binary was launched with `HOME` pointed at an empty scratch
+  directory, so the owner's real Vela profile was neither read nor written.
+  It stayed running for 25 s, with a WebKit WebContent process, and created
+  its config directory under the scratch `HOME`. It then exited on SIGTERM.
+  Its stdout and stderr were empty. The unified log for the app and WebKit
+  showed no CSP or "Refused" message. That absence is weak evidence: WKWebView
+  does not send page console messages to the unified log by default. Left for
+  the owner, at the desktop:
+  - launch the debug app (or a fresh `npm run tauri -- build --debug
+    --no-bundle`) and confirm it boots to Welcome or Home;
+  - confirm text renders in Geist;
+  - confirm the saved theme applies before first paint (no flash);
+  - confirm the Web Inspector console shows no CSP violation.
+- `tauri dev` and HMR. The automated part ran; the visual part did NOT. In a
+  disposable worktree of the scratch clone, with the scratch `HOME`,
+  `npm run tauri dev` started Vite on 127.0.0.1:1420 and launched the dev
+  binary. A second Vite started with `--port 1420 --strictPort` exited 1 with
+  "Port 1420 is already in use". Editing the Welcome button text `Add a source`
+  in `src/App.svelte` logged `[vite] (client) hmr update /src/App.svelte`.
+  Restoring the file logged a second update. Neither logged a page reload or
+  an error, and the app PID stayed the same, so the app did not restart. Vite
+  only sends an HMR update for a module a client has loaded, so the webview did
+  load `src/App.svelte` from the dev server. Left for the owner: seeing the
+  edited text change on screen. The worktree was removed.
+- VM gates: NOT RUN. These are Slice 0 (the Node 26.12.1 re-alignment and the
+  pre-migration E2E baseline), Slice 1's `smoke` run and its F1 and F2
+  red-proofs, the full `npm run e2e` at the branch head, the webview-mount
+  red-proof, and Slice 3's `smoke` and `uifoundation`. The VM is a UTM guest
+  on the Mac. It was suspended, and it can't be started from SSH while the
+  console is locked (`.agents/machines.md`, Linux VM). Nothing on the VM was
+  changed, so its Node is still 26.5.0.
+- Review: still NOT RUN. Codex, the reviewer that the 2026-07-26 routing names,
+  is not available (owner, 2026-10-24: "no codex available"), and no
+  substitute reviewer was used. Open owner decision: wait for codex, or name
+  another review route for this branch.
 
 ## Goal
 
