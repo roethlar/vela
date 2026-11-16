@@ -547,6 +547,25 @@ test('wheel bursts wait for the answer, merge volume targets and seek seconds, a
   }
 });
 
+test('queued seeks split at the backend limit and retain every remaining second', () => {
+  const ready = { busy: false, stopped: false, hasState: true };
+  const seek = (seconds) => ({ name: 'seek-relative', args: [seconds] });
+  const volume = { name: 'set-volume', args: [42] };
+  for (const sign of [1, -1]) {
+    for (const [total, chunks] of [[600, [600]], [610, [600, 10]], [1210, [600, 600, 10]], [600.5, [600, 0.5]]]) {
+      let pending = [seek(sign * total), volume];
+      for (const chunk of chunks) {
+        const waiting = takeMouseCommand(pending, { ...ready, busy: true });
+        assert.deepEqual(waiting, { pending, command: null }, 'waiting never consumes a remainder');
+        const next = takeMouseCommand(pending, ready);
+        assert.deepEqual(next.command, seek(sign * chunk), `${sign * total} seconds`);
+        pending = next.pending;
+      }
+      assert.deepEqual(pending, [volume], 'the following command keeps its place');
+    }
+  }
+});
+
 test('seek hover time uses thumb centres at both ends and at the middle', () => {
   assert.equal(seekTimeAtPointer(100, 100, 216, 180), 0);
   assert.equal(seekTimeAtPointer(108, 100, 216, 180), 0);

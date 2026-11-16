@@ -475,13 +475,27 @@ export function mergeWheelCommand(pending: readonly QueuedPlayerCommand[], comma
   return merged;
 }
 
-/** Take at most one command, only once the previous answer has arrived. */
+// The per-command bound in src-tauri/src/player/control.rs, not a burst limit.
+const MAX_RELATIVE_SEEK = 600;
+
+/** Take at most one command, only once the previous answer has arrived.
+ * Split a large seek at dispatch, keeping its remainder queued for the next
+ * reply. Later wheel input can still add to or cancel that remainder.
+ */
 export function takeMouseCommand(
   pending: readonly QueuedPlayerCommand[],
   ctx: { busy: boolean; stopped: boolean; hasState: boolean },
 ): { pending: readonly QueuedPlayerCommand[]; command: QueuedPlayerCommand | null } {
   if (ctx.stopped || !ctx.hasState) return { pending: [], command: null };
   if (ctx.busy || pending.length === 0) return { pending, command: null };
+  const first = pending[0];
+  if (first.name === "seek-relative" && Math.abs(first.args[0]) > MAX_RELATIVE_SEEK) {
+    const seconds = Math.sign(first.args[0]) * MAX_RELATIVE_SEEK;
+    return {
+      command: { name: "seek-relative", args: [seconds] },
+      pending: [{ name: "seek-relative", args: [first.args[0] - seconds] }, ...pending.slice(1)],
+    };
+  }
   return { pending: pending.slice(1), command: pending[0] };
 }
 

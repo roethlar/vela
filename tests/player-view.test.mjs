@@ -255,6 +255,74 @@ for (const end of ['stop', 'cleanup']) {
   });
 }
 
+for (const sign of [1, -1]) {
+  test(`61 queued wheel steps dispatch as ${sign * 600} then ${sign * 10} seconds`, async () => {
+    const h = viewHandlers();
+    h.wheel(0, -40);
+    for (let i = 0; i < 61; i++) h.wheel(sign * 40, 0);
+    assert.equal(h.commands.length, 1);
+    for (const seconds of [sign * 600, sign * 10]) {
+      const before = h.commands.length;
+      await h.reply();
+      assert.equal(h.commands.length, before + 1);
+      assert.deepEqual(h.commands.at(-1), { name: 'seek-relative', args: [seconds] });
+    }
+    await h.reply();
+    assert.equal(h.commands.length, 3);
+  });
+
+  test(`one large wheel event dispatches bounded seeks in direction ${sign}`, async () => {
+    const h = viewHandlers();
+    h.wheel(sign * 121 * 40, 0);
+    const expected = [];
+    for (const seconds of [sign * 600, sign * 600, sign * 10]) {
+      expected.push({ name: 'seek-relative', args: [seconds] });
+      assert.deepEqual(h.commands, expected);
+      await h.reply();
+    }
+    assert.deepEqual(h.commands, expected);
+  });
+}
+
+test('seek remainders accept reversal and pause priority while a chunk is unanswered', async () => {
+  const h = viewHandlers();
+  h.wheel(122 * 40, 0);
+  h.wheel(-40, 0);
+  h.wheel(0, -40);
+  h.contextmenu(h.event(2));
+  const expected = [
+    { name: 'seek-relative', args: [600] }, { name: 'toggle-pause', args: [] },
+    { name: 'seek-relative', args: [600] }, { name: 'seek-relative', args: [10] },
+    { name: 'set-volume', args: [42] },
+  ];
+  for (let i = 1; i <= expected.length; i++) {
+    assert.deepEqual(h.commands, expected.slice(0, i));
+    await h.reply();
+  }
+  assert.deepEqual(h.commands, expected);
+});
+
+test('a reversed wheel cancels the remaining seek without cancelling the in-flight chunk', async () => {
+  const h = viewHandlers();
+  h.wheel(61 * 40, 0);
+  h.wheel(-40, 0);
+  assert.deepEqual(h.commands, [{ name: 'seek-relative', args: [600] }]);
+  await h.reply();
+  assert.equal(h.commands.length, 1);
+});
+
+for (const end of ['stop', 'cleanup']) {
+  test(`${end} discards a partially delivered wheel seek`, async () => {
+    const h = viewHandlers();
+    h.wheel(61 * 40, 0);
+    assert.deepEqual(h.commands, [{ name: 'seek-relative', args: [600] }]);
+    if (end === 'stop') h.send({ name: 'stop', args: [] }); else h.cleanup();
+    await h.reply();
+    assert.equal(h.commands.length, end === 'stop' ? 2 : 1);
+    assert.equal(h.commands.filter((c) => c.name === 'seek-relative').length, 1);
+  });
+}
+
 test('picture clicks without a primary press leave playback, fullscreen, and a running wait alone', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const picture = pictureHandlers();
