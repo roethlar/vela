@@ -1,6 +1,6 @@
 # E2E harness
 
-Drives the real debug Vela binary through `tauri-driver` + a vendored
+On Linux, drives the real debug Vela binary through `tauri-driver` + a vendored
 WebKitWebDriver, on a throwaway config dir (`XDG_CONFIG_HOME` points into a
 temp dir per scenario — the owner's `~/.config/vela` is never touched).
 Design and deviations: `.agents/plans/e2e-harness.md`.
@@ -46,7 +46,7 @@ npm run e2e -- --embedded      # the same suite, played in the embedded player
   inode, size and modification time were noted; before each session starts
   (a restart included), the client checks them again and refuses to start a
   file that was written over or put in its place since.
-- Requires Linux, `tauri-driver` (`cargo install tauri-driver`), `Xvfb`
+- Linux requires `tauri-driver` (`cargo install tauri-driver`), `Xvfb`
   (`xorg-server-xvfb`), `bsdtar`, `curl`, `openssl`, and — for the playback-driving
   scenarios — `ffmpeg` and `mpv`. Server flows run against in-process mock
   Jellyfin servers (`mockjf.mjs`) whose Range-capable streams serve
@@ -64,6 +64,112 @@ npm run e2e -- --embedded      # the same suite, played in the embedded player
   run(ctx) }` (see "What a scenario declares" below) with `ctx = { driver,
   screenshot(name), restart(between), repoRoot, configRoot }`; assert with
   `node:assert/strict`.
+
+## On Windows
+
+The same mock-server suites drive the real debug `vela.exe` through
+`tauri-driver --native-driver <msedgedriver.exe>`, on the runner's interactive
+desktop. No Xvfb or weston is started. The hosted desktop is 1024×768; each
+new app window is placed at 1000×700 so it fits and fullscreen has a larger
+client area. This venue does not establish HDR or multiple-monitor behaviour.
+The executable is still the exact path Cargo reports for the build.
+`--skip-build` predicts `<target_directory>/debug/vela.exe` and cannot count
+for a parity verdict, just as on Linux.
+
+Use the **E2E Windows** manual Actions workflow (`e2e-windows.yml`). Choose
+`both` (default), `external`, or `embedded`, and optionally one scenario name.
+It installs Node/npm, Rust, Python, tauri-driver, mpv, ffmpeg and OpenSSL.
+External playback uses the installed mpv.exe on PATH. Embedded playback uses
+`VELA_LIBMPV_DIR`, containing the complete `libmpv-windows-x86_64` set,
+including `libmpv-2.dll`, its dependencies and manifest. The workflow downloads
+that artifact from the latest successful `ci.yml` run on main with its
+read-only Actions token. If that run has no usable artifact, a Linux job builds
+the set from this checkout's pins and uploads it for the Windows job. Download
+or manifest errors fail; they do not silently choose a different library.
+
+`fetch-driver.ps1` reads the installed Evergreen WebView2 runtime's registered
+version and checks the runtime executable. It downloads that exact version's
+x64 Edge WebDriver from Microsoft's HTTPS distribution, verifies a valid
+Microsoft Authenticode signature before executing it, and checks `--version`.
+The app is pinned to the discovered runtime directory for the run. The driver
+is checked again when cached; its SHA256, signer, version and URL are saved in
+`artifacts/<player>/webdriver.json`. The hash records identity; Microsoft's
+signature is the integrity check. See Microsoft's
+[runtime discovery](https://learn.microsoft.com/microsoft-edge/webview2/concepts/distribution)
+and [WebDriver requirements](https://learn.microsoft.com/microsoft-edge/webview2/how-to/webdriver).
+
+**Use a disposable Windows account.** Before every scenario the harness
+deletes the real roaming AppData `vela` directory (normally `%APPDATA%\vela`).
+Vela uses `directories::ProjectDirs::from("com", "vela", "vela")`, which reads
+the Windows known folder, not an `APPDATA` environment override. Its config
+is actually `RoamingAppData\vela\vela\config`. A junction from the scenario's
+temporary `config\vela` points there, so all existing seeding, persistence,
+recovery and byte-comparison assertions see the actual files. Seeded private
+files get Windows DACLs; backup privacy assertions inspect those DACLs instead
+of POSIX mode bits. The harness refuses deletion unless
+`VELA_E2E_DISPOSABLE_WINDOWS=1` and no Vela is running. This deletion is safe on
+a fresh hosted runner because the account contains no owner's Vela data.
+Changing `APPDATA` or `XDG_CONFIG_HOME` is not a substitute for that isolation.
+
+For a disposable local Windows account with an interactive desktop, install
+the same prerequisites and obtain the Windows library set, then run from the
+repository root in PowerShell 7:
+
+```powershell
+$env:VELA_E2E_DISPOSABLE_WINDOWS = '1'
+$env:VELA_LIBMPV_DIR = (Resolve-Path '.libmpv/out/libmpv-windows-x86_64').Path
+npm ci
+npm run e2e
+npm run e2e -- --embedded
+npm run e2e:verdict
+# For investigation (not a parity verdict):
+npm run e2e -- smoke
+npm run e2e -- --embedded embeddedplay
+```
+
+Full Windows embedded runs first execute CI's real DLL load/decode/EOF probe
+(`packaging/libmpv/check-libmpv-windows.py`). Linux's `test:libmpv` preflight
+tests the Wayland render/HDR implementation and is compiled only on Linux;
+running its filters on Windows would run zero tests. No Windows equivalent of
+those render/HDR unit tests is claimed by this harness.
+
+Windows IPC discovery lists `\\.\pipe\mpv-plex-<vela-pid>-<time>-<counter>`.
+Only the Vela executable located for this run, descended from this scenario's
+driver process, owns an eligible pipe. Restarts register the new app PID.
+The connection wait counts named-pipe instances, excluding this harness's
+temporary probe and mpv's one listening instance. Process identity, exit,
+command-line and environment checks use Windows process evidence; an unreadable
+environment fails rather than appearing empty. The environment reader supports
+x64 processes only and reads Windows' native process structures.
+
+All existing scenario meanings and assertions remain. Windows runs 47 external
+and 51 embedded scenarios. `playerfallback` is skipped on Windows: it specifically
+asserts X11's "needs a Wayland session" notice, while Windows supports embedding
+on its desktop. `embeddedlatestart` still exercises a failed embedded startup
+and external fallback. The ordinary player-only exclusions remain:
+
+- External runs skip `embeddedcontrols`, `embeddedcrop`, `embeddedfullscreenend`,
+  `embeddedlatestart`, `embeddedplay`, `embeddedskip`, and `embeddedtracks`:
+  these exercise the embedded view, renderer or startup lifecycle.
+- Embedded runs skip `autocrop` (the external player's stock crop script),
+  `markerbutton` (mpv's own OSD button), and `windowsetting` (mpv's separate
+  window), as well as `playerfallback` above.
+
+Every Windows skip records its reason in `results/<player>.json`, and contributes
+no parity coverage. Results carry `platform: "win32"`; the verdict rejects mixed
+Linux/Windows runs and missing or invented skip reasons. Existing row 10/11
+exemptions and test-only route disclosures still apply. Naming a skipped
+scenario explicitly fails, rather than turning a mistaken request green.
+
+Each requested screenshot has both `<name>.png` (WebDriver's page) and
+`<name>-desktop.png` (PowerShell `CopyFromScreen` of the whole desktop, including
+mpv's native video). Failures also attempt both captures. Both suites' artifacts
+are preserved in separate `artifacts/external/` and `artifacts/embedded/`
+directories and uploaded with `results/`, even on failure. A failed external run
+does not suppress the embedded run. The workflow runs the parity verdict after
+`both` full suites; a single suite or named scenario produces diagnostic results
+only, never a full parity PASS. Review the desktop captures for actual video and
+the paired page captures for controls; WebDriver alone cannot see native video.
 
 ## What a scenario declares
 
@@ -92,6 +198,8 @@ problem). A scenario's default export may hold only these keys:
 - `onlyPlayer`: `'external'` or `'embedded'` for a scenario of one player,
   with `onlyPlayerWhy`, the reason. Anything else is refused (a misspelt
   player used to make a scenario skip in both runs).
+- `skipOnWindows`: a non-empty reason for a scenario whose premise cannot
+  apply there. Recorded verbatim in the Windows result, never counted as proof.
 - `testOnly`: the steps of the scenario that go through a route a user of
   that player does not have, one entry per row and player: `{ row, player,
   via, route, proves, unproven }`. `via` names the route's helper, one of
@@ -332,6 +440,9 @@ through the same loader, but count for neither player: they are part of
 neither run.
 
 ## The embedded player
+
+The venue and library-test details below describe Linux. Windows uses the
+desktop and DLL preflight described in "On Windows" above.
 
 `--embedded` runs the suite with the embedded player instead of the external
 one (`.agents/plans/embedded-player.md`). Two things change:

@@ -1,0 +1,171 @@
+name: E2E Windows
+
+on:
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: Player suite(s) to run
+        type: choice
+        options: [both, external, embedded]
+        default: both
+        required: true
+      scenario:
+        description: Optional scenario name (blank runs the full suite)
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  libmpv:
+    if: inputs.suite != 'external'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    outputs:
+      run_id: ${{ steps.library.outputs.run_id }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Find the Windows set from the latest successful CI on main
+        id: library
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          run_id=$(gh run list --workflow ci.yml --branch main --status success --limit 1 --json databaseId --jq '.[0].databaseId // empty')
+          if [[ -n "$run_id" ]]; then
+            count=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/artifacts" --paginate --jq '[.artifacts[] | select(.name == "libmpv-windows-x86_64" and .expired == false)] | length')
+            if [[ "$count" == 1 ]]; then
+              echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+          echo 'No usable set from the latest successful main CI; building this checkout from its pins.'
+      - name: Build a set when CI has none
+        if: steps.library.outputs.run_id == ''
+        run: bash scripts/build-libmpv-windows.sh --container
+      - name: Check the fallback manifest
+        if: steps.library.outputs.run_id == ''
+        run: python3 -B packaging/libmpv/check-libmpv-windows.py .libmpv/out/libmpv-windows-x86_64 --manifest-only
+      - uses: actions/upload-artifact@v7
+        if: steps.library.outputs.run_id == ''
+        with:
+          name: e2e-libmpv-windows-x86_64
+          path: .libmpv/out/libmpv-windows-x86_64
+          if-no-files-found: error
+
+  windows:
+    needs: libmpv
+    if: ${{ !cancelled() && (needs.libmpv.result == 'success' || needs.libmpv.result == 'skipped') }}
+    runs-on: windows-latest
+    timeout-minutes: 180
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      # A hosted runner is a fresh, disposable account. The harness clears
+      # its REAL roaming AppData\vela before each scenario, never redirects it.
+      VELA_E2E_DISPOSABLE_WINDOWS: '1'
+      VELA_LIBMPV_DIR: ${{ github.workspace }}/.libmpv/out/libmpv-windows-x86_64
+      E2E_SCENARIO: ${{ inputs.scenario }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - name: Activate npm and install frontend dependencies
+        run: |
+          npm install --global npm@12.0.2
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node scripts/check-js-toolchain.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm ci
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+          architecture: x64
+      - name: Install mpv, ffmpeg, OpenSSL and tauri-driver
+        run: |
+          choco install mpv ffmpeg openssl --yes --no-progress --limit-output
+          if ($LASTEXITCODE -notin @(0, 3010)) { exit $LASTEXITCODE }
+          # New installs can update the machine PATH without updating this process.
+          $env:PATH = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User') + ';' + $env:PATH
+          # Prefer the actual mpv binary over a Chocolatey launcher shim: the
+          # process-identity/exit scenarios must observe mpv itself.
+          $mpvExe = Get-ChildItem "$env:ChocolateyInstall/lib/mpv*" -Filter mpv.exe -Recurse | Select-Object -First 1
+          if (-not $mpvExe) { throw 'Chocolatey installed no mpv.exe.' }
+          $env:PATH = $mpvExe.DirectoryName + ';' + $env:PATH
+          # GITHUB_PATH prepends the last line first. Add only these tools,
+          # keeping setup-node's selected Node/npm ahead of machine defaults.
+          @((Split-Path (Get-Command openssl -ErrorAction Stop).Source), (Split-Path (Get-Command ffmpeg -ErrorAction Stop).Source), $mpvExe.DirectoryName) |
+            Select-Object -Unique | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          mpv --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ffmpeg -version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          openssl version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo install tauri-driver --locked
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Download the CI library set
+        if: inputs.suite != 'external' && needs.libmpv.outputs.run_id != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LIBMPV_RUN_ID: ${{ needs.libmpv.outputs.run_id }}
+        run: |
+          gh run download $env:LIBMPV_RUN_ID --repo $env:GITHUB_REPOSITORY --name libmpv-windows-x86_64 --dir $env:VELA_LIBMPV_DIR
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/download-artifact@v8
+        if: inputs.suite != 'external' && needs.libmpv.outputs.run_id == ''
+        with:
+          name: e2e-libmpv-windows-x86_64
+          path: .libmpv/out/libmpv-windows-x86_64
+      - name: Check the library manifest against this checkout
+        if: inputs.suite != 'external'
+        run: |
+          python -B packaging/libmpv/check-libmpv-windows.py $env:VELA_LIBMPV_DIR --manifest-only
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Ready to run the suites
+        id: ready
+        run: |
+          if ($env:E2E_SCENARIO -and $env:E2E_SCENARIO -notmatch '^[a-z][a-z0-9-]*$') { throw 'Use one scenario name, not command-line arguments.' }
+          New-Item -ItemType Directory -Force tests/e2e/artifacts | Out-Null
+      - name: External player suite
+        if: inputs.suite != 'embedded'
+        run: |
+          $arguments = @('run', 'e2e', '--')
+          if ($env:E2E_SCENARIO) { $arguments += $env:E2E_SCENARIO }
+          npm @arguments
+          exit $LASTEXITCODE
+      - name: Embedded player suite
+        if: ${{ !cancelled() && steps.ready.outcome == 'success' && inputs.suite != 'external' }}
+        run: |
+          $arguments = @('run', 'e2e', '--', '--embedded')
+          if ($env:E2E_SCENARIO) { $arguments += $env:E2E_SCENARIO }
+          npm @arguments
+          exit $LASTEXITCODE
+      - name: Parity verdict (two full suites)
+        if: ${{ !cancelled() && steps.ready.outcome == 'success' && inputs.suite == 'both' && inputs.scenario == '' }}
+        run: |
+          npm run e2e:verdict
+          exit $LASTEXITCODE
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: e2e-windows-${{ inputs.suite }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          path: |
+            tests/e2e/artifacts/
+            tests/e2e/results/

@@ -9,8 +9,150 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { appBinaryFromMetadata, appCommands, appExecutableFromMessages, appIdentity, locateAppBinary, MESSAGE_FORMAT_ARG } from './e2e/app-binary.mjs';
 import { MpvIpc, mpvSocketSnapshot, setScenarioConfigRoot, socketOfScenario } from './e2e/mpv.mjs';
+import { npmCommand, ownedWindowsApps, windowsConfigPaths, windowsPipePaths } from './e2e/windows.mjs';
+import { resultsFileProblems, scenarioProblems, skipOutcome, verdictProblems } from './e2e/scenario-loader.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+const harnessText = (file) => fs.readFileSync(path.join(repoRoot, 'tests/e2e', file), 'utf8');
+
+test('Windows: npm executes its JS CLI and Cargo metadata predicts the exe suffix', () => {
+  const cli = path.join(repoRoot, 'package.json'); // existence only; never executed
+  assert.deepEqual(npmCommand(['run', 'e2e'], { npm_execpath: cli }, 'win32'), {
+    command: process.execPath, args: [cli, 'run', 'e2e'],
+  });
+  assert.throws(() => npmCommand([], {}, 'win32'), /npm_execpath/);
+  assert.deepEqual(npmCommand(['run', 'e2e'], {}, 'linux'), { command: 'npm', args: ['run', 'e2e'] });
+  const manifest = path.join(repoRoot, 'src-tauri/Cargo.toml');
+  const metadata = JSON.stringify({ target_directory: '/target', packages: [{ manifest_path: manifest, targets: [{ kind: ['bin'], name: 'vela' }] }] });
+  assert.equal(appBinaryFromMetadata(metadata, {}, manifest, 'win32'), '/target/debug/vela.exe');
+  assert.equal(appBinaryFromMetadata(metadata, {}, manifest, 'linux'), '/target/debug/vela');
+  assert.match(harnessText('app-binary.mjs'), /build: \{ \.\.\.npmCommand\(BUILD_ARGS\)/);
+});
+
+test('Windows: actual known-folder config is cleared and the existing scenario paths reach it', () => {
+  assert.deepEqual(windowsConfigPaths('C:\\Users\\runner\\AppData\\Roaming'), {
+    root: 'C:\\Users\\runner\\AppData\\Roaming\\vela', config: 'C:\\Users\\runner\\AppData\\Roaming\\vela\\vela\\config',
+  });
+  assert.throws(() => windowsConfigPaths('relative'), /absolute/);
+  const win = harnessText('windows.mjs');
+  assert.match(win, /VELA_E2E_DISPOSABLE_WINDOWS !== '1'/);
+  assert.match(win, /if \(running\.length\) throw/);
+  assert.match(win, /fs\.rmSync\(dirs\.root, \{ recursive: true, force: true \}\)/);
+  assert.match(win, /fs\.symlinkSync\(dirs\.config, path\.join\(configRoot, 'config', 'vela'\), 'junction'\)/);
+  assert.match(harnessText('windows.ps1'), /GetFolderPath\('ApplicationData'\)/);
+  const run = harnessText('run.mjs');
+  assert.ok(run.indexOf('prepareWindowsConfig(configRoot)') < run.indexOf('await scenario.seed'));
+  assert.match(run, /if \(isWindows\) windowsTool\('protect-fixtures'\)/);
+});
+
+test('Windows: pipe ownership requires the located app descended from this driver', () => {
+  const processes = [
+    { pid: 1, parent: 99, exe: 'C:\\driver.exe' },
+    { pid: 2, parent: 1, exe: 'C:\\msedgedriver.exe' },
+    { pid: 3, parent: 2, exe: 'C:\\APP\\vela.exe' },
+    { pid: 4, parent: 2, exe: 'C:\\other\\vela.exe' },
+    { pid: 5, parent: 99, exe: 'C:\\app\\vela.exe' },
+    { pid: 6, parent: 7, exe: 'C:\\app\\vela.exe' },
+    { pid: 7, parent: 6, exe: 'C:\\app\\vela.exe' },
+  ];
+  assert.deepEqual(ownedWindowsApps(processes, 1, 'C:\\app\\vela.exe'), [3]);
+  assert.deepEqual(ownedWindowsApps(processes, 1, 'C:\\app/vela.exe'), [3]);
+  assert.deepEqual(ownedWindowsApps(processes, 1, '\\\\?\\C:\\app\\vela.exe'), [3]);
+  assert.deepEqual(windowsPipePaths(['mpv-plex-3-123-0', 'mpv-plex-5-123-0', 'mpv-3-123-0.sock', 'mpv-plex-3-123-0-junk'], [3]), ['\\\\.\\pipe\\mpv-plex-3-123-0']);
+  assert.match(harnessText('mpv.mjs'), /if \(isWindows\) return windowsMpvPipes\(scenarioConfigRoot\)/);
+  assert.equal(harnessText('run.mjs').split('registerWindowsApp(configRoot, proc.pid, appBinary)').length - 1, 2, 'initial and restarted sessions register the same located executable');
+  assert.match(harnessText('run.mjs'), /if \(isWindows\) forgetWindowsApp\(configRoot\)/);
+});
+
+test('Windows: connection waits count clients, and cleanup kills the driver tree', () => {
+  assert.match(harnessText('helpers.mjs'), /if \(isWindows\) \{\s*await windowsToolAsync\('wait-clients', \[socketPath, connections\]\)/);
+  const ps = harnessText('windows.ps1');
+  assert.match(ps, /\$accepted = \$pipe\.NumberOfServerInstances - 2/);
+  assert.match(ps, /if \(\$accepted -ge \[int\]\$Detail\)/);
+  assert.match(harnessText('windows.mjs'), /'taskkill\.exe', \['\/PID', String\(pid\), '\/T', '\/F'\]/);
+  assert.match(harnessText('run.mjs'), /if \(isWindows\) \{ killWindowsTree\(proc\.pid\); return; \}/);
+});
+
+test('Windows: native desktop, both screenshot kinds, and Windows libmpv preflight are wired', () => {
+  const run = harnessText('run.mjs');
+  assert.match(run, /if \(isWindows\) \{\s*console\.log\('e2e: using the Windows interactive desktop/);
+  assert.match(run, /isWindows \? path\.join\(artifactsRoot, runPlayer\) : artifactsRoot/);
+  assert.match(run, /await windowsToolAsync\('screenshot', \[`\$\{file\}-desktop\.png`\]\)/);
+  assert.match(run, /await driver\.screenshotTo\(`\$\{file\}\.png`\)/);
+  assert.match(harnessText('windows.ps1'), /\$graphics\.CopyFromScreen\(/);
+  assert.match(run, /isWindows \? 'libmpv-2\.dll' : 'libmpv\.so\.2'/);
+  assert.match(run, /runStep\('python', \['-B', 'packaging\/libmpv\/check-libmpv-windows\.py', set\]\)/);
+});
+
+test('Windows: exact WebView2 version and valid Microsoft signature precede driver execution', () => {
+  const ps = harnessText('fetch-driver.ps1');
+  assert.match(ps, /F3017226-FE2A-4295-8BDF-00C3A9A7E4C5/);
+  assert.match(ps, /https:\/\/msedgedriver\.microsoft\.com\/\$version\/edgedriver_win64\.zip/);
+  assert.match(ps, /\$signature\.Status -ne 'Valid'/);
+  assert.match(ps, /O=Microsoft Corporation/);
+  assert.ok(ps.indexOf('Get-AuthenticodeSignature') < ps.indexOf('& $driver --version'));
+  assert.match(ps, /MSEdgeDriver \$\(\[regex\]::Escape\(\$version\)\)/);
+  const run = harnessText('run.mjs');
+  assert.match(run, /nativeDriver = windowsDriver\.driver/);
+  assert.match(run, /WEBVIEW2_BROWSER_EXECUTABLE_FOLDER = windowsDriver\.runtimeDir/);
+  assert.match(run, /\['--native-driver', nativeDriver,/);
+});
+
+test('Windows: private backups and process token checks retain native evidence', () => {
+  const ps = harnessText('windows.ps1');
+  assert.match(ps, /\$acl\.AreAccessRulesProtected -and \$rules\.Count -eq 3/);
+  assert.match(ps, /\$rule\.IdentityReference\.Value -in \$expected/);
+  assert.match(ps, /\$rule\.FileSystemRights -eq \[System\.Security\.AccessControl\.FileSystemRights\]::FullControl/);
+  assert.match(harnessText('windows-native.cs'), /ReadProcessMemory\(process,/);
+  assert.match(harnessText('windows-native.cs'), /throw new Win32Exception\(Marshal\.GetLastWin32Error\(\), "Cannot read the player's process memory"\)/);
+  assert.match(harnessText('scenarios/multiplex.mjs'), /processText\(pid, what\)/);
+  for (const name of ['configrecovery', 'connectionrecovery', 'combinedrecovery', 'recoveryresume']) {
+    assert.match(harnessText(`scenarios/${name}.mjs`), /privateFile\(/);
+  }
+});
+
+test('Windows: platform-specific scenarios keep the same assertions on native equivalents', () => {
+  assert.match(harnessText('scenarios/windowsetting.mjs'), /assert\.equal\(await first\.mpv\.getProp\('screen'\), 0,/);
+  assert.match(harnessText('scenarios/markerbutton.mjs'), /isWindows \? '--ao=null\\n--vo=gpu-next\\n--gpu-api=d3d11' : '--ao=null\\n--vo=x11'/);
+  assert.match(harnessText('windows.mjs'), /embeddedVideoOutput = isWindows \? 'gpu-next' : 'libmpv'/);
+  for (const name of ['embeddedplay', 'embeddedownconfig', 'mpvargs']) {
+    assert.match(harnessText(`scenarios/${name}.mjs`), /processName\(pid\)/);
+    assert.match(harnessText(`scenarios/${name}.mjs`), /embeddedVideoOutput[,)]/);
+  }
+  assert.match(harnessText('scenarios/multiplex.mjs'), /isWindows \? \/\^http:/);
+  for (const name of ['markerpayload', 'cropscript']) assert.match(harnessText(`scenarios/${name}.mjs`), /const socket = fixtureIpcPath\(dir, name\)/);
+});
+
+test('Windows: skip reasons are validated, judged, and never count as parity coverage', () => {
+  const scenario = { name: 'fallback', rows: [], noRows: 'venue-only', skipOnWindows: 'X11 requires Wayland', run() {} };
+  assert.deepEqual(scenarioProblems(scenario, 'fallback'), []);
+  assert.match(scenarioProblems({ ...scenario, skipOnWindows: '' }, 'fallback').join(' '), /non-empty reason/);
+  assert.equal(skipOutcome(scenario, 'external', 'linux'), null);
+  assert.deepEqual(skipOutcome(scenario, 'external', 'win32'), { status: 'skip', reason: scenario.skipOnWindows });
+  const run = (player) => ({ player, platform: 'win32', head: 'commit', full: true, built: true, appBinary: 'C:\\target\\debug\\vela.exe', appBinaryFrom: "cargo's report of this run's build", dirty: false, changedDuringRun: false, finishedAt: '2026-11-16T00:00:00.000Z', scenarios: { fallback: skipOutcome(scenario, player, 'win32') } });
+  const results = { external: run('external'), embedded: run('embedded') };
+  const options = { inventory: [], exemptions: [], knownFailures: [], checkout: { head: 'commit', dirty: false } };
+  assert.deepEqual(resultsFileProblems(results.external, 'external'), []);
+  assert.deepEqual(verdictProblems([scenario], results, options), []);
+  const bad = structuredClone(results);
+  bad.external.scenarios.fallback.reason = 'invented';
+  assert.match(verdictProblems([scenario], bad, options).join(' '), /not the skip/);
+  bad.external.platform = 'linux';
+  assert.match(resultsFileProblems(bad.external, 'external').join(' '), /unsupported platform/);
+  delete bad.external.platform;
+  assert.match(verdictProblems([scenario], bad, options).join(' '), /different platforms/);
+  const claims = { ...scenario, rows: ['1'] };
+  assert.match(verdictProblems([claims], results, { ...options, inventory: [{ id: '1' }] }).join(' '), /row 1 is shown by no scenario/);
+});
+
+test('Windows: workflow runs both suites independently and judges only two full runs', () => {
+  const workflow = fs.readFileSync(path.join(repoRoot, '.github/workflows/e2e-windows.yml'), 'utf8');
+  for (const required of ['workflow_dispatch:', 'runs-on: windows-latest', 'actions: read', '--workflow ci.yml --branch main --status success', 'gh run download', '--name libmpv-windows-x86_64', 'bash scripts/build-libmpv-windows.sh --container', 'choco install mpv ffmpeg openssl', 'npm run e2e:verdict', 'tests/e2e/artifacts/', 'tests/e2e/results/']) assert.ok(workflow.includes(required), required);
+  assert.match(workflow, /!cancelled\(\) && steps\.ready\.outcome == 'success' && inputs\.suite != 'external'/);
+  assert.match(workflow, /inputs\.suite == 'both' && inputs\.scenario == ''/);
+  assert.doesNotMatch(workflow, /continue-on-error|contents: write|actions: write/);
+});
 
 // Which app binary the runner starts (review finding pa-6). A run that builds
 // takes the executable from Cargo's own report of that build; a run with
@@ -426,6 +568,7 @@ test("the runner registers and records locateAppBinary's result, and builds noth
     ['let located;', 1],
     ['located = await locateAppBinary({ skipBuild, env: process.env, commands: appCommands(repoRoot) });', 1],
     ['setRunApp(located);', 1],
+    ['if (isWindows) registerWindowsApp(configRoot, proc.pid, appBinary);', 2],
     ['const { appBinary, built, appBinaryFrom } = located;', 1],
     ['if (!fs.existsSync(appBinary)) {', 1],
     [

@@ -27,6 +27,7 @@ import { MpvIpc, mpvSocketSnapshot, waitForNewMpvSocket } from '../mpv.mjs';
 import { holdsFor, mockSource, mpvInput, openLibraryGrid, pollUntil, seedConfig, stopPlayAsUser } from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
 import { shown } from '../proof.mjs';
+import { isWindows } from '../windows.mjs';
 
 const TICKS_PER_MS = 10_000;
 const INTRO_END = 12;
@@ -107,7 +108,7 @@ export default {
     // default output (gpu-next) did not come up within 15 s on that display
     // (Xvfb, no GPU); `x11` draws the same OSD in software.
     seedConfig(configRoot, [mockSource(mock)], {
-      mpv_extra_args: '--ao=null\n--vo=x11',
+      mpv_extra_args: isWindows ? '--ao=null\n--vo=gpu-next\n--gpu-api=d3d11' : '--ao=null\n--vo=x11',
       skip_intros: 'button',
       skip_credits: 'off',
       skip_commercials: 'off',

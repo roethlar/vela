@@ -8,6 +8,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { isWindows, windowsAppPids } from '../windows.mjs';
 import { pollUntil, openLibraryGrid, goHome, playAndQuit, makeClips, mockSource, seedConfig } from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
 import { shown } from '../proof.mjs';
@@ -118,7 +119,7 @@ export default {
     // a leaked twin from another scenario) must neither satisfy nor break
     // the restart check.
     const scopedPids = () =>
-      execSync('pgrep -x vela || true')
+      isWindows ? windowsAppPids(configRoot).map(String) : execSync('pgrep -x vela || true')
         .toString()
         .trim()
         .split('\n')

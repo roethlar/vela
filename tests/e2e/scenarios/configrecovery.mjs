@@ -4,6 +4,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { privateFile } from '../windows.mjs';
 import { createMockPlexTls, mockPlexSource, startMockPlex } from '../mockplex.mjs';
 
 let tls;
@@ -109,8 +110,8 @@ export default {
       'the renamed settings file must be byte-identical',
     );
     assert.equal(
-      fs.statSync(path.join(files.dir, backups[0])).mode & 0o777,
-      0o600,
+      privateFile(path.join(files.dir, backups[0])),
+      true,
       'the renamed settings file must be private',
     );
     assert.doesNotThrow(() => JSON.parse(fs.readFileSync(files.config, 'utf8')));

@@ -15,12 +15,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pollUntil } from '../helpers.mjs';
 import { MpvIpc } from '../mpv.mjs';
+import { fixtureIpcPath } from '../windows.mjs';
 
 const PAYLOAD = JSON.stringify({ markers: [{ kind: 'intro', start_ms: 1000, end_ms: 2000 }] });
 
 // Start an idle mpv with the script, ask whether it loaded any marker, stop it.
 async function scriptLoadsMarkers({ script, dir, name, option, environment }) {
-  const socket = path.join(dir, `${name}.sock`);
+  const socket = fixtureIpcPath(dir, name);
   const env = { ...process.env };
   delete env.VELA_MARKERS_PAYLOAD;
   if (environment) env.VELA_MARKERS_PAYLOAD = environment;
@@ -59,7 +60,7 @@ async function scriptLoadsMarkers({ script, dir, name, option, environment }) {
 // never publishes an OSD size: a drawn button can never be shown, and only
 // the quiet arm of `draw=no` can arm the marker.
 async function armsWithoutWindow({ script, dir, name, draw }) {
-  const socket = path.join(dir, `${name}.sock`);
+  const socket = fixtureIpcPath(dir, name);
   const payload = path.join(dir, `${name}.json`);
   fs.writeFileSync(payload, PAYLOAD, { mode: 0o600 });
   const env = { ...process.env };

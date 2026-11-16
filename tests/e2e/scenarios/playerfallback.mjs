@@ -101,6 +101,7 @@ async function waitForHome(driver) {
 
 export default {
   name: 'playerfallback',
+  skipOnWindows: 'Tests the X11-only "needs a Wayland session" fallback notice; Windows supports embedding on its desktop. embeddedlatestart tests startup fallback on Windows.',
   onlyPlayer: 'external',
   onlyPlayerWhy:
     'its premise is a venue where the embedded player cannot run (X11), so the play goes to the external player; in a run of the embedded player there is nothing to fall back from',

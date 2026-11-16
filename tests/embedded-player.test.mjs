@@ -1032,14 +1032,14 @@ test('the shipped library is tested itself, in every full embedded E2E run', () 
   // tests, whatever the variable gave.
   assert.match(
     runner,
-    /\n  const set = path\.resolve\(repoRoot, process\.env\.VELA_LIBMPV_DIR \?\? '\.libmpv\/out\/libmpv'\);\n  if \(!fs\.existsSync\(path\.join\(set, 'libmpv\.so\.2'\)\)\) \{/,
+    /\n  const set = path\.resolve\(repoRoot, process\.env\.VELA_LIBMPV_DIR \?\? \(isWindows \? '\.libmpv\/out\/libmpv-windows-x86_64' : '\.libmpv\/out\/libmpv'\)\);\n  if \(!fs\.existsSync\(path\.join\(set, isWindows \? 'libmpv-2\.dll' : 'libmpv\.so\.2'\)\)\) \{/,
   );
   // Reached on every full run: the condition is the whole statement that
   // follows the library check, with nothing but comments between.
   assert.match(
     runner,
-    /\n  displayEnv = \{ VELA_LIBMPV_DIR: set \};\n(?:  \/\/[^\n]*\n)*  if \(nameFilter\.length === 0\) \{\n    runStep\('npm', \['run', 'test:libmpv'\], \{ VELA_LIBMPV_DIR: set \}\);\n  \} else \{/,
+    /\n  displayEnv = \{ VELA_LIBMPV_DIR: set \};\n(?:  \/\/[^\n]*\n)*  if \(nameFilter\.length === 0\) \{\n    if \(isWindows\) \{\n(?:      \/\/[^\n]*\n)*      console\.log\('[^']+'\);\n      runStep\('python', \['-B', 'packaging\/libmpv\/check-libmpv-windows\.py', set\]\);\n    \} else \{\n      runStep\('npm', \['run', 'test:libmpv'\], \{ VELA_LIBMPV_DIR: set \}\);\n    \}\n  \} else \{/,
   );
-  assert.match(runner, /function runStep\(cmd, args, env = \{\}\) \{\s+const res = spawnSync\(cmd, args, \{ stdio: 'inherit', cwd: repoRoot, env: \{ \.\.\.process\.env, \.\.\.env \} \}\);\s+if \(res\.status !== 0\) \{[\s\S]{0,80}process\.exit\(1\);/);
+  assert.match(runner, /function runStep\(cmd, args, env = \{\}\) \{\s+if \(isWindows && cmd === 'npm'\) \(\{ command: cmd, args \} = npmCommand\(args\)\);\s+const res = spawnSync\(cmd, args, \{ stdio: 'inherit', cwd: repoRoot, env: \{ \.\.\.process\.env, \.\.\.env \} \}\);\s+if \(res\.status !== 0\) \{[\s\S]{0,80}process\.exit\(1\);/);
   assert.match(read('tests/e2e/README.md'), /`npm run test:libmpv`/);
 });

@@ -4,6 +4,7 @@
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
+import { isWindows, windowsMpvPipes } from './windows.mjs';
 
 // The scenario whose plays the sockets below may belong to: the runner sets
 // its throwaway config root before each scenario (run.mjs).
@@ -38,6 +39,7 @@ export function socketOfScenario(name, configRoot, procRoot = '/proc') {
 
 function listMpvSockets() {
   if (!scenarioConfigRoot) throw new Error('mpv sockets: no scenario config root set (run.mjs sets it)');
+  if (isWindows) return windowsMpvPipes(scenarioConfigRoot);
   const sockets = [];
   for (const entry of fs.readdirSync('/tmp')) {
     if (!entry.startsWith('vela-')) continue;

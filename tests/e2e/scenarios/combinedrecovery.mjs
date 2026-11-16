@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { privateFile } from '../windows.mjs';
 
 let seeded;
 
@@ -76,7 +77,7 @@ export default {
       name.startsWith('config.invalid-') && name.endsWith('.json'));
     assert.equal(backups.length, 1);
     assert.deepEqual(fs.readFileSync(path.join(files.dir, backups[0])), seeded.config);
-    assert.equal(fs.statSync(path.join(files.dir, backups[0])).mode & 0o777, 0o600);
+    assert.equal(privateFile(path.join(files.dir, backups[0])), true);
     assert.doesNotThrow(() => JSON.parse(fs.readFileSync(files.config, 'utf8')));
     assert.ok(!fs.existsSync(files.connections), 'legacy recovery must not create connections');
     assert.deepEqual(fs.readFileSync(files.playlists), seeded.playlists);

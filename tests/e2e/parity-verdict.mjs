@@ -39,6 +39,12 @@ const scenarios = await loadScenarios(path.join(e2eDir, 'scenarios'));
 for (const player of PLAYERS) {
   const run = results[player];
   if (run) console.log(`${player}: ${run.full ? 'full' : 'NAMED'} run of ${run.head}${run.dirty ? ' (DIRTY)' : ''}${run.built === true ? '' : ' (NOT BUILT BY THE RUN)'}, finished ${run.finishedAt}`);
+  if (run?.platform) {
+    console.log(`${player}: platform ${run.platform}`);
+    for (const [name, result] of Object.entries(run.scenarios ?? {})) {
+      if (result.status === 'skip') console.log(`${player}: SKIP ${name}: ${result.reason}`);
+    }
+  }
 }
 for (const k of KNOWN_FAILURES) {
   console.log(`known product failure: ${k.scenario} in the ${k.player} player: ${results[k.player]?.scenarios?.[k.scenario]?.status ?? 'not run'}`);

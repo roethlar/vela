@@ -16,6 +16,7 @@ import {
 } from '../helpers.mjs';
 import { createMockPlexTls, mockPlexSource, startMockPlex } from '../mockplex.mjs';
 import { shown } from '../proof.mjs';
+import { isWindows, processText } from '../windows.mjs';
 import { plexStopProblems } from '../judge.mjs';
 
 const TITLE = 'Shared Plex Movie';
@@ -199,7 +200,7 @@ export default {
     );
     assert.match(
       artworkSrc,
-      /^vela-artwork:\/\/localhost\//,
+      isWindows ? /^http:\/\/vela-artwork\.localhost\// : /^vela-artwork:\/\/localhost\//,
       'the webview receives only Vela artwork protocol identity',
     );
     assert.ok(!/[?&]X-Plex-Token=/i.test(artworkSrc), 'the artwork URL must not contain a token');
@@ -263,7 +264,7 @@ export default {
         // There row 7 rests on the path and title above and the wire below.
         const pid = await mpv.getProp('pid');
         for (const what of ['cmdline', 'environ']) {
-          const text = fs.readFileSync(`/proc/${pid}/${what}`, 'utf8');
+          const text = processText(pid, what);
           assert.ok(!text.includes('plex-token-'), `the player's ${what} must carry no token`);
           assert.ok(!/x-plex-token/i.test(text), `the player's ${what} must carry no token header`);
         }

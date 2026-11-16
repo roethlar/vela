@@ -20,6 +20,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
+import { npmCommand } from './windows.mjs';
 
 // The directory, under the repository root, that holds the app's package. It
 // is where `tauri build` runs `cargo build` (Cargo reads its configuration
@@ -43,7 +44,7 @@ export const METADATA_ARGS = ['metadata', '--format-version', '1', '--no-deps', 
 export function appCommands(repoRoot) {
   return {
     appManifest: path.join(repoRoot, CARGO_DIR, 'Cargo.toml'),
-    build: { command: 'npm', args: BUILD_ARGS, cwd: repoRoot },
+    build: { ...npmCommand(BUILD_ARGS), cwd: repoRoot },
     metadata: { command: 'cargo', args: METADATA_ARGS, cwd: path.join(repoRoot, CARGO_DIR) },
   };
 }
@@ -250,7 +251,7 @@ function predictAppBinary(commands, env) {
 // means to the file system, as it does to Cargo. Throws, saying why, when the
 // answer does not say, or when CARGO_BUILD_TARGET is set (the binary is then
 // under <target_directory>/<target>/debug/).
-export function appBinaryFromMetadata(metadataText, env, appManifest) {
+export function appBinaryFromMetadata(metadataText, env, appManifest, platform = process.platform) {
   let metadata;
   try {
     metadata = JSON.parse(metadataText);
@@ -274,5 +275,5 @@ export function appBinaryFromMetadata(metadataText, env, appManifest) {
   if (bins.length !== 1 || typeof bins[0].name !== 'string' || bins[0].name === '' || bins[0].name.includes('/')) {
     throw new Error(`Cargo's metadata names ${bins.length} binary targets of the app's package, not one`);
   }
-  return `${target}/debug/${bins[0].name}`;
+  return `${target}/debug/${bins[0].name}${platform === 'win32' ? '.exe' : ''}`;
 }

@@ -4,6 +4,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { privateFile } from '../windows.mjs';
 
 let seeded;
 
@@ -78,7 +79,7 @@ export default {
     const held = backups(files.dir);
     assert.equal(held.length, 1, 'connection recovery must create exactly one invalid backup');
     assert.deepEqual(fs.readFileSync(path.join(files.dir, held[0])), seeded.connections);
-    assert.equal(fs.statSync(path.join(files.dir, held[0])).mode & 0o777, 0o600);
+    assert.equal(privateFile(path.join(files.dir, held[0])), true);
     assert.deepEqual(JSON.parse(fs.readFileSync(files.connections, 'utf8')), { sources: [] });
     assert.deepEqual(fs.readFileSync(files.config), seeded.config);
     assert.deepEqual(fs.readFileSync(files.playlists), seeded.playlists);

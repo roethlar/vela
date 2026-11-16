@@ -16,6 +16,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { holdsFor, pollUntil } from '../helpers.mjs';
 import { MpvIpc } from '../mpv.mjs';
+import { fixtureIpcPath, isWindows } from '../windows.mjs';
 
 // A 1280x720 frame whose picture is 1280x544, with black bars of 88 rows above
 // and below: the crop the script must find.
@@ -40,7 +41,7 @@ function makeClip(dir, name, { bars, tenBit = false, pq = false }) {
 }
 
 async function startMpv({ script, dir, name, clip, auto }) {
-  const socket = path.join(dir, `${name}.sock`);
+  const socket = fixtureIpcPath(dir, name);
   const args = [
     // Copy-back decoding where the machine has a hardware decoder: there a
     // crop with nothing after it halts playback every time, so the checks
@@ -50,6 +51,7 @@ async function startMpv({ script, dir, name, clip, auto }) {
     // With no window, what mpv would show on screen goes to its terminal,
     // which is how a message from the script is read below.
     '--term-osd=force',
+    ...(isWindows ? ['--terminal=yes'] : []),
     `--input-ipc-server=${socket}`,
     `--script=${script}`,
     '--script-opts-append=vela-crop-delay=1',

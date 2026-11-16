@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { privateFile } from '../windows.mjs';
 
 let seeded;
 
@@ -95,7 +96,7 @@ export default {
 
     assert.ok(!fs.existsSync(files.marker), 'successful resume must remove the marker');
     assert.deepEqual(fs.readFileSync(files.backup), seeded.backup);
-    assert.equal(fs.statSync(files.backup).mode & 0o777, 0o600);
+    assert.equal(privateFile(files.backup), true);
     assert.doesNotThrow(() => JSON.parse(fs.readFileSync(files.config, 'utf8')));
     assert.deepEqual(fs.readFileSync(files.connections), seeded.connections);
     assert.deepEqual(fs.readFileSync(files.playlists), seeded.playlists);

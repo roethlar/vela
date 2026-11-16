@@ -25,6 +25,7 @@ import path from 'node:path';
 import { MpvIpc, mpvSocketSnapshot } from '../mpv.mjs';
 import { makeClips, mockSource, openDetailAndPlay, openLibraryGrid, pollUntil, seedConfig } from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
+import { processName } from '../windows.mjs';
 
 const NOTICE = 'Embedded player: could not start';
 let mock;
@@ -58,7 +59,7 @@ async function playerAt(socketPath) {
   try {
     mpv = await MpvIpc.connect(socketPath, { timeoutMs: 300 });
     const pid = await mpv.getProp('pid');
-    return { mpv, program: fs.readFileSync(`/proc/${pid}/comm`, 'utf8').trim() };
+    return { mpv, program: processName(pid) };
   } catch {
     mpv?.close();
     return null;

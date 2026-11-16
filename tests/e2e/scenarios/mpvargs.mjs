@@ -34,6 +34,7 @@ import {
 } from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
 import { shown } from '../proof.mjs';
+import { embeddedVideoOutput, processName } from '../windows.mjs';
 
 let mock;
 
@@ -86,12 +87,12 @@ export default {
       );
       // The play is in the player this run is about.
       const pid = await mpv.getProp('pid');
-      const program = fs.readFileSync(`/proc/${pid}/comm`, 'utf8').trim();
+      const program = processName(pid);
       if (runPlayer === 'embedded') {
         assert.equal(program, 'vela', 'the embedded player plays inside Vela');
         assert.equal(
           await pollUntil(() => mpv.getProp('current-vo').catch(() => null), 'mpv to set up its video output'),
-          'libmpv',
+          embeddedVideoOutput,
           'the embedded player draws through the library',
         );
       } else {

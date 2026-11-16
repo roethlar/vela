@@ -39,12 +39,14 @@ import {
 } from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
 import { shown } from '../proof.mjs';
+import { isWindows, windowsTool } from '../windows.mjs';
 
 let mock;
 
 // The processes, of anyone's, whose command line names the play's socket:
 // the external player's mpv is started with it (--input-ipc-server).
 function processesNaming(socketPath) {
+  if (isWindows) return windowsTool('processes').filter((p) => p.cmdline?.includes(socketPath) && !processEnded(p.pid)).map((p) => String(p.pid));
   return fs
     .readdirSync('/proc')
     .filter((entry) => /^\d+$/.test(entry))

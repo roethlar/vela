@@ -18,6 +18,7 @@ import {
   velaConnected,
 } from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
+import { isWindows } from '../windows.mjs';
 
 let mock;
 
@@ -182,18 +183,25 @@ export default {
       'nothing but the stored window can make the first play of a run fullscreen',
     );
     assert.equal(await first.mpv.getProp('window-maximized'), false);
-    const firstScreen = await first.mpv.getProp('screen-name');
-    assert.notEqual(
-      firstScreen,
-      'no-such-screen',
-      'a stored screen that is not connected must not be asked for',
-    );
-    // ...and the screen holding Vela's window is asked for by name instead.
-    // This venue has one screen, so which screen cannot be told apart here;
-    // what is checked is that the play is sent to a screen by name and not
-    // left with none.
-    assert.equal(typeof firstScreen, 'string');
-    assert.notEqual(firstScreen, '', "the screen holding Vela's window is asked for by name");
+    if (isWindows) {
+      // Windows mpv selects a monitor by numeric index, never screen-name.
+      // This hosted venue has one monitor; asking for 0 proves Vela selected
+      // it explicitly rather than leaving mpv's default (-1).
+      assert.equal(await first.mpv.getProp('screen'), 0, "the screen holding Vela's window is explicitly selected");
+    } else {
+      const firstScreen = await first.mpv.getProp('screen-name');
+      assert.notEqual(
+        firstScreen,
+        'no-such-screen',
+        'a stored screen that is not connected must not be asked for',
+      );
+      // ...and the screen holding Vela's window is asked for by name instead.
+      // This venue has one screen, so which screen cannot be told apart here;
+      // what is checked is that the play is sent to a screen by name and not
+      // left with none.
+      assert.equal(typeof firstScreen, 'string');
+      assert.notEqual(firstScreen, '', "the screen holding Vela's window is asked for by name");
+    }
     assert.equal(await first.mpv.getProp('geometry'), '800x450', 'the stored size');
     // It stays fullscreen to the end, so it never shows a windowed size of
     // its own (and with no window here it reports 0x0).

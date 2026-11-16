@@ -14,11 +14,12 @@ import { appCommands, locateAppBinary } from './app-binary.mjs';
 import { Driver, setRunApp } from './driver.mjs';
 import { setScenarioConfigRoot } from './mpv.mjs';
 import { beginProof, endProof } from './proof.mjs';
-import { loadScenarios, proofProblems, recordedTree, resultsFileProblems, runsIn } from './scenario-loader.mjs';
+import { loadScenarios, proofProblems, recordedTree, resultsFileProblems, skipOutcome } from './scenario-loader.mjs';
+import { forgetWindowsApp, isWindows, killWindowsTree, npmCommand, prepareWindowsConfig, registerWindowsApp, stopWindowsApps, windowsTool, windowsToolAsync } from './windows.mjs';
 
 const e2eDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(e2eDir, '../..');
-const artifactsDir = path.join(e2eDir, 'artifacts');
+const artifactsRoot = path.join(e2eDir, 'artifacts');
 const resultsDir = path.join(e2eDir, 'results');
 const driverPort = Number(process.env.VELA_E2E_PORT ?? 4444);
 const driverUrl = `http://127.0.0.1:${driverPort}`;
@@ -31,6 +32,8 @@ const nameFilter = argv.filter((a) => !a.startsWith('--'));
 // the venue below is a Wayland compositor, which that player needs.
 if (argv.includes('--embedded')) process.env.VELA_E2E_PLAYER = 'embedded';
 const runPlayer = process.env.VELA_E2E_PLAYER || 'external';
+// Keep both Windows suites' screenshots/logs; Linux's artifact layout is unchanged.
+const artifactsDir = isWindows ? path.join(artifactsRoot, runPlayer) : artifactsRoot;
 if (!['external', 'embedded'].includes(runPlayer)) {
   console.error(`e2e: unknown player "${runPlayer}" (VELA_E2E_PLAYER is external or embedded)`);
   process.exit(1);
@@ -56,6 +59,7 @@ for (const [sig, code] of Object.entries({ SIGHUP: 129, SIGINT: 130, SIGTERM: 14
 }
 
 function runStep(cmd, args, env = {}) {
+  if (isWindows && cmd === 'npm') ({ command: cmd, args } = npmCommand(args));
   const res = spawnSync(cmd, args, { stdio: 'inherit', cwd: repoRoot, env: { ...process.env, ...env } });
   if (res.status !== 0) {
     console.error(`e2e: \`${cmd} ${args.join(' ')}\` failed`);
@@ -64,8 +68,8 @@ function runStep(cmd, args, env = {}) {
 }
 
 function resolveTauriDriver() {
-  for (const dir of [...(process.env.PATH ?? '').split(':'), path.join(os.homedir(), '.cargo/bin')]) {
-    const p = path.join(dir, 'tauri-driver');
+  for (const dir of [...(process.env.PATH ?? '').split(path.delimiter), path.join(os.homedir(), '.cargo/bin')]) {
+    const p = path.join(dir, isWindows ? 'tauri-driver.exe' : 'tauri-driver');
     if (dir && fs.existsSync(p)) return p;
   }
   console.error('e2e: tauri-driver not found — install with `cargo install tauri-driver`');
@@ -94,11 +98,13 @@ async function waitUntil(fn, what, timeoutMs = 10000) {
 async function runScenario(scenario, tauriDriverBin) {
   let proof = { shown: [], routes: [] };
   const configRoot = fs.mkdtempSync(path.join(os.tmpdir(), `vela-e2e-${scenario.name}-`));
+  if (isWindows) prepareWindowsConfig(configRoot);
   // A play's socket is the scenario's only when its app made it (mpv.mjs).
   setScenarioConfigRoot(configRoot);
   // The app reads XDG_CONFIG_HOME=<configRoot>/config, so a seeded config
   // file belongs at <configRoot>/config/vela/config.json.
   if (scenario.seed) await scenario.seed({ configRoot, repoRoot });
+  if (isWindows) windowsTool('protect-fixtures');
   const scenarioEnv = scenario.environment
     ? await scenario.environment({ configRoot, repoRoot })
     : {};
@@ -124,7 +130,7 @@ async function runScenario(scenario, tauriDriverBin) {
   // WebKitWebDriver child tauri-driver spawns.
   const proc = spawn(
     tauriDriverBin,
-    ['--native-driver', path.join(e2eDir, 'wkdriver-wrapper.sh'), '--port', String(driverPort)],
+    ['--native-driver', nativeDriver, '--port', String(driverPort)],
     {
       cwd: repoRoot,
       env: {
@@ -135,10 +141,12 @@ async function runScenario(scenario, tauriDriverBin) {
       },
       stdio: ['ignore', logFd, logFd],
       detached: true,
+      ...(isWindows ? { windowsHide: true } : {}),
     },
   );
   const killTree = () => {
     try {
+      if (isWindows) { killWindowsTree(proc.pid); return; }
       process.kill(-proc.pid, 'SIGTERM');
     } catch {}
   };
@@ -149,13 +157,17 @@ async function runScenario(scenario, tauriDriverBin) {
   try {
     await waitUntil(driverListening, `tauri-driver on :${driverPort}`);
     await driver.newSession();
+    if (isWindows) registerWindowsApp(configRoot, proc.pid, appBinary);
     beginProof();
     await scenario.run({
       driver,
       repoRoot,
       configRoot,
-      screenshot: (name) =>
-        driver.screenshotTo(path.join(artifactsDir, `${scenario.name}-${name}.png`)),
+      screenshot: async (name) => {
+        const file = path.join(artifactsDir, `${scenario.name}-${name}`);
+        if (isWindows) await windowsToolAsync('screenshot', [`${file}-desktop.png`]);
+        await driver.screenshotTo(`${file}.png`);
+      },
       // Relaunch the app on the same throwaway config (restart-persistence
       // scenarios). WebKitWebDriver spawns a fresh app per session. The
       // optional `between` hook runs while the app is down — the only safe
@@ -164,8 +176,10 @@ async function runScenario(scenario, tauriDriverBin) {
         // Exit-path scenarios deliberately close the app from inside the
         // webview, so the old WebDriver session may already be gone.
         await driver.deleteSession().catch(() => {});
+        if (isWindows) stopWindowsApps(configRoot);
         if (between) await between();
         await driver.newSession();
+        if (isWindows) registerWindowsApp(configRoot, proc.pid, appBinary);
       },
     });
     // What it reached must be what it declares (proof.mjs).
@@ -176,13 +190,20 @@ async function runScenario(scenario, tauriDriverBin) {
     }
     return { err: null, proof };
   } catch (err) {
+    if (isWindows) {
+      try { await windowsToolAsync('screenshot', [path.join(artifactsDir, `${scenario.name}-failure-desktop.png`)]); }
+      catch (captureError) { console.error(`e2e: failure desktop capture: ${captureError.message}`); }
+      await driver.screenshotTo(path.join(artifactsDir, `${scenario.name}-failure.png`)).catch(() => {});
+    }
     return { err, proof };
   } finally {
     endProof();
     if (runCleanup) await runCleanup().catch(() => {});
     if (runCleanup) activeCleanups.delete(runCleanup);
     await driver.deleteSession().catch(() => {});
+    if (isWindows) stopWindowsApps(configRoot);
     killTree();
+    if (isWindows) forgetWindowsApp(configRoot);
     activeKills.delete(killTree);
     process.removeListener('exit', killTree);
     fs.closeSync(logFd);
@@ -242,7 +263,22 @@ if (await driverListening()) {
   process.exit(1);
 }
 
-runStep(path.join(e2eDir, 'fetch-driver.sh'), []);
+let nativeDriver = path.join(e2eDir, 'wkdriver-wrapper.sh');
+let windowsDriver;
+if (isWindows) {
+  const fetched = spawnSync('pwsh.exe', ['-NoProfile', '-NonInteractive', '-File', path.join(e2eDir, 'fetch-driver.ps1')], {
+    cwd: repoRoot, encoding: 'utf8', timeout: 180000,
+  });
+  if (fetched.error || fetched.status !== 0) throw new Error(`Edge driver setup: ${fetched.error?.message ?? fetched.stderr}`);
+  windowsDriver = JSON.parse(fetched.stdout.trim());
+  nativeDriver = windowsDriver.driver;
+  // Pin this session to the runtime whose version was checked, even if an
+  // Evergreen update installs another runtime during the two suites.
+  process.env.WEBVIEW2_BROWSER_EXECUTABLE_FOLDER = windowsDriver.runtimeDir;
+  console.log(`e2e: WebView2 and signed Microsoft Edge WebDriver ${windowsDriver.version}`);
+} else {
+  runStep(path.join(e2eDir, 'fetch-driver.sh'), []);
+}
 
 // The app binary (review finding pa-6; see the app-binary module). A run that builds
 // makes the debug build (`tauri build --debug --no-bundle`, which embeds the
@@ -271,6 +307,7 @@ console.log(`e2e: running ${appBinary} (from ${appBinaryFrom})`);
 
 fs.rmSync(artifactsDir, { recursive: true, force: true });
 fs.mkdirSync(artifactsDir, { recursive: true });
+if (isWindows) fs.writeFileSync(path.join(artifactsDir, 'webdriver.json'), JSON.stringify(windowsDriver, null, 2));
 
 // Default to a private Xvfb display: on the live Wayland session a test
 // window that opens unfocused/occluded stops getting frame callbacks and
@@ -285,10 +322,10 @@ if (runPlayer === 'embedded') {
   // repository root, where it is checked here, and handed on whole: the
   // app and the library tests (which cargo runs from src-tauri/) would each
   // read it from somewhere else.
-  const set = path.resolve(repoRoot, process.env.VELA_LIBMPV_DIR ?? '.libmpv/out/libmpv');
-  if (!fs.existsSync(path.join(set, 'libmpv.so.2'))) {
+  const set = path.resolve(repoRoot, process.env.VELA_LIBMPV_DIR ?? (isWindows ? '.libmpv/out/libmpv-windows-x86_64' : '.libmpv/out/libmpv'));
+  if (!fs.existsSync(path.join(set, isWindows ? 'libmpv-2.dll' : 'libmpv.so.2'))) {
     console.error(
-      `e2e: no libmpv set at ${set} — build one with scripts/build-libmpv.sh --container, or point VELA_LIBMPV_DIR at one`,
+      `e2e: no libmpv set at ${set} — build one with ${isWindows ? 'scripts/build-libmpv-windows.sh --container (on Linux)' : 'scripts/build-libmpv.sh --container'}, or point VELA_LIBMPV_DIR at one`,
     );
     process.exit(1);
   }
@@ -300,12 +337,23 @@ if (runPlayer === 'embedded') {
   // target). Every full run of this player runs them first; a failure, or a
   // set they cannot load, fails the run.
   if (nameFilter.length === 0) {
-    runStep('npm', ['run', 'test:libmpv'], { VELA_LIBMPV_DIR: set });
+    if (isWindows) {
+      // The HDR/render-API Rust tests are cfg(linux), and would run zero
+      // tests here. Use CI's real Windows DLL load/decode/EOF probe instead.
+      console.log('e2e: Windows libmpv load/play/EOF probe (Linux HDR/render-API tests do not compile on Windows)');
+      runStep('python', ['-B', 'packaging/libmpv/check-libmpv-windows.py', set]);
+    } else {
+      runStep('npm', ['run', 'test:libmpv'], { VELA_LIBMPV_DIR: set });
+    }
   } else {
-    console.log('e2e: the libmpv tests run in a full embedded run (npm run test:libmpv runs them alone)');
+    console.log(isWindows
+      ? 'e2e: the Windows DLL load/play/EOF probe runs in a full embedded run'
+      : 'e2e: the libmpv tests run in a full embedded run (npm run test:libmpv runs them alone)');
   }
 }
-if (!process.env.VELA_E2E_HEADED && runPlayer === 'embedded') {
+if (isWindows) {
+  console.log('e2e: using the Windows interactive desktop (no Xvfb/weston)');
+} else if (!process.env.VELA_E2E_HEADED && runPlayer === 'embedded') {
   // A private, headless Wayland compositor: Xvfb is X11, where the embedded
   // player cannot run. It draws with the GPU (the web view and the video
   // both need that) and shows nothing on any screen.
@@ -375,7 +423,8 @@ for (const scenario of scenarios) {
   // (see README.md). In a run of the other player the scenario is skipped by
   // name, never silently; asked for by name, it fails. (The loader has
   // already refused an `onlyPlayer` that names no player.)
-  if (!runsIn(scenario, runPlayer)) {
+  const skip = skipOutcome(scenario, runPlayer, process.platform);
+  if (skip) {
     const needs =
       scenario.onlyPlayer === 'external'
         ? 'needs a run of the external player (without --embedded)'
@@ -383,12 +432,12 @@ for (const scenario of scenarios) {
     if (nameFilter.includes(scenario.name)) {
       failures += 1;
       console.log('FAIL');
-      console.error(`e2e: ${scenario.name} ${needs}`);
+      console.error(`e2e: ${scenario.name} ${skip.reason ?? needs}`);
     } else {
       skipped += 1;
-      console.log(`SKIP (${needs})`);
+      console.log(`SKIP (${skip.reason ?? needs})`);
     }
-    outcomes[scenario.name] = { status: 'skip' };
+    outcomes[scenario.name] = skip;
     continue;
   }
   const { err, proof } = await runScenario(scenario, tauriDriverBin);
@@ -415,6 +464,7 @@ if (!live) {
     JSON.stringify(
       {
         player: runPlayer,
+        ...(isWindows ? { platform: 'win32' } : {}),
         full: nameFilter.length === 0,
         // Whether this run built the app it ran: it ran the build, and
         // started the executable Cargo reported for that build (above).

@@ -10,6 +10,7 @@ import path from 'node:path';
 import { MpvIpc, mpvSocketSnapshot, waitForNewMpvSocket } from './mpv.mjs';
 import { testOnlyRoute } from './proof.mjs';
 import { acceptedConnections } from './judge.mjs';
+import { isWindows, processAlive, windowsAppPids, windowsToolAsync } from './windows.mjs';
 
 // Generate 10s test clips into <configRoot>/media; returns the dir. With
 // withTracks, make 60s clips with two named audio tracks and one subtitle
@@ -127,6 +128,10 @@ export async function velaConnected(socketPath, connections, {
   intervalMs = 20,
 } = {}) {
   assert.ok(Number.isInteger(connections) && connections > 0, 'connections must be a positive integer');
+  if (isWindows) {
+    await windowsToolAsync('wait-clients', [socketPath, connections]);
+    return;
+  }
   await pollUntil(
     () => acceptedConnections(readProcNetUnix(), socketPath) >= connections,
     `mpv at ${socketPath} to accept ${connections} connections (Vela and the scenario)`,
@@ -280,6 +285,7 @@ export function socketAccepting(socketPath) {
 // Whether process `pid` has ended: it is gone, or it is a zombie waiting to be
 // reaped (it runs nothing any more).
 export function processEnded(pid) {
+  if (isWindows) return !processAlive(pid);
   try {
     const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
     // The state follows the command name, which is in parentheses.
@@ -293,6 +299,7 @@ export function processEnded(pid) {
 // the scenario's own XDG_CONFIG_HOME (a Vela the user runs, or one of another
 // scenario, never counts).
 export function scenarioAppPids(configRoot) {
+  if (isWindows) return windowsAppPids(configRoot);
   const mine = `XDG_CONFIG_HOME=${path.join(configRoot, 'config')}\0`;
   return fs
     .readdirSync('/proc')

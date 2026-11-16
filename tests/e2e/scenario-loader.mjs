@@ -12,7 +12,7 @@ import { EXEMPTIONS, INVENTORY, KNOWN_FAILURES, PLAYERS, ROW_IDS, SPLITS } from 
 import { TEST_ONLY_ROUTES } from './proof.mjs';
 
 const FUNCTION_KEYS = ['seed', 'environment', 'cleanup', 'run'];
-const DATA_KEYS = ['name', 'onlyPlayer', 'onlyPlayerWhy', 'rows', 'noRows', 'testOnly'];
+const DATA_KEYS = ['name', 'onlyPlayer', 'onlyPlayerWhy', 'rows', 'noRows', 'testOnly', 'skipOnWindows'];
 export const SCENARIO_KEYS = [...DATA_KEYS, ...FUNCTION_KEYS];
 const TEST_ONLY_KEYS = ['row', 'player', 'via', 'route', 'proves', 'unproven'];
 
@@ -36,6 +36,9 @@ export function scenarioProblems(scenario, expectedName) {
     if (key in scenario && typeof scenario[key] !== 'function') problems.push(`${where}: "${key}" is not a function`);
   }
   if (typeof scenario.run !== 'function') problems.push(`${where}: no run()`);
+  if ('skipOnWindows' in scenario && !text(scenario.skipOnWindows)) {
+    problems.push(`${where}: skipOnWindows needs a non-empty reason`);
+  }
 
   if ('onlyPlayer' in scenario) {
     if (!PLAYERS.includes(scenario.onlyPlayer)) {
@@ -163,7 +166,11 @@ export function resultsTopProblems(run, player) {
   if (run === null || typeof run !== 'object' || Array.isArray(run)) return [`${about} are not a results file: ${said(run)}`];
   const problems = [];
   const keys = Object.keys(run).sort().join(', ');
-  if (keys !== RESULTS_FILE_KEYS.join(', ')) problems.push(`${about} hold ${keys || 'nothing'}, not ${RESULTS_FILE_KEYS.join(', ')}`);
+  const expectedKeys = 'platform' in run ? [...RESULTS_FILE_KEYS, 'platform'].sort() : RESULTS_FILE_KEYS;
+  if (keys !== expectedKeys.join(', ')) problems.push(`${about} hold ${keys || 'nothing'}, not ${expectedKeys.join(', ')}`);
+  // Existing Linux files stay byte-for-byte the same schema. Windows files
+  // must identify their venue, so a Linux and a Windows run cannot be paired.
+  if ('platform' in run && run.platform !== 'win32') problems.push(`${about} name an unsupported platform ${said(run.platform)}`);
   if (run.player !== player) problems.push(`${about} are of a ${run.player} run`);
   for (const flag of ['full', 'built', 'dirty', 'changedDuringRun']) {
     if (typeof run[flag] !== 'boolean') problems.push(`${about} give "${flag}" as ${said(run[flag])}, not true or false`);
@@ -173,7 +180,7 @@ export function resultsTopProblems(run, player) {
     problems.push(`${about} say the tree changed during the run and that the run was clean`);
   }
   if (typeof run.head !== 'string' || run.head === '') problems.push(`${about} name no commit`);
-  if (typeof run.appBinary !== 'string' || !path.isAbsolute(run.appBinary)) {
+  if (typeof run.appBinary !== 'string' || !(run.platform === 'win32' ? path.win32 : path).isAbsolute(run.appBinary)) {
     problems.push(`${about} name no app binary by its full path (${said(run.appBinary)})`);
   }
   // locateAppBinary: a run that built took the binary from Cargo's report of
@@ -199,7 +206,10 @@ export function resultsTopProblems(run, player) {
 export function outcomeShapeProblem(result) {
   if (result === null || typeof result !== 'object' || Array.isArray(result)) return `it is ${said(result)}, not a result`;
   const keys = Object.keys(result).sort().join(', ');
-  if (result.status === 'skip') return keys === 'status' ? null : `it is a skip that holds ${keys}, not status alone`;
+  if (result.status === 'skip') {
+    if (keys === 'status' || (keys === 'reason, status' && text(result.reason))) return null;
+    return `it is a skip that holds ${keys}, not status alone or status with a non-empty reason`;
+  }
   if (result.status !== 'pass' && result.status !== 'fail') return `its status is ${said(result.status)}, not pass, fail or skip`;
   if (keys !== 'error, routes, shown, status') return `it holds ${keys || 'nothing'}, not status, error, shown and routes`;
   for (const list of ['shown', 'routes']) {
@@ -262,6 +272,7 @@ export function verdictProblems(
 ) {
   const problems = [];
   const heads = new Set();
+  const platforms = new Set();
   if (!checkout?.head) {
     problems.push('the checked-out commit is unknown, so the runs cannot be tied to the scenarios and records judged');
   } else if (checkout.dirty) {
@@ -276,6 +287,7 @@ export function verdictProblems(
     // The top of the file, as the runner writes it: its names, their kinds,
     // and what the runner cannot write together.
     problems.push(...resultsTopProblems(run, player));
+    platforms.add(run.platform ?? 'linux');
     // Each of these is judged by what the runner writes and by nothing that
     // merely reads as it: `full: true`, `built: true`, `dirty: false`. A file
     // that does not say so does not get the benefit of the doubt.
@@ -312,11 +324,12 @@ export function verdictProblems(
       const result = resultOf(scenario.name);
       const known = knownFailures.find((k) => k.scenario === scenario.name && k.player === player);
       const record = result !== null && typeof result === 'object' && !Array.isArray(result);
-      if (!runsIn(scenario, player)) {
+      const skip = skipOutcome(scenario, player, run.platform ?? 'linux');
+      if (skip) {
         // A full run names every scenario, the ones it skips too.
         if (result === undefined) {
           problems.push(`${scenario.name} is not in the ${player} results, which name every scenario, a skipped one too`);
-        } else if (!record || result.status !== 'skip' || Object.keys(result).length !== 1) {
+        } else if (!record || result.status !== 'skip' || result.reason !== skip.reason || Object.keys(result).sort().join(',') !== Object.keys(skip).sort().join(',')) {
           problems.push(
             `${scenario.name} does not run in the ${player} player, and its result there is not the skip the runner writes: ${said(result)}`,
           );
@@ -355,6 +368,7 @@ export function verdictProblems(
     }
   }
   if (heads.size > 1) problems.push(`the two runs are of different commits (${[...heads].join(', ')})`);
+  if (platforms.size > 1) problems.push(`the two runs are of different platforms (${[...platforms].join(', ')})`);
   return problems;
 }
 
@@ -385,6 +399,16 @@ export async function loadScenarios(dir, { prefix = '' } = {}) {
 
 // Whether `scenario` runs in a run of `player`.
 export const runsIn = (scenario, player) => !scenario.onlyPlayer || scenario.onlyPlayer === player;
+
+// A platform skip says why in the results and is never evidence of a row.
+// Player-only skips keep the existing Linux shape; Windows records all reasons.
+export function skipOutcome(scenario, player, platform) {
+  if (platform === 'win32' && scenario.skipOnWindows) return { status: 'skip', reason: scenario.skipOnWindows };
+  if (!runsIn(scenario, player)) {
+    return platform === 'win32' ? { status: 'skip', reason: scenario.onlyPlayerWhy } : { status: 'skip' };
+  }
+  return null;
+}
 
 // Whether `scenario` is recorded as failing in `player` on a product defect.
 export const knownToFail = (scenario, player, knownFailures = KNOWN_FAILURES) =>

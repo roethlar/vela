@@ -35,6 +35,7 @@ import { MpvIpc, mpvSocketSnapshot, waitForNewMpvSocket } from '../mpv.mjs';
 import { makeClips, mockSource, openDetailAndPlay, openLibraryGrid, pollUntil, seedConfig, showPlayerBar } from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
 import { shown } from '../proof.mjs';
+import { embeddedVideoOutput, isWindows, processName } from '../windows.mjs';
 
 let mock;
 
@@ -165,12 +166,12 @@ export default {
         () => mpv.getProp('current-vo').catch(() => null),
         'mpv to set up its video output',
       );
-      assert.equal(output, 'libmpv', "mpv draws through the library's renderer");
+      assert.equal(output, embeddedVideoOutput, "mpv draws through the library's renderer");
       // mpv reports the process it runs in. An external player is a process
       // called mpv; this one is Vela itself.
       const pid = await mpv.getProp('pid');
       assert.equal(
-        fs.readFileSync(`/proc/${pid}/comm`, 'utf8').trim(),
+        processName(pid),
         'vela',
         'the player runs inside Vela, not as a program of its own',
       );
@@ -186,7 +187,7 @@ export default {
       // be agreed with it about HDR: the surface stays as it is and mpv is
       // left to choose what it draws for (the plan, "Colour"). On a real
       // desktop the display decides, so there is nothing to assert there.
-      if (!process.env.VELA_E2E_HEADED) {
+      if (!isWindows && !process.env.VELA_E2E_HEADED) {
         for (const option of ['target-trc', 'target-prim', 'target-peak']) {
           assert.equal(await mpv.getProp(option), 'auto', `${option} is left to mpv`);
         }
