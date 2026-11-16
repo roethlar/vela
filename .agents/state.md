@@ -12,14 +12,26 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - PLATFORM PARITY, OWNER RULING 2026-11-16 (`.agents/decisions.md`, last
   entry; read it first). Vela works the same on Linux, macOS and Windows;
   a feature missing on one platform is a defect, and "by design" is never
-  the answer. Known differences to fix, listed in that entry: the embedded
-  player (Linux under Wayland only; its plan's amendment of that date has
-  the macOS and Windows slices, probes first, NOT STARTED); the player
-  window's remembered screen on macOS; the macOS 27 local-network failure
-  of August. Before asking the owner to check anything on a platform, say
-  what that platform has and lacks. The agent recommended holding the
-  v1.0.67 tag until the embedded player works on macOS and Windows; the
-  tag is the owner's.
+  the answer. Before asking the owner to check anything on a platform, say
+  what that platform has and lacks. The agent recommended holding the tag
+  until the embedded player works on macOS and Windows; the tag is the
+  owner's. Where it stands (2026-11-16, evening):
+  - Landed: the macOS app declares why it reaches the local network
+    (`d6a8033`, the August failure's likely cause; checked in the release
+    workflow); the player window finds its remembered screen on a Mac,
+    Retina included (`b3635db`); version 1.0.68 (`be1a98e`).
+  - Found: mpv's Windows output ignores `--screen-name` (it takes only
+    `--screen=<number>`), so the remembered screen never worked on
+    Windows. Fix in progress.
+  - The embedded player on macOS and Windows: probes run on hosted
+    runners (`probes/`, workflow `platform-probe.yml`); results and the
+    design that follows are in `.agents/plans/embedded-player.md`, the
+    amendment of 2026-11-16 ("Probe log", "Design that follows"). Windows:
+    mpv's own window inside Vela's (proven by probe W0). macOS: mpv cannot
+    be embedded by `wid`, so the render API (OpenGL) into a layer under
+    the page; HDR there is open (to be measured on the owner's Mac).
+    In progress: the Windows library build from the pins, the Windows
+    host, the macOS drawing probe M1.
 - VELA 1.0.66 IS READY TO BE RELEASED, AS FAR AS THE AGENT CAN TAKE IT
   (2026-11-16). It is NOT tagged and NOT published; the owner verifies the
   macOS and Windows builds first. The whole account, with what was
