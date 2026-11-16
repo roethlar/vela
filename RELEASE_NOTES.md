@@ -1,4 +1,4 @@
-# Vela 1.0.65
+# Vela 1.0.66
 
 This release opens each video's mpv window the way you left the last one,
 checks the certificate of HTTPS media servers when playing, saves Settings as
@@ -106,10 +106,13 @@ Vela's own window on Linux with Wayland.
 - Update `h2` to 0.4.20 (`RUSTSEC-2026-0258`) and `rustls` to 0.23.46 with
   `rustls-webpki` 0.103.16 (`RUSTSEC-2026-0285`, `RUSTSEC-2026-0348`,
   `RUSTSEC-2026-0349` and two further rustls advisories).
-- Update the front end's build dependencies for published advisories:
-  `devalue` 5.9.4 (`GHSA-9rgm-9g3h-6x36` and related), Vite 8.3.5,
-  `source-map-js` 1.2.2, SvelteKit 2.70.4 and its static adapter 3.0.11. Vela
-  ships a static page and was not exposed by the SvelteKit advisories.
+- Remove SvelteKit from the front end. Vela used none of its features (it
+  ships one static page), and advisories against SvelteKit kept failing the
+  dependency check every release has to pass. The page is now built by Svelte
+  and Vite alone; nothing about it looks or behaves differently.
+- Update the front end's other build dependencies for published advisories:
+  `devalue` 5.9.4 (`GHSA-9rgm-9g3h-6x36` and related), Vite 8.3.5 and
+  `source-map-js` 1.2.2.
 
 ## Downloads
 
@@ -152,4 +155,4 @@ The macOS and Windows packages do not carry it.
 Full setup and privacy details are in the
 [README](https://github.com/roethlar/vela#readme).
 
-[Changes since 1.0.60](https://github.com/roethlar/vela/compare/v1.0.60...v1.0.65)
+[Changes since 1.0.60](https://github.com/roethlar/vela/compare/v1.0.60...v1.0.66)
