@@ -2482,7 +2482,9 @@ mod tests {
     }
 
     /// A program that stands in for mpv: it writes down the arguments it was
-    /// started with and then stays alive until it is killed.
+    /// started with and then stays alive until it is killed. Publish the
+    /// arguments by a rename in the same directory: callers use existence
+    /// as readiness, so the file must not be visible until it is complete.
     #[cfg(unix)]
     pub(crate) fn stand_in_for_mpv(name: &str) -> (std::path::PathBuf, std::path::PathBuf) {
         use std::os::unix::fs::PermissionsExt;
@@ -2494,8 +2496,8 @@ mod tests {
         std::fs::write(
             &program,
             format!(
-                "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\nexec sleep 30\n",
-                arguments.display()
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{arguments}.pending' && mv '{arguments}.pending' '{arguments}'\nexec sleep 30\n",
+                arguments = arguments.display()
             ),
         )
         .unwrap();
