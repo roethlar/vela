@@ -15,3 +15,4 @@ answer is in that log and product code has replaced it.
 - `screenshot`: can a hosted runner show a window and take a picture of
   the screen? Every later visual check on these platforms depends on it.
 - `m0-embed`: can macOS mpv `wid`/macvk draw beneath transparent Wry HTML, with `gpu-next` or `gpu`?
+- `w0-embed`: compare mpv in a tao HWND versus a child HWND beneath a transparent WebView2 page on Windows.

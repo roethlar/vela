@@ -1,0 +1,17 @@
+[package]
+name = "w0-embed"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+# Vela currently locks tao 0.35.3 and wry 0.55.1; stay on those minor lines.
+tao = "0.35"
+wry = { version = "0.55", features = ["transparent"] }
+libloading = "0.8"
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_System_LibraryLoader",
+    "Win32_UI_WindowsAndMessaging",
+] }
