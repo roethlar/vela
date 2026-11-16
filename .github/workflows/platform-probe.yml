@@ -1,0 +1,50 @@
+name: Platform probe
+
+# Manual only. Runs one probe from probes/ on a hosted macOS or Windows runner
+# and keeps what it writes to probe-out/ (screenshots, logs) as an artifact.
+# The probes answer the open questions of the macOS and Windows slices of
+# .agents/plans/embedded-player.md (amendment of 2026-11-16) before any product
+# code is written for them. Nothing here builds, signs or ships Vela, and no
+# secret is given to a probe.
+
+on:
+  workflow_dispatch:
+    inputs:
+      probe:
+        description: 'The probe to run: a directory under probes/'
+        required: true
+      os:
+        description: 'The runner: windows-latest or macos-latest'
+        required: true
+        default: windows-latest
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ${{ inputs.os }}
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Run the probe
+        shell: bash
+        env:
+          PROBE: ${{ inputs.probe }}
+          PROBE_OUT: ${{ github.workspace }}/probe-out
+        run: |
+          set -euo pipefail
+          case "$PROBE" in
+            ''|*[!a-z0-9-]*) echo "a probe is named by lower-case letters, digits and dashes: '$PROBE'" >&2; exit 2 ;;
+          esac
+          test -f "probes/$PROBE/run.sh" || { echo "no probes/$PROBE/run.sh" >&2; exit 2; }
+          mkdir -p "$PROBE_OUT"
+          bash "probes/$PROBE/run.sh"
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: probe-${{ inputs.probe }}-${{ inputs.os }}
+          path: probe-out
+          if-no-files-found: warn
