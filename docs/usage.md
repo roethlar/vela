@@ -199,8 +199,10 @@ crashes the webview on NVIDIA with Wayland. This affects the library UI
 renderer, not mpv's video output, and has no effect on macOS or Windows. The
 one exception is a start with the embedded player chosen, which needs that
 renderer and is never entered with the NVIDIA proprietary driver. A
-`WEBKIT_DISABLE_DMABUF_RENDERER` you set yourself is left as it is, and rules
-the embedded player out.
+`WEBKIT_DISABLE_DMABUF_RENDERER` you set yourself is left as it is. It rules
+the embedded player out only when its value is nonempty and not `0`. An empty
+value or `0` does not cause that refusal; the other requirements for embedded
+playback still apply.
 
 ## Configuration, recovery, and privacy
 

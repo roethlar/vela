@@ -402,6 +402,28 @@ test('the release workflow puts the set into every Linux package and checks each
   );
 });
 
+test('the embedded-player guide qualifies the renderer override refusal', () => {
+  // startup.rs refuses only a present, nonempty value other than the exact
+  // string "0". The guide must not turn that into a presence-only refusal
+  // or imply that the exceptions waive the other startup requirements.
+  const paragraph = read('docs/usage.md')
+    .split(/\n\s*\n/)
+    .find((text) => text.includes('`WEBKIT_DISABLE_DMABUF_RENDERER`'))
+    ?.replace(/\s+/g, ' ');
+  assert.ok(paragraph, 'the guide must explain the renderer override');
+  assert.match(
+    paragraph,
+    /rules the embedded player out only when its value is nonempty and not `0`\./,
+    'only nonempty values other than "0" cause the renderer refusal',
+  );
+  assert.match(paragraph, /you set yourself is left as it is/);
+  assert.match(
+    paragraph,
+    /An empty value or `0` does not cause that refusal; the other requirements for embedded playback still apply\./,
+    'empty and "0" are exceptions to this refusal, not to the other requirements',
+  );
+});
+
 // --- scripts/build.sh, run for real against fakes ---------------------------
 
 function executable(file, body) {
