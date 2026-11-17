@@ -1027,18 +1027,17 @@ const checkUnavailable = !onLinux
 // installs libarchive-tools and squashfs-tools before `npm run check` (since
 // `4ab145b`), so CI runs these tests, as a developer's machine and the E2E
 // venue do (docs/development.md, "Packaging the set", says what the workflow
-// needs). The test below holds CI to it.
-test('CI installs bsdtar and squashfs-tools before it runs npm run check, so these tests run there', () => {
-  const frontend = read('.github/workflows/ci.yml')
-    .match(/^ {2}frontend:\n(?<body>[\s\S]*?)(?=\n {2}[a-z][a-z0-9_-]*:\n|(?![\s\S]))/m)?.groups?.body;
-  assert.ok(frontend, 'ci.yml has a frontend job');
-  const check = frontend.indexOf('- run: npm run check');
-  assert.ok(check >= 0, 'the frontend job runs npm run check');
-  const installs = [...frontend.slice(0, check).matchAll(/apt-get install -y ([^\n]*)/g)]
-    .flatMap((m) => m[1].trim().split(/\s+/));
-  for (const name of ['libarchive-tools', 'squashfs-tools']) {
-    assert.ok(installs.includes(name), `the frontend job installs ${name} before npm run check (it installs: ${installs.join(' ')})`);
-  }
+// needs). In a CI run (GitHub sets `CI=true` in every step) the test below
+// fails when one of the tools is missing, so a run that would skip these
+// tests cannot pass.
+test('in a CI run on Linux, bsdtar, mksquashfs and unsquashfs are installed', {
+  skip: !(process.env.CI === 'true' && onLinux) && 'only a CI run on Linux must have them',
+}, () => {
+  const missing = ['bsdtar', 'mksquashfs', 'unsquashfs'].filter(
+    (tool) => spawnSync('/bin/sh', ['-c', `command -v ${tool}`]).status !== 0,
+  );
+  assert.deepEqual(missing, [],
+    'not installed (bsdtar is in libarchive-tools, the other two in squashfs-tools); the tests that need them would skip');
 });
 
 // The kinds of package the check unpacks, each made here from a file tree

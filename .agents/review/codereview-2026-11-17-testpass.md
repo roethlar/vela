@@ -10,7 +10,10 @@ working agent's review). The third, over `019c08b..dc3c9e8`: one LOW
 finding (tp-8), repaired. The fourth, over tp-8's repair
 (`dc3c9e8..6f92baa`): one LOW finding (tp-9), repaired. A fifth, over
 tp-9's repair (`6f92baa..17893e6`), was clean: every finding of the pass so
-far, tp-1 to tp-9, is closed.
+far, tp-1 to tp-9, is closed. A sixth, over the marker script's repair
+(`27f6cdf..0357eec`, a defect the Windows suite found), was clean. A
+seventh, over two test commits (`0357eec..5d83c72`): **findings**, three
+candidates, all admitted (two MEDIUM, one LOW), all repaired by one change.
 
 ## Dispatch record
 
@@ -37,6 +40,9 @@ far, tp-1 to tp-9, is closed.
 | tp-7 | LOW      | settingValue accepts an expected default before the setting has loaded | `[x]` | `d48bc08` |
 | tp-8 | LOW      | The click retry's guard never runs the script that picks the element | `[x]` | `6f92baa` |
 | tp-9 | LOW      | The click retry's guard never runs the script's not-found path | `[x]` | `17893e6` |
+| tp-10 | MEDIUM  | A disabled or commented-out install satisfies the CI tools guard | `[x]` | this commit |
+| tp-11 | MEDIUM  | The CI tools guard can read the wrong job | `[x]` | this commit |
+| tp-12 | LOW     | Equivalent valid workflow syntax fails the CI tools guard | `[x]` | this commit |
 
 ### tp-1
 
@@ -181,3 +187,70 @@ Admitted. Repair (the working agent's): the test also runs the script
 against an empty list and an overlay-only list, expecting false and nothing
 scrolled; seen failing with the not-found result turned to true and with
 the check deleted.
+
+## The fifth hunt: tp-9's repair
+
+Over `6f92baa..17893e6`. **clean**: no finding.
+
+## The sixth hunt: the marker script's repair
+
+Over `27f6cdf..0357eec`: the marker script showed no skip button when a
+play was paused inside a marker before mpv's OSD had a size, found by the
+Windows suite's `markerbutton` (run 44028451739) and reproduced with real
+mpv; the repair, its tests under LuaJIT and Lua 5.2, and CI installing
+both. **clean**: no finding.
+
+## The seventh hunt: two test commits
+
+Over `0357eec..5d83c72`: `e7d25fe` (a note in
+`tests/libmpv-packaging.test.mjs` said CI installs nothing) and `5d83c72`
+(a test reading `ci.yml`'s `frontend` job for an `apt-get install` of
+libarchive-tools and squashfs-tools before `npm run check`). **findings**:
+three, admitted. All three are against guards that read the workflow's
+text; the guard `0357eec` added for the Luas had the same design, and the
+repair covers it too.
+
+### tp-10 (MEDIUM)
+
+Reviewer, verbatim, evidence: "tests/libmpv-packaging.test.mjs:1037 scans
+raw text without checking execution. Adding `if: ${{ false }}` to the
+install step, or commenting out its apt-get command, still passed. With
+CI=true and bsdtar made unavailable, the guard passed while a
+package-check test reported SKIP; the test command exited 0." Predicted
+failure: "CI can remain green while packaging coverage silently disappears
+on runners lacking the tools."
+
+### tp-11 (MEDIUM)
+
+Reviewer, verbatim, evidence: "tests/libmpv-packaging.test.mjs:1032–1033
+selects only `frontend`. A mutation making that job push-only and adding a
+pull-request-only `frontend-pr` without the install still passed.
+Separately, the boundary regex consumed a following `ToolsJob: # comment`
+header; its install satisfied the guard despite belonging to another
+runner." Predicted failure: "A job running npm run check without the
+dependencies can pass this guard using another job's installation,
+leaving package checks skipped."
+
+### tp-12 (LOW)
+
+Reviewer, verbatim, evidence: "tests/libmpv-packaging.test.mjs:1035–1038
+requires the literal `- run: npm run check` and single-line install
+arguments. Adding `name: Check frontend` before the unchanged run command
+caused failure. Wrapping the apt-get package list with shell continuations
+also failed, although both packages remained installed before checking."
+Predicted failure: "Correct workflow edits turn npm run check and CI red
+solely because command formatting changed."
+
+### The repair (the working agent's)
+
+Both text-reading guards are gone. What they stood for is checked where
+the tests run, as the reviewer proposed: in a CI run (`CI=true`, which
+GitHub sets in every step) a test fails when a tool is missing, so a run
+that would skip the tests needing it cannot pass, whichever job runs the
+check and however its workflow is written. In
+`tests/libmpv-packaging.test.mjs`, on Linux: bsdtar, mksquashfs and
+unsquashfs. In `tests/markers-script.test.mjs`: luajit and lua5.2. Outside
+a CI run both checks are skipped and the tools' own tests skip as before,
+with their reasons. Seen failing with CI=true on real PATHs without
+bsdtar, without mksquashfs and without lua5.2; passing with all of them;
+`npm run check` with CI=true and both Luas: 1184 passed, none skipped.

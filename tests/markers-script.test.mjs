@@ -3,8 +3,8 @@
 // make. It runs under each of the two Luas mpv runs the script with: LuaJIT
 // (the system mpv's, usually) and Lua 5.2 (the libmpv Vela ships;
 // packaging/libmpv/versions.txt). A Lua that is not installed is skipped,
-// with that reason; CI's `frontend` job installs both, and the last test
-// holds it to that.
+// with that reason; CI's `frontend` job installs both, and in a CI run a
+// missing one fails the last test instead.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -86,17 +86,8 @@ for (const lua of LUAS) {
   });
 }
 
-test('CI installs both Luas before it runs npm run check, so the tests above run there', () => {
-  const ci = fs.readFileSync(path.join(repoRoot, '.github/workflows/ci.yml'), 'utf8');
-  const start = ci.indexOf('\n  frontend:\n');
-  assert.ok(start >= 0, 'ci.yml has a frontend job');
-  const rest = ci.slice(start + 1);
-  const end = rest.slice(1).search(/\n {2}[a-z][a-z0-9-]*:\n/);
-  const job = end < 0 ? rest : rest.slice(0, end + 1);
-  const check = job.indexOf('- run: npm run check');
-  assert.ok(check >= 0, 'the frontend job runs npm run check');
-  const installs = [...job.slice(0, check).matchAll(/apt-get install -y ([^\n]*)/g)].flatMap((m) => m[1].trim().split(/\s+/));
-  for (const lua of LUAS) {
-    assert.ok(installs.includes(lua), `the frontend job installs ${lua} before npm run check (it installs: ${installs.join(' ')})`);
-  }
+// In a CI run (GitHub sets `CI=true` in every step) a missing Lua fails here,
+// instead of only its tests above skipping: a skipped test holds nothing.
+test('in a CI run, both Luas are installed', { skip: process.env.CI !== 'true' && 'not a CI run' }, () => {
+  assert.deepEqual(LUAS.filter((lua) => !installed(lua)), [], 'not installed; their tests above would skip');
 });
