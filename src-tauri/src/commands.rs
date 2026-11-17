@@ -1509,7 +1509,7 @@ fn extract_7z(archive: &std::path::Path, dest: &std::path::Path) -> Result<(), S
 #[cfg(not(target_os = "windows"))]
 fn run_mpv_installer() -> Result<(), String> {
     let installer = mpv_command_installer().ok_or_else(|| {
-        "No supported mpv installer was found on this system. Install mpv manually, or point Vela at an existing mpv in Settings -> Player.".to_string()
+        "No supported mpv installer was found on this system. Install mpv manually, or point Vela at an existing mpv in Settings -> mpv.".to_string()
     })?;
     run_command_installer(installer)
 }

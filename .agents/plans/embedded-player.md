@@ -2625,7 +2625,8 @@ had replaced 44042221966 at `23d4745` for the macOS set's VideoToolbox
 build (`1e9905e`). If a later run replaces it,
 `.agents/state.md` names it. mpv's own window stays the
 default everywhere; Vela's window is the experimental choice: Settings →
-Player → Video player → "Vela's window (experimental)", then restart Vela.
+Playback → Video player → "Vela's window (experimental)" (no restart since
+2026-11-17).
 
 **Every platform has:** browsing Plex, Jellyfin and Emby; mpv's own window
 with progress, resume and the remembered window (fullscreen or not, size,
@@ -2676,7 +2677,7 @@ installer and the macOS app).
   Windows.
 - Check by eye, in order:
   1. Install mpv if it is not there (winget, scoop or Chocolatey, where
-     Vela finds it; anywhere else, give its path in Settings → Player),
+     Vela finds it; anywhere else, give its path in Settings → mpv),
      then install Vela (NSIS or MSI).
   2. Play in mpv's own window; make it fullscreen on your second screen;
      play again: it reopens there.
@@ -2924,7 +2925,7 @@ codex hunt over it.
      /proc/driver/nvidia/version` prints its version).
   2. Install Vela (AppImage, deb, rpm or the Arch package) and start it
      from a terminal.
-  3. Settings → Player → Video player → "Vela's window (experimental)";
+  3. Settings → Playback → Video player → "Vela's window (experimental)";
      quit, and start Vela again from the terminal.
   4. The library draws as usual (not blank or white). Play an SDR file:
      the picture inside Vela's window under its controls. Then an HDR10

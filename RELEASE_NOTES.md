@@ -8,7 +8,7 @@ Vela's own window on Linux (with Wayland), Windows and macOS.
 ## Highlights
 
 - Every video of a session opens the way you left the one before it: full
-  screen or not, maximized or not, its size and its screen. Settings → Player
+  screen or not, maximized or not, its size and its screen. Settings → Picture
   → Player window chooses how the first video after Vela starts opens.
 - Settings saves each change as you make it. The Save buttons on the Player
   tab are gone.
@@ -17,7 +17,7 @@ Vela's own window on Linux (with Wayland), Windows and macOS.
   "Upgrading and going back" before you update.
 - Experimental, on Linux (Wayland), Windows and macOS: play inside Vela's own
   window, with Vela's own controls, keys and mouse actions, by choosing
-  Settings → Player → Video player. mpv's own window stays the default on
+  Settings → Playback → Video player. mpv's own window stays the default on
   every system.
 - Servers that share a name can be told apart by their Plex, Jellyfin or Emby
   mark.
@@ -27,8 +27,8 @@ Vela's own window on Linux (with Wayland), Windows and macOS.
 - **An HTTPS server with a self-signed or privately signed certificate stops
   playing after this update**, until you either name the authority's
   certificate file to mpv with `tls-ca-file` (in the Advanced mpv options or
-  your own mpv config) or turn on Settings → Player → mpv player → Skip
-  server certificate checks. Browsing is not affected, and neither are plain
+  your own mpv config) or turn on Settings → mpv → Server certificates →
+  Skip server certificate checks. Browsing is not affected, and neither are plain
   HTTP servers or servers with a publicly trusted certificate. Until now mpv
   did not check, so the stream's sign-in token was sent without knowing who
   received it.
@@ -58,7 +58,7 @@ Vela's own window on Linux (with Wayland), Windows and macOS.
   opens full screen or maximized returns to that size when you leave full
   screen. The window's position is not carried. The carried size takes
   precedence over a custom `--geometry`.
-- Add Settings → Player → Player window, which chooses how the first video
+- Add Settings → Picture → Player window, which chooses how the first video
   opens after Vela starts: "As you last left it" (the default; quit from full
   screen and the next session opens full screen), "Full screen", or "Default"
   (mpv and your own options decide).
@@ -70,7 +70,7 @@ Vela's own window on Linux (with Wayland), Windows and macOS.
   The header says "Saved", or "Not saved" with the reason in the section
   concerned.
 - Add an experimental second player that shows the video inside Vela's own
-  window, on Linux, Windows and macOS: Settings → Player → Video player. It
+  window, on Linux, Windows and macOS: Settings → Playback → Video player. It
   has its own control bar, keys and mouse actions (click to pause,
   double-click for full screen, the wheel for volume), and is off by default.
   On Linux it runs in a Wayland session (not under X11), NVIDIA's

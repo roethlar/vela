@@ -118,7 +118,7 @@ place after it was found.
 ## The shipped libmpv set
 
 This is the library behind the experimental embedded player, which
-Settings → Player → Video player offers. The Linux and Windows packages the release
+Settings → Playback → Video player offers. The Linux and Windows packages the release
 workflow builds carry it; a package you build yourself carries it when you
 ask, and a development build can be pointed at it: see "Trying the embedded
 player" and "Packaging the set" below. By default playback still runs the
@@ -266,7 +266,7 @@ packaging/libmpv/check-in-container.sh registry.fedoraproject.org/fedora:latest
 
 ### Trying the embedded player
 
-Experimental, on Linux (Wayland), Windows and macOS. Settings → Player →
+Experimental, on Linux (Wayland), Windows and macOS. Settings → Playback →
 Video player offers it, and says why when it cannot be used. Every released
 package carries its library; a Linux package you build yourself carries it
 when built with `--with-libmpv` (see "Packaging the set" below), and
@@ -284,8 +284,8 @@ state are in `.agents/plans/embedded-player.md`.
    library from where its package put it and nowhere else: on Linux its
    resource directory, on Windows beside `Vela.exe`, on macOS the app's
    `Contents/Frameworks`.
-3. In Settings → Player → Video player choose "Vela's window
-   (experimental)" (it is saved at once) and restart Vela. The choice is
+3. In Settings → Playback → Video player choose "Vela's window
+   (experimental)" (it is saved at once; no restart is needed). The choice is
    stored as
    `"player": "embedded"` in `~/.config/vela/config.json`; choosing mpv's own
    window removes the field.

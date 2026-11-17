@@ -60,7 +60,7 @@ for macOS, Windows, Linux, or Arch.
 1. **Install mpv 0.38 or newer** if you don't have it. mpv is deliberately not
    bundled, so it stays independently updateable. Vela detects common install
    locations, can offer a package-manager install on first run, and accepts a
-   custom executable under Settings → Player.
+   custom executable under Settings → mpv.
 2. **Download Vela** from
    [GitHub Releases](https://github.com/roethlar/vela/releases/latest) and
    install it. macOS downloads use the universal DMG; the duplicate

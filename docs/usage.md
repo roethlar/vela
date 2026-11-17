@@ -6,7 +6,7 @@ transcoding, configuration storage, recovery, and privacy.
 
 ## Choosing which copy plays
 
-When the same title exists on multiple connected servers, Settings → Player
+When the same title exists on multiple connected servers, Settings → Servers
 offers four source policies:
 
 - **Prefer Best** ranks resolution first, then HDR within that resolution, then
@@ -31,7 +31,7 @@ offline server.
 
 ## Playback quality
 
-The source policies above choose **which copy** plays. Settings → Player →
+The source policies above choose **which copy** plays. Settings → Playback →
 Playback quality chooses **how that copy is delivered**, and the two are
 independent.
 
@@ -69,7 +69,7 @@ what you see if you run Emby — a report is more useful than a guess.
 
 ## Playing in Vela's own window (experimental)
 
-Settings → Player → Video player chooses where videos play:
+Settings → Playback → Video player chooses where videos play:
 
 - **mpv's own window** (the default): Vela starts the mpv installed on your
   system, in a window of its own. The rest of this page describes that
@@ -134,7 +134,7 @@ needs, shipped as separate shared libraries with their licence texts.
 By default Vela uses a predictable `--no-config` mpv profile. On macOS, that
 profile prefers AVFoundation audio with CoreAudio as fallback so AirPlay and
 local-output transitions remain synchronized; Vela does not guess or apply an
-AirPlay delay. Settings → Player can opt into your own `mpv.conf`, which also
+AirPlay delay. Settings → mpv can opt into your own `mpv.conf`, which also
 hands audio-output selection to that file. Custom mpv options are appended
 after Vela's defaults and can override the audio output, HDR defaults, or other
 playback behavior, so change them deliberately.
@@ -150,7 +150,7 @@ takes precedence over custom mpv options and `mpv.conf`: a custom
 Default, your options still decide how the first play of a run opens; with
 As you last left it, the saved window does once there is one.
 
-Settings → Player → Player window chooses how that first play opens:
+Settings → Picture → Player window chooses how that first play opens:
 
 - **As you last left it** (the default): as the last play of the previous run
   left its window — fullscreen, maximized, screen, and size. Quit from
@@ -181,8 +181,8 @@ not know) does not play, and the notice for a video that ended before it
 started points at the certificate. There are two ways on. For a private
 authority, name its certificate file to mpv with `tls-ca-file` in the
 Advanced options or in your own mpv config; the check stays on. Or turn the
-check off with Settings → Player → mpv player → Skip server certificate
-checks; your sign-in token is then sent without knowing who receives it.
+check off with Settings → mpv → Server certificates → Skip server
+certificate checks; your sign-in token is then sent without knowing who receives it.
 Either applies to the next video. Plain HTTP servers are not affected.
 
 Black-bar cropping is Off by default. Manual mode runs on `Shift+C`; Automatic

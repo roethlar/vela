@@ -131,7 +131,7 @@
     await refreshWatchState();
     if (end.failedToStart === true) {
       // Sent only for an https stream whose certificate the player checks.
-      const said = "The player ended before playback could be confirmed. For HTTPS streams, check the server's certificate and Settings → Player → mpv player → Skip server certificate checks. If your server uses a private authority, name its certificate file to mpv with tls-ca-file in Advanced options or your own mpv configuration.";
+      const said = "The player ended before playback could be confirmed. For HTTPS streams, check the server's certificate and Settings → mpv → Server certificates → Skip server certificate checks. If your server uses a private authority, name its certificate file to mpv with tls-ca-file in Advanced options or your own mpv configuration.";
       if (detailView) detailStatus = said;
       else setError(said);
     }
@@ -3119,7 +3119,7 @@
       <div class="mpvtext">
         <b>mpv is required for playback</b> and wasn't found.
         {#if mpvInfo.canAutoInstall}
-          Install it automatically ({mpvInfo.installDescription}), or point Vela at an existing mpv in Settings → Player.
+          Install it automatically ({mpvInfo.installDescription}), or point Vela at an existing mpv in Settings → mpv.
         {:else}
           Install it, then restart Vela.
         {/if}

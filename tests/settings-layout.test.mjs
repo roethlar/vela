@@ -15,6 +15,18 @@ test('Settings has six tabs, the old Player tab split in three', () => {
   assert.doesNotMatch(settings, /activeTab === "player"/);
 });
 
+test('no message or document sends anyone to the removed Player tab', () => {
+  // st-5: on-screen errors and docs still said "Settings → Player".
+  const files = [
+    ...fs.readdirSync('src', { recursive: true }).filter((f) => /\.(svelte|ts)$/.test(f)).map((f) => `src/${f}`),
+    ...fs.readdirSync('src-tauri/src', { recursive: true }).filter((f) => f.endsWith('.rs')).map((f) => `src-tauri/src/${f}`),
+    ...fs.readdirSync('docs').filter((f) => f.endsWith('.md')).map((f) => `docs/${f}`),
+    'README.md', 'RELEASE_NOTES.md',
+  ];
+  const stale = files.filter((f) => /Settings\s*(→|->)\s*Player\b/.test(fs.readFileSync(f, 'utf8')));
+  assert.deepEqual(stale, []);
+});
+
 test('the Video player choice is the first thing on the Playback tab', () => {
   const start = settings.indexOf('{#if activeTab === "playback"}');
   assert.notEqual(start, -1);
