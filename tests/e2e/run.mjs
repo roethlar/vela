@@ -456,11 +456,14 @@ for (const scenario of scenarios) {
 // each player (`npm run e2e:verdict`; parity-verdict.mjs). A live run counts
 // for neither player and writes none.
 if (!live) {
-  const tree = recordedTree(treeAtStart, [...treeSamples, readTree()]);
+  // One final sample, judged and reported alike: a second read could miss a
+  // change the first one saw, and leave nothing to report.
+  const samples = [...treeSamples, readTree()];
+  const tree = recordedTree(treeAtStart, samples);
   if (tree.changedDuringRun) {
     console.error('e2e: the worktree changed during the run; its results are recorded as dirty');
     // What changed, so the cause can be found (paths and git's status codes only).
-    const changed = [...treeSamples, readTree()].find((s) => s.head !== treeAtStart.head || s.status !== treeAtStart.status);
+    const changed = samples.find((s) => s.head !== treeAtStart.head || s.status !== treeAtStart.status);
     console.error(`e2e: at the start ${treeAtStart.head}: ${JSON.stringify(treeAtStart.status)}; later ${changed.head}: ${JSON.stringify(changed.status)}`);
   }
   fs.mkdirSync(resultsDir, { recursive: true });
