@@ -417,14 +417,17 @@ Recorded and verified 2026-11-12, locally on the host.
   every other agent worktree (`~/dev/vela-*-wt`,
   `~/dev/vela-agent-keep/wt/`), `~/dev/vela-libmpv-win`,
   `~/dev/vela-xcheck-target`, and the run logs under `~/dev/vela-agent-keep/`
-  except `pkg/` and `final-b163241/`. Branches were kept; detached heads
-  no branch held are tags `keep/pa4-repair-atk`, `keep/sp-rvview`,
+  except `~/dev/vela-agent-keep/pkg/` and
+  `~/dev/vela-agent-keep/final-b163241/`. Branches were kept; detached
+  heads no branch held are tags `keep/pa4-repair-atk`, `keep/sp-rvview`,
   `keep/cx-titlebar`. The podman images below were not touched. What
   follows is the history of what those were:
   - `~/dev/vela-spike-libmpv/`: the probe programs (`probe1`, `probe2`,
-    `pbuild.sh` rebuilds them), `p0/` (probe scripts, screenshots, clips)
-    and `libset/` (the library-set recipe, its downloaded sources, the
-    build tree `work22/` and the built set `out22/libmpv/`).
+    `pbuild.sh` rebuilds them), `~/dev/vela-spike-libmpv/p0/` (probe
+    scripts, screenshots, clips) and `~/dev/vela-spike-libmpv/libset/`
+    (the library-set recipe, its downloaded sources, the build tree
+    `~/dev/vela-spike-libmpv/libset/work22/` and the built set
+    `~/dev/vela-spike-libmpv/libset/out22/libmpv/`).
     `VELA_LIBMPV=<path to libmpv.so.2>` makes a probe use that library.
     Files under `libset/work22` belong to container sub-ids: remove them
     with `podman unshare rm -rf`.
