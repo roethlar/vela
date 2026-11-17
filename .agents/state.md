@@ -57,22 +57,34 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     owner: each platform, what it has, what to check (2026-11-17)": what
     each platform has and lacks, what machines proved, what to look at, in
     order. Builds: release run by hand 44000903570 at `068bf91` (every job
-    passed; it carries pl-1 to pl-22). pl-23 to pl-26 and the
-    `completionhub` repair (Blockers) came after it; a release run at a
-    head that carries them replaces it and is named here.
+    passed; it carries pl-1 to pl-22). Later work (pl-23 to pl-26, the
+    release's test pass below) came after it; a release run at a head that
+    carries it replaces it and is named here.
   - Linux unchanged through all of it: both end-to-end suites in full at
     `6b206ec`, `623ec17`, `c49be2a`, `49f2c3c`, `cf23d90`, `959f437`,
     `3061b52`, `0b2099a` and `2bc6e3c` (48 of 48, 51 of 51, parity PASS);
-    at `7f1db1f` the embedded suite lost `completionhub` once (the race in
-    Blockers).
-  - The end-to-end suite has a Windows port (`9617815`, workflow
-    `e2e-windows.yml`, by hand), but no run of it has started a WebDriver
-    session: 43964966316 at `acf0a40` (all 110 scenarios) and 44003362983
-    at `ba0ebad` (one scenario, after the settings repair `96c0f4d`) both
-    timed out in Edge WebDriver's POST /session. Its repair is part of the
-    release's test pass, now under way; probe W3 (`probes/w3-webdriver`,
-    run 44003737295) looks for where the session hangs. Probe W2
-    (`probes/w2-vela`) checks Vela on Windows meanwhile.
+    at `7f1db1f` the embedded suite lost `completionhub` once, and at
+    `f2dcbc3` `markers` once (both in Blockers).
+  - THE RELEASE'S TEST PASS (2026-11-17; the decision of 2026-11-16
+    reached the 2026-11-14 rule's condition). Done so far:
+    `completionhub`'s race repaired (`2ab8ac5`, `c3ea91d`; the scenario
+    alone 40 of 40 in the embedded player at `f2dcbc3`); pl-9's guard
+    (`50b8893`); a codex hunt over it (tp-1 to tp-3, all repaired:
+    `.agents/review/codereview-2026-11-17-testpass.md`). The Windows
+    end-to-end suite runs at last: probe W3 (run 44003737295) found that
+    Edge WebDriver's DevTools arguments never reach Vela's browser on the
+    elevated runner, and the suite's Windows build now opens the port
+    itself (`94662e3`); its runs are no longer dirty (`2302240`, line
+    endings), each scenario keeps one WebView2 data folder (`f089797`),
+    and the runner shows animations (`ae11f7f`). Its first full run
+    (44007571185 at `2ab8ac5`: external 31 passed, 16 failed; embedded
+    37 passed, 14 failed) found one real defect: under Cargo 1.100's
+    build-dir layout a debug or --no-bundle build had no mpv scripts next
+    to the binary, so markers and autocrop were missing (on every
+    platform with that Cargo; installed bundles unaffected), repaired in
+    `build.rs` (`e87ffe2`). The second full run (44013741142 at `e87ffe2`)
+    shows what is left: the plan's Probe log and the run's results name
+    each remaining failure as it is diagnosed.
   - Type-checking Windows and macOS Rust from Linux:
     `scripts/check-other-platforms.sh` (repo-guidance, Verification).
 - VELA 1.0.66 IS READY TO BE RELEASED, AS FAR AS THE AGENT CAN TAKE IT
@@ -430,16 +442,19 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     state in between.
   - The external player runs the same code; it has not been seen to fail
     there.
-  - Left unfixed until 2026-11-17: the effect is negligible and the
-    ordering here has a long review history
-    (`tests/clean-eof-refresh-order.test.mjs`); it waited for the
-    release's test pass (decision of 2026-11-14 on tests). Seen again
-    2026-11-17, once in the full embedded run at `7f1db1f` (50 of 51). Now
-    in that pass: a codex coding task (`cxhub`) repairs it, from this
-    entry. Candidate fix recorded here: the page reads the two local lists
-    after `get_hubs` has answered, and the two local commands wait,
-    bounded, for a completion that has been handed to the dispatcher and
-    not yet admitted.
+  - REPAIRED 2026-11-17 in the release's test pass (`2ab8ac5`, then
+    `c3ea91d` for tp-1 and tp-2): the first report of a clean end now
+    goes out from the completion dispatcher after the local admission has
+    been tried, unless the tracker already sent it (an EOF seen after the
+    tracker's end). The scenario alone passed 40 of 40 in the embedded
+    player at `f2dcbc3`. Remove this entry once the full runs after
+    `c3ea91d` show no `completionhub` failure.
+- E2E `markers` failed once in the embedded player, in the full run at
+  `f2dcbc3` (50 of 51): "timed out waiting for the Stopped check-in" 15 s
+  after the second leg's quit. Alone it then passed 10 of 10 on the same
+  build. `/Stopped` is posted before the end notify, so the clean-end
+  report change of that build cannot delay it. Not diagnosed; watch the
+  next full runs, and keep a failing run's artifacts.
   - Until then: an embedded run that fails the verdict on `completionhub`
     alone is this race until shown otherwise; run the scenario again by
     itself before reading it as a regression.
