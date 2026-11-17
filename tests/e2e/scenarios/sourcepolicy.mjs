@@ -85,7 +85,7 @@ async function setPolicy(driver, configRoot, label, expected) {
   await driver.click(
     await driver.find(
       'xpath',
-      `//*[@role='dialog' and @aria-label='Settings']//button[@role='tab' and normalize-space(.)='Player']`,
+      `//*[@role='dialog' and @aria-label='Settings']//button[@role='tab' and normalize-space(.)='Servers']`,
     ),
   );
   await driver.click(

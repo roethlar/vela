@@ -51,7 +51,7 @@ export default {
       'Settings panel',
     );
     const missing = await driver.exec(
-      `return ['Connected','Servers','Player','Appearance']` +
+      `return ['Connected','Servers','Playback','Picture','mpv','Appearance']` +
         `.filter(s => !Array.from(document.querySelectorAll('button,a,h2,h3'))` +
         `.some(e => e.textContent.trim() === s))`,
     );

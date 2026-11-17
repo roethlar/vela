@@ -189,7 +189,7 @@ function assertMotionSuppressed(snapshot, label) {
 }
 
 async function assertSettingsIcons(driver) {
-  await openSettingsTab(driver, 'Player');
+  await openSettingsTab(driver, 'mpv');
   await driver.waitFor(
     `return [...document.querySelectorAll('[role="dialog"] p')]
       .some((node) => /Found mpv|mpv wasn't found/.test(node.textContent))`,

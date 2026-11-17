@@ -284,11 +284,13 @@
   let err = $state<string | null>(null);
 
   // Vertical settings tabs — split the (formerly very long) panel into sections.
-  type TabId = "connected" | "servers" | "player" | "appearance";
+  type TabId = "connected" | "servers" | "playback" | "picture" | "mpv" | "appearance";
   const tabs: { id: TabId; label: string }[] = [
     { id: "connected", label: "Connected" },
     { id: "servers", label: "Servers" },
-    { id: "player", label: "Player" },
+    { id: "playback", label: "Playback" },
+    { id: "picture", label: "Picture" },
+    { id: "mpv", label: "mpv" },
     { id: "appearance", label: "Appearance" },
   ];
   let activeTab = $state<TabId>("connected");
@@ -794,6 +796,10 @@
 
       <div class="tabcontent" role="tabpanel">
 
+    <!-- Shared by settings on more than one tab, so shown above them all. -->
+    {@render saveError(advancedDraft.feedback.error)}
+    {@render saveError(playbackDraft.feedback.error)}
+
     {#if activeTab === "connected"}
     <section>
       <h3>Connected</h3>
@@ -814,112 +820,7 @@
     </section>
     {/if}
 
-    {#if activeTab === "player"}
-    <section>
-      <h3>Duplicate playback source</h3>
-      {@render saveError(playbackDraft.feedback.error)}
-      <div class="form">
-        <p class="muted small">
-          This chooses <b>which copy</b> plays, not how it is delivered — that's
-          Playback quality, further down. It does nothing when a title exists in
-          only one place.
-        </p>
-        <fieldset class="policygrid">
-          <legend>When the same title exists on more than one server</legend>
-          {#each playbackPolicies as policy}
-            <label class:active={playback.policy === policy.value} class="policycard">
-              <input
-                type="radio"
-                name="playback-source-policy"
-                value={policy.value}
-                aria-busy={!playbackSetting.confirmed.known} bind:group={playback.policy}
-                onchange={(e) => changeDraft(playbackDraft, "policy", e.currentTarget.value as PlaybackSourcePolicy, savePlaybackPreferences)}
-              />
-              <span>
-                <b>{policy.label}</b>
-                <small>{policy.summary}</small>
-              </span>
-            </label>
-          {/each}
-        </fieldset>
-
-        <div class="helpbox">
-          <b>How Vela decides</b>
-          <p><b>Best:</b> resolution → HDR within that resolution → bitrate. A 4K SDR copy beats a 1080p HDR copy.</p>
-          <p><b>Compatible:</b> stay at or below the playback display's resolution and match its current HDR state when possible.</p>
-          <p><b>Fastest:</b> this machine → local network → internet, then Best within that tier.</p>
-          <p>
-            <b>Manual override:</b> <b>Play Version</b> on a title's menu permanently chooses a server for the three automatic modes.
-            In Ask Every Time it answers only that play and is never saved. During a playlist or TV continuation, Ask keeps the first
-            choice only for that playback session and asks again if the chosen server lacks a later item.
-          </p>
-        </div>
-
-        {#if playbackPreferences}
-          <div class="displaystatus" aria-live="polite">
-            <b>Detected playback display</b>
-            <span>{displaySummary(playbackPreferences.detectedDisplay)}</span>
-            {#if playbackPreferences.detectedDisplay.evidence === "mpv-observed"}
-              <small>Observed from the current or most recent mpv playback output.</small>
-            {:else}
-              <small>Detected from the monitor containing Vela's window.</small>
-            {/if}
-            {#if playbackPreferences.effectiveDisplay.evidence === "manual-override"}
-              <small><b>Compatible will use:</b> {displaySummary(playbackPreferences.effectiveDisplay)}</small>
-            {/if}
-          </div>
-        {/if}
-
-        <details class="advanced-display">
-          <summary>Advanced display override</summary>
-          <p class="muted small">
-            Leave both on Auto unless native detection is unavailable or wrong. Resolution and HDR can be overridden independently.
-          </p>
-          <div class="overridegrid">
-            <div class="field">
-              <label for="playback-resolution-override">Resolution</label>
-              <select id="playback-resolution-override" aria-busy={!playbackSetting.confirmed.known} bind:value={playback.resolutionOverride} onchange={(e) => changeDraft(playbackDraft, "resolutionOverride", e.currentTarget.value, savePlaybackPreferences)}>
-                <option value="">Auto (detected)</option>
-                <option value="720p">1280 × 720</option>
-                <option value="1080p">1920 × 1080</option>
-                <option value="1440p">2560 × 1440</option>
-                <option value="2160p">3840 × 2160 (4K)</option>
-                <option value="4320p">7680 × 4320 (8K)</option>
-              </select>
-            </div>
-            <div class="field">
-              <label for="playback-hdr-override">HDR</label>
-              <select id="playback-hdr-override" aria-busy={!playbackSetting.confirmed.known} bind:value={playback.hdrOverride} onchange={(e) => changeDraft(playbackDraft, "hdrOverride", e.currentTarget.value, savePlaybackPreferences)}>
-                <option value="">Auto (detected)</option>
-                <option value="enabled">HDR enabled</option>
-                <option value="disabled">SDR / HDR disabled</option>
-              </select>
-            </div>
-          </div>
-        </details>
-
-      </div>
-    </section>
-
-    <section>
-      <h3>Continue Playing</h3>
-      {@render saveError(continueDraft.feedback.error)}
-      <div class="form">
-        <div class="field">
-          <label for="continue-playing">After a video or playlist finishes</label>
-          <select id="continue-playing" aria-busy={!continuePlayingSetting.confirmed.known} bind:value={continuation.mode} onchange={(e) => changeDraft(continueDraft, "mode", e.currentTarget.value as ContinuePlayingMode, saveContinuePlaying)}>
-            <option value="off">Off</option>
-            <option value="on">On — continue through Continue Watching</option>
-            <option value="only-tv">TV only — play the next episode</option>
-          </select>
-          <p class="muted small">
-            TV only follows the show's episode order and rolls into the next season.
-            On walks the same Continue Watching list shown on Home.
-          </p>
-        </div>
-      </div>
-    </section>
-
+    {#if activeTab === "playback"}
     {#if videoPlayer.offered}
     <section>
       <h3>Video player</h3>
@@ -948,147 +849,66 @@
     {/if}
 
     <section>
-      <h3>Player window</h3>
-      {@render saveError(playerWindowDraft.feedback.error)}
+      <h3>Continue Playing</h3>
+      {@render saveError(continueDraft.feedback.error)}
       <div class="form">
         <div class="field">
-          <label for="player-window">After Vela starts, the first video opens</label>
-          <select id="player-window" aria-busy={!playerWindowSetting.confirmed.known} bind:value={playerWindow.mode} onchange={(e) => changeDraft(playerWindowDraft, "mode", e.currentTarget.value as PlayerWindowMode, savePlayerWindowMode)}>
-            <option value="remember">As you last left it</option>
-            <option value="fullscreen">Full screen</option>
-            <option value="default">Default — as mpv and your options say</option>
+          <label for="continue-playing">After a video or playlist finishes</label>
+          <select id="continue-playing" aria-busy={!continuePlayingSetting.confirmed.known} bind:value={continuation.mode} onchange={(e) => changeDraft(continueDraft, "mode", e.currentTarget.value as ContinuePlayingMode, saveContinuePlaying)}>
+            <option value="off">Off</option>
+            <option value="on">On — continue through Continue Watching</option>
+            <option value="only-tv">TV only — play the next episode</option>
           </select>
           <p class="muted small">
-            Each later video opens the way you left the one before it: full
-            screen, maximized, its screen and its size. This only chooses how
-            the first one opens. It applies to mpv's own window.
+            TV only follows the show's episode order and rolls into the next season.
+            On walks the same Continue Watching list shown on Home.
           </p>
         </div>
       </div>
     </section>
 
     <section>
-      <h3>mpv player</h3>
-      <div class="form">
-        <label class="check">
-          <input
-            type="checkbox"
-            id="player-skip-certificate-checks"
-            aria-busy={!tlsSetting.confirmed.known} bind:checked={tls.skip}
-            onchange={(e) => changeDraft(tlsDraft, "skip", e.currentTarget.checked, savePlayerTls)}
-            disabled={!tlsSetting.confirmed.known}
-            aria-describedby="player-certificate-help"
-          />
-          Skip server certificate checks
-        </label>
-        <p id="player-certificate-help" class="muted small">
-          The player checks HTTPS server certificates by default. Turning this check off
-          sends your sign-in token without knowing who receives it. For a server signed
-          by a private authority, you can instead name that authority's certificate file
-          to mpv with <code>tls-ca-file</code> in Advanced options or your own mpv configuration.
-          Applies to the next video; plain HTTP is unchanged.
-        </p>
-        {@render saveError(tlsDraft.feedback.error ?? tlsLoadError)}
-      </div>
-      {#if mpv}
-        <p class="muted small">
-          {#if mpv.available}
-            <span class="inlineicon"><Icon name="check" size={14} stroke={2.5} /></span>Found mpv at <code class="path">{mpv.path}</code>
-          {:else}
-            <span class="inlineicon"><Icon name="close" size={14} stroke={2.5} /></span>mpv wasn't found. Install it below, or point Vela at an existing mpv.
-          {/if}
-        </p>
-      {/if}
+      <h3>Skipping</h3>
       <div class="form">
         <div class="field">
-          <label for="mpv-path">mpv executable path (optional override)</label>
-          <input
-            id="mpv-path"
-            placeholder={navigatorIsWindows() ? "C:\\Program Files\\mpv\\mpv.exe" : "/usr/local/bin/mpv"}
-            aria-busy={!mpvSetting.confirmed.known} bind:value={mpvPath.path}
-            oninput={() => mpvDraft.edit("path")}
-            onblur={saveMpvPath}
-            onkeydown={(e) => { if (e.key === "Enter") { e.preventDefault(); void saveMpvPath(); } }}
-          />
-        </div>
-        <div class="btnrow">
-          <button onclick={browseMpv}>Browse…</button>
-          {#if mpv?.configuredPath}
-            <button class="rm" onclick={clearMpvPath}>Clear</button>
-          {/if}
-        </div>
-        {@render saveError(mpvDraft.feedback.error)}
-        {#if mpv?.canAutoInstall}
-          <button class="primary" disabled={installingMpv} onclick={installMpv}>
-            {installingMpv ? "Installing mpv…" : "Install mpv automatically"}
-          </button>
-          <p class="muted small">
-            {mpv.installDescription}. Needs an internet connection.
-          </p>
-        {/if}
-
-        <div class="warn">
-          <b><span class="inlineicon"><Icon name="alert" size={14} stroke={2.25} /></span>Advanced — requires mpv knowledge.</b>
-          These options are passed straight to mpv, exactly as written. Wrong or
-          unsupported options can degrade quality or stop playback. If you're not
-          comfortable with mpv's command-line options, leave this blank — Vela's
-          defaults are already tuned for HDR.
-        </div>
-
-        <div class="field">
-          <label for="mpv-extra">Advanced mpv options</label>
-          {@render saveError(advancedDraft.feedback.error)}
-          <textarea
-            id="mpv-extra"
-            rows="4"
-            spellcheck="false"
-            placeholder={"One option per line, e.g.\n--vo=gpu\n--profile=fast"}
-            aria-busy={!advancedSetting.confirmed.known} bind:value={advanced.extraArgs}
-            oninput={() => advancedDraft.edit("extraArgs")}
-            onblur={blurMpvAdvanced}
-          ></textarea>
-          <p class="muted small">
-            One mpv option per line, appended when launching mpv — so these override
-            Vela's defaults. Vela's playback tracking (its IPC socket) and the media
-            URL are protected and can't be overridden. Lines starting with
-            <code>#</code> are ignored. A bad option just makes mpv fail to start.
-          </p>
-        </div>
-
-        <label class="check">
-          <input type="checkbox" aria-busy={!advancedSetting.confirmed.known} bind:checked={advanced.useOwnConfig} onchange={(e) => changeDraft(advancedDraft, "useOwnConfig", e.currentTarget.checked, saveMpvAdvanced)} />
-          Use my own mpv config (<code>~/.config/mpv/mpv.conf</code>)
-        </label>
-        <p class="muted small">
-          By default Vela launches mpv with <code>--no-config</code> for a predictable
-          setup. Tick this to load your own <code>mpv.conf</code> instead — it can then
-          change anything, including settings that disable HDR or break playback.
-        </p>
-
-        <div class="field">
-          <label for="mpv-autocrop">Black-bar cropping (mpv autocrop)</label>
-          <select id="mpv-autocrop" aria-busy={!advancedSetting.confirmed.known} bind:value={advanced.autocrop} onchange={(e) => changeDraft(advancedDraft, "autocrop", e.currentTarget.value as AutocropMode, saveMpvAdvanced)}>
+          <label for="skip-intros">Skip intros</label>
+          <select id="skip-intros" aria-busy={!advancedSetting.confirmed.known} bind:value={advanced.skipIntros} onchange={(e) => changeDraft(advancedDraft, "skipIntros", e.currentTarget.value as SkipPolicy, saveMpvAdvanced)}>
             <option value="off">Off</option>
-            <option value="manual">Manual — press Shift+C to crop</option>
-            <option value="auto">Automatic — crop every video</option>
+            <option value="button">Button — ask on screen</option>
+            <option value="autoskip">Auto-skip</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="skip-credits">Skip credits</label>
+          <select id="skip-credits" aria-busy={!advancedSetting.confirmed.known} bind:value={advanced.skipCredits} onchange={(e) => changeDraft(advancedDraft, "skipCredits", e.currentTarget.value as SkipPolicy, saveMpvAdvanced)}>
+            <option value="off">Off</option>
+            <option value="button">Button — ask on screen</option>
+            <option value="autoskip">Auto-skip</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="skip-commercials">Skip commercials</label>
+          <select id="skip-commercials" aria-busy={!advancedSetting.confirmed.known} bind:value={advanced.skipCommercials} onchange={(e) => changeDraft(advancedDraft, "skipCommercials", e.currentTarget.value as SkipPolicy, saveMpvAdvanced)}>
+            <option value="off">Off</option>
+            <option value="button">Button — ask on screen</option>
+            <option value="autoskip">Auto-skip</option>
           </select>
           <p class="muted small">
-            Loads mpv's bundled <code>autocrop.lua</code> to remove black bars.
-            <b>Manual</b> only crops when you press <code>Shift+C</code> during
-            playback. <b>Automatic</b> crops every video on its own.
-            In Vela's window, cropping is done by Vela's own script (the Crop
-            button or <code>Shift+C</code>) and does not crop HDR video.
+            Uses the intro, credits and commercial markers your media server
+            publishes — Vela never guesses where they are, so titles without
+            markers are unaffected. <b>Button</b> shows a skip button on the
+            video: click it, or press <code>Space</code> while it is visible.
+            <b>Auto-skip</b> jumps past the range on its own.
           </p>
-          {#if advanced.autocrop === "auto"}
-            <p class="warn small">
-              <span class="inlineicon"><Icon name="alert" size={14} stroke={2.25} /></span>Automatic cropping runs at the start of every video and can be
-              unreliable on HDR content — on some GPU/Wayland setups it may
-              occasionally hang mpv (unkillable). If playback freezes, switch back to
-              Off or Manual.
-            </p>
-          {/if}
         </div>
+      </div>
+    </section>
 
+    <section>
+      <h3>Playback quality</h3>
+      <div class="form">
         <div class="field">
           <label for="playback-quality">Playback quality</label>
           <select id="playback-quality" aria-busy={!advancedSetting.confirmed.known} bind:value={advanced.playbackQuality} onchange={(e) => changeDraft(advancedDraft, "playbackQuality", e.currentTarget.value, saveMpvAdvanced)}>
@@ -1131,38 +951,185 @@
             </p>
           {/if}
         </div>
+      </div>
+    </section>
 
-        <div class="field">
-          <label for="skip-intros">Skip intros</label>
-          <select id="skip-intros" aria-busy={!advancedSetting.confirmed.known} bind:value={advanced.skipIntros} onchange={(e) => changeDraft(advancedDraft, "skipIntros", e.currentTarget.value as SkipPolicy, saveMpvAdvanced)}>
-            <option value="off">Off</option>
-            <option value="button">Button — ask on screen</option>
-            <option value="autoskip">Auto-skip</option>
-          </select>
-        </div>
+    {/if}
 
-        <div class="field">
-          <label for="skip-credits">Skip credits</label>
-          <select id="skip-credits" aria-busy={!advancedSetting.confirmed.known} bind:value={advanced.skipCredits} onchange={(e) => changeDraft(advancedDraft, "skipCredits", e.currentTarget.value as SkipPolicy, saveMpvAdvanced)}>
-            <option value="off">Off</option>
-            <option value="button">Button — ask on screen</option>
-            <option value="autoskip">Auto-skip</option>
-          </select>
-        </div>
+    {#if activeTab === "picture"}
+    <section>
+      <h3>Display</h3>
+      <div class="form">
+        {#if playbackPreferences}
+          <div class="displaystatus" aria-live="polite">
+            <b>Detected playback display</b>
+            <span>{displaySummary(playbackPreferences.detectedDisplay)}</span>
+            {#if playbackPreferences.detectedDisplay.evidence === "mpv-observed"}
+              <small>Observed from the current or most recent mpv playback output.</small>
+            {:else}
+              <small>Detected from the monitor containing Vela's window.</small>
+            {/if}
+            {#if playbackPreferences.effectiveDisplay.evidence === "manual-override"}
+              <small><b>Compatible will use:</b> {displaySummary(playbackPreferences.effectiveDisplay)}</small>
+            {/if}
+          </div>
+        {/if}
 
+        <details class="advanced-display">
+          <summary>Advanced display override</summary>
+          <p class="muted small">
+            Leave both on Auto unless native detection is unavailable or wrong. Resolution and HDR can be overridden independently.
+          </p>
+          <div class="overridegrid">
+            <div class="field">
+              <label for="playback-resolution-override">Resolution</label>
+              <select id="playback-resolution-override" aria-busy={!playbackSetting.confirmed.known} bind:value={playback.resolutionOverride} onchange={(e) => changeDraft(playbackDraft, "resolutionOverride", e.currentTarget.value, savePlaybackPreferences)}>
+                <option value="">Auto (detected)</option>
+                <option value="720p">1280 × 720</option>
+                <option value="1080p">1920 × 1080</option>
+                <option value="1440p">2560 × 1440</option>
+                <option value="2160p">3840 × 2160 (4K)</option>
+                <option value="4320p">7680 × 4320 (8K)</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="playback-hdr-override">HDR</label>
+              <select id="playback-hdr-override" aria-busy={!playbackSetting.confirmed.known} bind:value={playback.hdrOverride} onchange={(e) => changeDraft(playbackDraft, "hdrOverride", e.currentTarget.value, savePlaybackPreferences)}>
+                <option value="">Auto (detected)</option>
+                <option value="enabled">HDR enabled</option>
+                <option value="disabled">SDR / HDR disabled</option>
+              </select>
+            </div>
+          </div>
+        </details>
+      </div>
+    </section>
+
+    <section>
+      <h3>Player window</h3>
+      {@render saveError(playerWindowDraft.feedback.error)}
+      <div class="form">
         <div class="field">
-          <label for="skip-commercials">Skip commercials</label>
-          <select id="skip-commercials" aria-busy={!advancedSetting.confirmed.known} bind:value={advanced.skipCommercials} onchange={(e) => changeDraft(advancedDraft, "skipCommercials", e.currentTarget.value as SkipPolicy, saveMpvAdvanced)}>
-            <option value="off">Off</option>
-            <option value="button">Button — ask on screen</option>
-            <option value="autoskip">Auto-skip</option>
+          <label for="player-window">After Vela starts, the first video opens</label>
+          <select id="player-window" aria-busy={!playerWindowSetting.confirmed.known} bind:value={playerWindow.mode} onchange={(e) => changeDraft(playerWindowDraft, "mode", e.currentTarget.value as PlayerWindowMode, savePlayerWindowMode)}>
+            <option value="remember">As you last left it</option>
+            <option value="fullscreen">Full screen</option>
+            <option value="default">Default — as mpv and your options say</option>
           </select>
           <p class="muted small">
-            Uses the intro, credits and commercial markers your media server
-            publishes — Vela never guesses where they are, so titles without
-            markers are unaffected. <b>Button</b> shows a skip button on the
-            video: click it, or press <code>Space</code> while it is visible.
-            <b>Auto-skip</b> jumps past the range on its own.
+            Each later video opens the way you left the one before it: full
+            screen, maximized, its screen and its size. This only chooses how
+            the first one opens. It applies to mpv's own window.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h3>Black-bar cropping</h3>
+      <div class="form">
+        <div class="field">
+          <label for="mpv-autocrop">Black-bar cropping (mpv autocrop)</label>
+          <select id="mpv-autocrop" aria-busy={!advancedSetting.confirmed.known} bind:value={advanced.autocrop} onchange={(e) => changeDraft(advancedDraft, "autocrop", e.currentTarget.value as AutocropMode, saveMpvAdvanced)}>
+            <option value="off">Off</option>
+            <option value="manual">Manual — press Shift+C to crop</option>
+            <option value="auto">Automatic — crop every video</option>
+          </select>
+          <p class="muted small">
+            Loads mpv's bundled <code>autocrop.lua</code> to remove black bars.
+            <b>Manual</b> only crops when you press <code>Shift+C</code> during
+            playback. <b>Automatic</b> crops every video on its own.
+            In Vela's window, cropping is done by Vela's own script (the Crop
+            button or <code>Shift+C</code>) and does not crop HDR video.
+          </p>
+          {#if advanced.autocrop === "auto"}
+            <p class="warn small">
+              <span class="inlineicon"><Icon name="alert" size={14} stroke={2.25} /></span>Automatic cropping runs at the start of every video and can be
+              unreliable on HDR content — on some GPU/Wayland setups it may
+              occasionally hang mpv (unkillable). If playback freezes, switch back to
+              Off or Manual.
+            </p>
+          {/if}
+        </div>
+      </div>
+    </section>
+
+    {/if}
+
+    {#if activeTab === "mpv"}
+    <section>
+      <h3>mpv</h3>
+      {#if mpv}
+        <p class="muted small">
+          {#if mpv.available}
+            <span class="inlineicon"><Icon name="check" size={14} stroke={2.5} /></span>Found mpv at <code class="path">{mpv.path}</code>
+          {:else}
+            <span class="inlineicon"><Icon name="close" size={14} stroke={2.5} /></span>mpv wasn't found. Install it below, or point Vela at an existing mpv.
+          {/if}
+        </p>
+      {/if}
+      <div class="form">
+        <div class="field">
+          <label for="mpv-path">mpv executable path (optional override)</label>
+          <input
+            id="mpv-path"
+            placeholder={navigatorIsWindows() ? "C:\\Program Files\\mpv\\mpv.exe" : "/usr/local/bin/mpv"}
+            aria-busy={!mpvSetting.confirmed.known} bind:value={mpvPath.path}
+            oninput={() => mpvDraft.edit("path")}
+            onblur={saveMpvPath}
+            onkeydown={(e) => { if (e.key === "Enter") { e.preventDefault(); void saveMpvPath(); } }}
+          />
+        </div>
+        <div class="btnrow">
+          <button onclick={browseMpv}>Browse…</button>
+          {#if mpv?.configuredPath}
+            <button class="rm" onclick={clearMpvPath}>Clear</button>
+          {/if}
+        </div>
+        {@render saveError(mpvDraft.feedback.error)}
+        {#if mpv?.canAutoInstall}
+          <button class="primary" disabled={installingMpv} onclick={installMpv}>
+            {installingMpv ? "Installing mpv…" : "Install mpv automatically"}
+          </button>
+          <p class="muted small">
+            {mpv.installDescription}. Needs an internet connection.
+          </p>
+        {/if}
+
+        <label class="check">
+          <input type="checkbox" aria-busy={!advancedSetting.confirmed.known} bind:checked={advanced.useOwnConfig} onchange={(e) => changeDraft(advancedDraft, "useOwnConfig", e.currentTarget.checked, saveMpvAdvanced)} />
+          Use my own mpv config (<code>~/.config/mpv/mpv.conf</code>)
+        </label>
+        <p class="muted small">
+          By default Vela launches mpv with <code>--no-config</code> for a predictable
+          setup. Tick this to load your own <code>mpv.conf</code> instead — it can then
+          change anything, including settings that disable HDR or break playback.
+        </p>
+
+        <div class="warn">
+          <b><span class="inlineicon"><Icon name="alert" size={14} stroke={2.25} /></span>Advanced — requires mpv knowledge.</b>
+          These options are passed straight to mpv, exactly as written. Wrong or
+          unsupported options can degrade quality or stop playback. If you're not
+          comfortable with mpv's command-line options, leave this blank — Vela's
+          defaults are already tuned for HDR.
+        </div>
+
+        <div class="field">
+          <label for="mpv-extra">Advanced mpv options</label>
+          <textarea
+            id="mpv-extra"
+            rows="4"
+            spellcheck="false"
+            placeholder={"One option per line, e.g.\n--vo=gpu\n--profile=fast"}
+            aria-busy={!advancedSetting.confirmed.known} bind:value={advanced.extraArgs}
+            oninput={() => advancedDraft.edit("extraArgs")}
+            onblur={blurMpvAdvanced}
+          ></textarea>
+          <p class="muted small">
+            One mpv option per line, appended when launching mpv — so these override
+            Vela's defaults. Vela's playback tracking (its IPC socket) and the media
+            URL are protected and can't be overridden. Lines starting with
+            <code>#</code> are ignored. A bad option just makes mpv fail to start.
           </p>
         </div>
 
@@ -1186,6 +1153,31 @@
             {/each}
           </div>
         {/if}
+      </div>
+    </section>
+
+    <section>
+      <h3>Server certificates</h3>
+      <div class="form">
+        <label class="check">
+          <input
+            type="checkbox"
+            id="player-skip-certificate-checks"
+            aria-busy={!tlsSetting.confirmed.known} bind:checked={tls.skip}
+            onchange={(e) => changeDraft(tlsDraft, "skip", e.currentTarget.checked, savePlayerTls)}
+            disabled={!tlsSetting.confirmed.known}
+            aria-describedby="player-certificate-help"
+          />
+          Skip server certificate checks
+        </label>
+        <p id="player-certificate-help" class="muted small">
+          The player checks HTTPS server certificates by default. Turning this check off
+          sends your sign-in token without knowing who receives it. For a server signed
+          by a private authority, you can instead name that authority's certificate file
+          to mpv with <code>tls-ca-file</code> in Advanced options or your own mpv configuration.
+          Applies to the next video; plain HTTP is unchanged.
+        </p>
+        {@render saveError(tlsDraft.feedback.error ?? tlsLoadError)}
       </div>
     </section>
     {/if}
@@ -1239,6 +1231,47 @@
           Add as many servers as you like — connect one, then fill this in again for the
           next. Each appears under <b>Connected</b> and is browsed alongside the rest.
         </p>
+      </div>
+    </section>
+
+    <section>
+      <h3>When a title is on more than one server</h3>
+      <div class="form">
+        <p class="muted small">
+          This chooses <b>which copy</b> plays, not how it is delivered — that's
+          Playback quality, on the Playback tab. It does nothing when a title exists in
+          only one place.
+        </p>
+        <fieldset class="policygrid">
+          <legend>When the same title exists on more than one server</legend>
+          {#each playbackPolicies as policy}
+            <label class:active={playback.policy === policy.value} class="policycard">
+              <input
+                type="radio"
+                name="playback-source-policy"
+                value={policy.value}
+                aria-busy={!playbackSetting.confirmed.known} bind:group={playback.policy}
+                onchange={(e) => changeDraft(playbackDraft, "policy", e.currentTarget.value as PlaybackSourcePolicy, savePlaybackPreferences)}
+              />
+              <span>
+                <b>{policy.label}</b>
+                <small>{policy.summary}</small>
+              </span>
+            </label>
+          {/each}
+        </fieldset>
+
+        <div class="helpbox">
+          <b>How Vela decides</b>
+          <p><b>Best:</b> resolution → HDR within that resolution → bitrate. A 4K SDR copy beats a 1080p HDR copy.</p>
+          <p><b>Compatible:</b> stay at or below the playback display's resolution and match its current HDR state when possible.</p>
+          <p><b>Fastest:</b> this machine → local network → internet, then Best within that tier.</p>
+          <p>
+            <b>Manual override:</b> <b>Play Version</b> on a title's menu permanently chooses a server for the three automatic modes.
+            In Ask Every Time it answers only that play and is never saved. During a playlist or TV continuation, Ask keeps the first
+            choice only for that playback session and asks again if the chosen server lacks a later item.
+          </p>
+        </div>
       </div>
     </section>
     {/if}

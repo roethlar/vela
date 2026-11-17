@@ -46,7 +46,7 @@ async function openPlayerSettings(driver) {
   await driver.click(await driver.find('css selector', 'button[aria-label="Settings"]'));
   await driver.waitFor(`return !!document.querySelector('[role="dialog"]')`, 'Settings dialog');
   await driver.click(
-    await driver.find('xpath', `//button[@role='tab' and normalize-space(.)='Player']`),
+    await driver.find('xpath', `//button[@role='tab' and normalize-space(.)='Playback']`),
   );
   await driver.waitFor(
     `return !!document.querySelector('select#continue-playing')`,
