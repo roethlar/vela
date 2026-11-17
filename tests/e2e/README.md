@@ -98,6 +98,20 @@ signature is the integrity check. See Microsoft's
 [runtime discovery](https://learn.microsoft.com/microsoft-edge/webview2/concepts/distribution)
 and [WebDriver requirements](https://learn.microsoft.com/microsoft-edge/webview2/how-to/webdriver).
 
+**The Windows build opens a DevTools port.** Edge WebDriver launches the app
+with its DevTools port in `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` and waits
+for `DevToolsActivePort` in the data folder it chose. On the hosted runner (an
+elevated account, WebView2 156) that variable never reaches the browser,
+because wry always sets browser arguments of its own; the data folder does
+(probe W3, `probes/w3-webdriver`). So on Windows the suite builds with
+`tauri build --config <file>`, a file written outside the worktree that gives
+each window of `tauri.conf.json` wry's default arguments plus
+`--remote-debugging-port=0` (`app-binary.mjs`, `webdriverConfig`). That debug
+build, which replaces `src-tauri\target\debug\vela.exe`, accepts DevTools
+connections on a local port while it runs; rebuild before using that binary
+for anything else. The app Vela ships is built without it. `--skip-build`
+needs a binary the suite built.
+
 **Use a disposable Windows account.** Before every scenario the harness
 deletes the real roaming AppData `vela` directory (normally `%APPDATA%\vela`).
 Vela uses `directories::ProjectDirs::from("com", "vela", "vela")`, which reads

@@ -18,6 +18,7 @@
 // recorded as not built, and the verdict refuses it.
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
 import { npmCommand } from './windows.mjs';
@@ -39,12 +40,54 @@ export const BUILD_ARGS = ['run', 'tauri', '--', 'build', '--debug', '--no-bundl
 // The arguments `cargo` is given, in CARGO_DIR, for a --skip-build run.
 export const METADATA_ARGS = ['metadata', '--format-version', '1', '--no-deps', '--manifest-path', 'Cargo.toml'];
 
+// Windows: Edge WebDriver launches the app with its DevTools port in
+// WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS and waits for DevToolsActivePort in
+// the data folder it chose (WEBVIEW2_USER_DATA_FOLDER). On the hosted runner
+// (an elevated account, WebView2 156) that variable never reaches the
+// browser, because wry always sets browser arguments of its own; the data
+// folder still does, and so do the app's own arguments (probe W3, run
+// 44003737295). So the suite's Windows build gives each window, through
+// `tauri build --config`, wry's default arguments plus a DevTools port the
+// browser picks: it writes DevToolsActivePort into the driver's folder and
+// the driver's launch finds it. Only this debug build carries the port; the
+// app Vela ships keeps wry's defaults.
+export const WEBDRIVER_BROWSER_ARGS = [
+  '--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection', // wry's default
+  '--autoplay-policy=no-user-gesture-required', // wry's, with autoplay on
+  '--remote-debugging-port=0',
+].join(' ');
+
+// The --config file for that build: tauri.conf.json's windows, each with the
+// arguments above. Tauri merges --config as a JSON Merge Patch, which
+// replaces the windows array whole, so every window is copied from the file.
+export function webdriverConfig(tauriConf) {
+  const windows = tauriConf?.app?.windows;
+  if (!Array.isArray(windows) || windows.length === 0) throw new Error('tauri.conf.json declares no window');
+  return { app: { windows: windows.map((window) => ({ ...window, additionalBrowserArgs: WEBDRIVER_BROWSER_ARGS })) } };
+}
+
+// Writes that file outside the worktree and returns its path.
+export function writeWebdriverConfig(repoRoot, tmpdir = os.tmpdir()) {
+  const tauriConf = JSON.parse(fs.readFileSync(path.join(repoRoot, CARGO_DIR, 'tauri.conf.json'), 'utf8'));
+  const file = path.join(fs.mkdtempSync(path.join(tmpdir, 'vela-e2e-webview2-')), 'webdriver.conf.json');
+  fs.writeFileSync(file, `${JSON.stringify(webdriverConfig(tauriConf), null, 2)}\n`);
+  return file;
+}
+
+// BUILD_ARGS with `--config <file>` given to `tauri build` (before the `--`
+// whose arguments go to Cargo).
+export function webdriverBuildArgs(configFile) {
+  const at = BUILD_ARGS.indexOf('build') + 1;
+  return [...BUILD_ARGS.slice(0, at), '--config', configFile, ...BUILD_ARGS.slice(at)];
+}
+
 // What the runner runs, for a repository root. Tests replace `build` with a
 // plain `cargo build` of a made-up crate laid out as this one.
-export function appCommands(repoRoot) {
+export function appCommands(repoRoot, platform = process.platform) {
+  const buildArgs = platform === 'win32' ? webdriverBuildArgs(writeWebdriverConfig(repoRoot)) : BUILD_ARGS;
   return {
     appManifest: path.join(repoRoot, CARGO_DIR, 'Cargo.toml'),
-    build: { ...npmCommand(BUILD_ARGS), cwd: repoRoot },
+    build: { ...npmCommand(buildArgs, process.env, platform), cwd: repoRoot },
     metadata: { command: 'cargo', args: METADATA_ARGS, cwd: path.join(repoRoot, CARGO_DIR) },
   };
 }

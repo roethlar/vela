@@ -7,7 +7,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { appBinaryFromMetadata, appCommands, appExecutableFromMessages, appIdentity, locateAppBinary, MESSAGE_FORMAT_ARG } from './e2e/app-binary.mjs';
+import { appBinaryFromMetadata, appCommands, appExecutableFromMessages, appIdentity, locateAppBinary, MESSAGE_FORMAT_ARG, webdriverBuildArgs, webdriverConfig, writeWebdriverConfig } from './e2e/app-binary.mjs';
 import { MpvIpc, mpvSocketSnapshot, setScenarioConfigRoot, socketOfScenario } from './e2e/mpv.mjs';
 import { npmCommand, ownedWindowsApps, windowsConfigPaths, windowsPipePaths } from './e2e/windows.mjs';
 import { resultsFileProblems, scenarioProblems, skipOutcome, verdictProblems } from './e2e/scenario-loader.mjs';
@@ -27,7 +27,36 @@ test('Windows: npm executes its JS CLI and Cargo metadata predicts the exe suffi
   const metadata = JSON.stringify({ target_directory: '/target', packages: [{ manifest_path: manifest, targets: [{ kind: ['bin'], name: 'vela' }] }] });
   assert.equal(appBinaryFromMetadata(metadata, {}, manifest, 'win32'), '/target/debug/vela.exe');
   assert.equal(appBinaryFromMetadata(metadata, {}, manifest, 'linux'), '/target/debug/vela');
-  assert.match(harnessText('app-binary.mjs'), /build: \{ \.\.\.npmCommand\(BUILD_ARGS\)/);
+  assert.match(harnessText('app-binary.mjs'), /build: \{ \.\.\.npmCommand\(buildArgs, process\.env, platform\)/);
+});
+
+test("Windows: the suite's build opens the DevTools port Edge WebDriver waits for (probe W3)", () => {
+  const tauriConf = JSON.parse(fs.readFileSync(path.join(repoRoot, 'src-tauri/tauri.conf.json'), 'utf8'));
+  // Every window of the real configuration, copied whole, with wry's default
+  // arguments kept and a port the browser picks.
+  const overlay = webdriverConfig(tauriConf);
+  assert.deepEqual(overlay.app.windows.map(({ additionalBrowserArgs, ...window }) => window), tauriConf.app.windows);
+  for (const window of overlay.app.windows) {
+    const args = window.additionalBrowserArgs.split(' ');
+    assert.ok(args.includes('--remote-debugging-port=0'));
+    assert.ok(args.includes('--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection'));
+  }
+  assert.throws(() => webdriverConfig({ app: {} }), /no window/);
+  // The file goes to tauri build before the arguments Cargo gets.
+  assert.deepEqual(webdriverBuildArgs('C:\\t\\webdriver.conf.json'),
+    ['run', 'tauri', '--', 'build', '--config', 'C:\\t\\webdriver.conf.json', '--debug', '--no-bundle', '--', MESSAGE_FORMAT_ARG]);
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vela-e2e-overlay-test-'));
+  try {
+    const file = writeWebdriverConfig(repoRoot, tmp);
+    assert.ok(file.startsWith(tmp));
+    assert.deepEqual(JSON.parse(fs.readFileSync(file, 'utf8')), overlay);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+  // Only Windows builds that way; elsewhere the build is unchanged.
+  assert.match(harnessText('app-binary.mjs'),
+    /const buildArgs = platform === 'win32' \? webdriverBuildArgs\(writeWebdriverConfig\(repoRoot\)\) : BUILD_ARGS;/);
+  assert.deepEqual(appCommands('/r', 'linux').build.args, ['run', 'tauri', '--', 'build', '--debug', '--no-bundle', '--', MESSAGE_FORMAT_ARG]);
 });
 
 test('Windows: actual known-folder config is cleared and the existing scenario paths reach it', () => {
