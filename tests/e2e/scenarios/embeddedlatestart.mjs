@@ -20,7 +20,6 @@
 // After that the embedded player is not tried again in this run, and the user
 // is not told a second time.
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
 import path from 'node:path';
 import { MpvIpc, mpvSocketSnapshot } from '../mpv.mjs';
 import { makeClips, mockSource, openDetailAndPlay, openLibraryGrid, pollUntil, seedConfig } from '../helpers.mjs';
@@ -29,7 +28,6 @@ import { processName } from '../windows.mjs';
 
 const NOTICE = 'Embedded player: could not start';
 let mock;
-let logFile;
 
 const stopReports = () =>
   mock.state.served.filter((r) => r.method === 'POST' && r.path === '/Sessions/Playing/Stopped').length;
@@ -54,11 +52,23 @@ async function settled(stopReportsBefore) {
 
 // The program a player's mpv runs in: `vela` for the embedded player, `mpv`
 // for the external one. `null` once the socket is gone.
+//
+// Each connection asks its mpv for its log messages first, before anything
+// else, because that is how the notice is seen: Vela sends it as a
+// `show-text` command, 1.5 s after Vela connects, and mpv logs a command a
+// client sends at trace level. Only what mpv logs after the asking arrives,
+// and the asking comes before the program is looked up (on Windows that
+// takes a while). A shared `--log-file` will not do: both players took the
+// same options, so both mpvs wrote one file, each at its own offset, and the
+// late embedded player's last lines landed on the external player's notice
+// (found 2026-11-17, in overlay mode, whose player logs more as it starts).
 async function playerAt(socketPath) {
   let mpv;
   try {
     mpv = await MpvIpc.connect(socketPath, { timeoutMs: 300 });
+    const asked = mpv.requestLog('trace');
     const pid = await mpv.getProp('pid');
+    await asked;
     return { mpv, program: processName(pid) };
   } catch {
     mpv?.close();
@@ -77,10 +87,13 @@ async function newPlayers(before) {
   return players;
 }
 
-const showTextCommands = () =>
-  fs.existsSync(logFile)
-    ? fs.readFileSync(logFile, 'utf8').split('\n').filter((line) => line.includes('Run command: show-text'))
-    : [];
+// The `show-text` commands one mpv has run, as it logged them to this
+// scenario's connection.
+const showTextCommands = (mpv) =>
+  mpv
+    .logged()
+    .filter((message) => message.prefix === 'cplayer' && message.text.startsWith('Run command: show-text'))
+    .map((message) => message.text.trim());
 
 export default {
   name: 'embeddedlatestart',
@@ -91,7 +104,6 @@ export default {
   noRows: 'decision D3, a late embedded start; not a row of the inventory',
 
   async seed({ configRoot }) {
-    logFile = path.join(configRoot, 'mpv-commands.log');
     const mediaDir = makeClips(configRoot, ['stream.mp4']);
     mock = await startMockJellyfin({
       movies: [{
@@ -103,9 +115,7 @@ export default {
       }],
     });
     seedConfig(configRoot, [mockSource(mock)], {
-      // The log is how the notice is seen: Vela sends it as a `show-text`
-      // command, which mpv logs at trace level.
-      mpv_extra_args: `--vo=null\n--ao=null\n--msg-level=cplayer=trace\n--log-file=${logFile}`,
+      mpv_extra_args: '--vo=null\n--ao=null',
     });
   },
 
@@ -203,7 +213,7 @@ export default {
       // 3. The user is told why, once.
       const notices = await pollUntil(
         () => {
-          const commands = showTextCommands();
+          const commands = showTextCommands(external.mpv);
           return commands.length > 0 ? commands : null;
         },
         'the notice on the external player',
@@ -235,9 +245,8 @@ export default {
         'the second play to progress',
       );
       // Vela sends a notice 1.5 s after it connects; wait well past that.
-      // (Each mpv starts its log afresh, so these are this play's commands.)
       await new Promise((r) => setTimeout(r, 3500));
-      assert.deepEqual(showTextCommands(), [], 'the user is not told a second time');
+      assert.deepEqual(showTextCommands(second.mpv), [], 'the user is not told a second time');
       assert.equal(await playerViewShown(), false);
       second.mpv.quit();
     } finally {

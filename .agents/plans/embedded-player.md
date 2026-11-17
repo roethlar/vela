@@ -2785,3 +2785,16 @@ what is not known is found by probes first, logged below.
   compositing, serves X11 and NVIDIA alike, in standard range (GTK 3
   composites in 8-bit sRGB; mpv tone-maps HDR into it, as on macOS before
   its EDR layer).
+- **A shared mpv log hid the fallback notice (`embeddedlatestart`).** Found
+  when the embedded suite first ran under X11. The scenario saw the notice
+  in an mpv `--log-file`, and both players take the same options, so both
+  mpvs wrote that one file, each at its own offset. Under X11 the late
+  embedded player, which logs more as it starts there, wrote its last
+  lines over the external player's notice: in the file, kept from a failed
+  run, the late player's quit at its 8 s sits at lines 537 to 539, where
+  the external player logged its first 2 s; no `show-text` survived. Under
+  Wayland it had passed by the luck of the offsets. The scenario now asks
+  each mpv for its own log messages over its own IPC connection, first
+  thing on connecting, at trace level, where mpv logs a command a client
+  sends (`tests/e2e/mpv.mjs`, `requestLog`); 3 of 3 under X11 and 1 of 1
+  under Wayland.

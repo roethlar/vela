@@ -106,6 +106,9 @@ export class MpvIpc {
   // The last value mpv reported on THIS connection for each property it was
   // asked to observe (`observe`).
   #reported = new Map();
+  // mpv's own log messages, once asked for on this connection (`requestLog`):
+  // `{ prefix, level, text }`, in the order mpv sent them.
+  #logged = [];
 
   static async connect(socketPath, { timeoutMs = 10000 } = {}) {
     const deadline = Date.now() + timeoutMs;
@@ -146,9 +149,13 @@ export class MpvIpc {
           else reject(new Error(`mpv: ${msg.error}`));
         }
         // Of the events (no request_id), only the changes of properties this
-        // connection observes are kept; assertions otherwise poll properties.
+        // connection observes and the log messages it asked for are kept;
+        // assertions otherwise poll properties.
         if (msg.event === 'property-change' && typeof msg.name === 'string' && 'data' in msg) {
           this.#reported.set(msg.name, msg.data);
+        }
+        if (msg.event === 'log-message' && typeof msg.text === 'string') {
+          this.#logged.push({ prefix: msg.prefix, level: msg.level, text: msg.text });
         }
       }
     });
@@ -180,6 +187,19 @@ export class MpvIpc {
   // when it has reported none (or `name` is not observed).
   reported(name) {
     return this.#reported.get(name);
+  }
+
+  // Ask this mpv to send its log messages at `level` and above to this
+  // connection, from now on. They are this one process's messages: unlike a
+  // `--log-file`, which every mpv given the same options writes, each at its
+  // own offset, over the others' lines.
+  requestLog(level) {
+    return this.cmd('request_log_messages', level);
+  }
+
+  // The log messages this mpv has sent this connection so far.
+  logged() {
+    return [...this.#logged];
   }
 
   async setProp(name, value) {
