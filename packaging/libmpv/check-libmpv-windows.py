@@ -22,6 +22,19 @@ import sys
 import time
 
 
+# The build links the MinGW runtimes statically (see static_winpthread,
+# static_cxx_runtime and LDFLAGS in scripts/build-libmpv-windows.sh). Its
+# Windows inbox allowlist also excludes the optional GCC support runtimes.
+# A checking machine's installed copy must not hide a missing dependency,
+# even in System32 or the interpreter's baseline. Include all GCC unwind
+# variants, although the x86_64 build normally uses SEH.
+FORBIDDEN_RUNTIME_DLLS = frozenset({
+    "libwinpthread-1.dll", "libgcc_s_seh-1.dll", "libgcc_s_dw2-1.dll",
+    "libgcc_s_sjlj-1.dll", "libstdc++-6.dll", "libssp-0.dll",
+    "libatomic-1.dll", "libgomp-1.dll",
+})
+
+
 def safe_name(name):
     return (bool(name) and not ntpath.isabs(name) and ":" not in name
             and "\\" not in name and all(p not in ("", ".", "..") for p in name.split("/")))
@@ -140,6 +153,8 @@ def check_loaded(directory, listed, modules, require_mpv=False, baseline=(), sys
     for path in modules:
         path = ntpath.normcase(ntpath.normpath(path))
         parent, name = ntpath.split(path)
+        if name in FORBIDDEN_RUNTIME_DLLS:
+            problems.append(f"forbidden runtime DLL loaded: {path}")
         # Include subdirectories, though DLLs may only be listed in the root.
         inside = path.startswith(root.rstrip("\\") + "\\")
         if inside and name.endswith(".dll") and (name not in dlls or parent != root):

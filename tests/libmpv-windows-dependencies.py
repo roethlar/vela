@@ -301,18 +301,44 @@ class LoadedModuleTests(unittest.TestCase):
     mpv = directory + r"\libmpv-2.dll"
     interpreter = r"C:\Python\python313.dll"
     windows = r"E:\Windows"
+    runtimes = ("libwinpthread-1.dll", "libgcc_s_seh-1.dll", "libgcc_s_dw2-1.dll",
+                "libgcc_s_sjlj-1.dll", "libstdc++-6.dll", "libssp-0.dll",
+                "libatomic-1.dll", "libgomp-1.dll")
 
     def audit(self, modules, baseline=()):
         return check.check_loaded(self.directory, self.names, [self.mpv, *modules], True,
                                   baseline, self.windows)
 
     def test_new_external_module_names_its_path(self):
-        for path in (r"C:\tools\libwinpthread-1.dll", r"D:\Vela\libmpv-other\plugin.dll",
+        for path in (r"C:\tools\foreign.dll", r"D:\Vela\libmpv-other\plugin.dll",
                      r"E:\Windows\System32-other\bad.dll", r"E:\Windows\other\bad.dll",
                      r"C:\Windows\System32\wrong-root.dll", r"C:\tools\module.pyd"):
             with self.subTest(path=path):
                 self.assertEqual(self.audit([path]),
                                  ["new module loaded from outside the set and Windows: " + path.lower()])
+
+    def test_forbidden_runtimes_in_windows_directories(self):
+        for folder in (r"System32", r"SysWOW64", r"WinSxS\assembly",
+                       r"System32\DriverStore\FileRepository", r"DriverStore\FileRepository"):
+            for name in self.runtimes:
+                path = self.windows + "\\" + folder + "\\" + name.upper()
+                with self.subTest(path=path):
+                    self.assertIn("forbidden runtime DLL loaded: " + path.lower(), self.audit([path]))
+
+    def test_forbidden_runtimes_elsewhere(self):
+        for folder in (r"C:\tools", self.directory):
+            for name in self.runtimes:
+                path = folder + "\\" + name
+                with self.subTest(path=path):
+                    self.assertIn("forbidden runtime DLL loaded: " + path.lower(), self.audit([path]))
+
+    def test_baseline_and_manifest_cannot_exempt_forbidden_runtimes(self):
+        for folder in (self.windows + r"\System32", self.directory, r"C:\Python"):
+            path = folder + r"\libwinpthread-1.dll"
+            with self.subTest(path=path):
+                problems = check.check_loaded(self.directory, [*self.names, "libwinpthread-1.dll"],
+                                              [self.mpv, path], True, [path.upper()], self.windows)
+                self.assertIn("forbidden runtime DLL loaded: " + path.lower(), problems)
 
     def test_baseline_is_exempt_case_insensitively(self):
         self.assertEqual(self.audit([self.interpreter], baseline=[self.interpreter.upper()]), [])
@@ -321,10 +347,14 @@ class LoadedModuleTests(unittest.TestCase):
     def test_windows_directories_and_set_are_allowed(self):
         modules = [self.directory.upper() + r"\HELPER.DLL"]
         for suffix in (r"System32\kernel32.dll", r"SysWOW64\kernel32.dll",
-                       r"WinSxS\assembly\module.dll", r"System32\DriverStore\FileRepository\gpu.dll",
-                       r"DriverStore\FileRepository\gpu.dll"):
+                       r"WinSxS\assembly\module.dll"):
             modules.append(self.windows.upper() + "\\" + suffix)
         self.assertEqual(self.audit(modules), [])
+
+    def test_driverstore_gpu_modules_are_allowed(self):
+        for folder in (r"System32\DriverStore\FileRepository", r"DriverStore\FileRepository"):
+            with self.subTest(folder=folder):
+                self.assertEqual(self.audit([self.windows.upper() + "\\" + folder + r"\gpu.dll"]), [])
 
     def test_baseline_does_not_exempt_wrong_set_dll_or_unlisted_set_dll(self):
         foreign = r"C:\Python\helper.dll"
@@ -334,6 +364,13 @@ class LoadedModuleTests(unittest.TestCase):
         self.assertIn("loaded unlisted DLL: " + unlisted.lower(), problems)
 
     def test_play_passes_unchanging_baseline_and_system_root_to_audit(self):
+        self.assert_play_rejects_module(r"C:\tools\foreign.dll", r"new module.*c:\\tools\\foreign\.dll")
+
+    def test_play_rejects_runtime_from_system32(self):
+        self.assert_play_rejects_module(self.windows + r"\System32\libwinpthread-1.dll",
+                                        r"forbidden runtime DLL loaded: e:\\windows\\system32\\libwinpthread-1\.dll")
+
+    def assert_play_rejects_module(self, external, expected):
         class Kernel:
             def SetDefaultDllDirectories(self, flags):
                 return True
@@ -350,7 +387,6 @@ class LoadedModuleTests(unittest.TestCase):
         # loads. If the audit extends its baseline, drops the call, or omits the
         # real SystemRoot/baseline, this exercise fails for a different reason.
         baseline = [self.interpreter, self.windows + r"\System32\kernel32.dll"]
-        external = r"C:\tools\libwinpthread-1.dll"
         loaded = baseline + [self.mpv, self.windows + r"\System32\DriverStore\gpu.dll"]
         snapshots = [baseline, baseline, loaded, loaded + [external]]
         event = check.Event(1, 0, 0)  # without the audit, an unexpected shutdown
@@ -364,7 +400,7 @@ class LoadedModuleTests(unittest.TestCase):
                 patch.object(check.ctypes, "CDLL", return_value=library), \
                 patch.object(check.ctypes, "string_at", return_value=b"mpv 0.42.0"), \
                 contextlib.redirect_stdout(io.StringIO()):
-            with self.assertRaisesRegex(RuntimeError, r"new module.*c:\\tools\\libwinpthread-1\.dll"):
+            with self.assertRaisesRegex(RuntimeError, expected):
                 check.play(Path(self.directory))
 
 
