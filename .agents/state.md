@@ -517,7 +517,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   `a65f521` built locally with the libmpv set and passing
   `packaging/libmpv/check-package.sh`, on the NVIDIA machine as
   `~/vela-nv-test/vela-1.0.68-1-settings-x86_64.pkg.tar.zst` (sha256
-  `455a9f3d…b142`). Not yet run on these commits: the Windows suite (no
+  `455a9f3d…b142`). The owner installed it there: "verified on the other
+  linux box" (2026-11-17). Not yet run on these commits: the Windows suite (no
   release builds while the audit gate fails; CI's own jobs ran).
 
 - FOUND 2026-11-17, NOT FIXED: Vela's Linux AppImage always runs under
