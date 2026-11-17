@@ -510,6 +510,21 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   `xvfb-run`, not what ran under it), kept this machine at a load of
   about 20; `watchposition` failed twice and `pagefail` once in that
   window (next entry).
+- The Windows end-to-end suite did not pass at `9d44c5e` (run 44101184219),
+  failing different scenarios on each of two attempts. Attempt 1: external
+  in full, embedded 48 of 50 (`curation`, `resume`: "mpv: no reply to
+  get_property"; the failure screenshot shows the play already watched;
+  ASSUMPTION, unproven: on the slow runner `playAndQuit`'s wait for Vela's
+  connections outlasted the 10-second clip, and the embedded player closed
+  its pipe before the harness's `time-pos` question, helpers.mjs:607).
+  Attempt 2: embedded in full, external 44 of 46 (`continuetv`: a WebDriver
+  `execute/sync` got no response within 30 s; `smoke`, next: the page's
+  version line read null). Nothing that runs on Windows changed since
+  `74df55a`, where both suites passed in full (44087343362): the product
+  change of `daa182c` is Linux-only, and the harness change of `9d44c5e`
+  touches Windows only in a log line. So these are the hosted runner's
+  intermittents, not a defect found; they make the Windows suite a weak
+  gate until its waits are made robust (proposed to the owner, not done).
 - E2E `watchposition` and `pagefail` fail now and then in the embedded
   player, more often on a loaded machine. `watchposition`: the grid's
   `scrollTop` moves 1 to 4 px during one of its holds (777 to 776, 775
