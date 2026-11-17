@@ -233,9 +233,11 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   document, and the scenario's scroll helper sends one scroll event, not
   two (the blocker's entry and what its diagnosis missed are in
   `docs/history/state-archive.md`, rotated that day). The full run of both suites at `b066dc0`, each building its app, passed everything: external 48 of 48, embedded 50 of 50, parity verdict PASS (the first run with no failure at all; results kept on `continuum` in `~/dev/vela-agent-keep/full-b066dc0-e2e/`).
-  One known intermittent failure remains, `completionhub` in the embedded
-  player (Blockers); wherever the account below calls `pagefail` the one
-  recorded failure, that was true when it was written.
+  One known intermittent failure remained then, `completionhub` in the
+  embedded player, repaired 2026-11-17 (its entry is in
+  `docs/history/state-archive.md`); `markers` is the one now (Blockers).
+  Wherever the account below calls `pagefail` the one recorded failure,
+  that was true when it was written.
 - ALSO 2026-11-15: SETTINGS SAVE EACH CHANGE AS IT IS MADE (`5fc040f`;
   plan `.agents/plans/settings-autosave.md`, decision of that day). The
   Player tab's seven Save buttons are gone; a setting added later gets
