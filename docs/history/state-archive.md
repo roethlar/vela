@@ -4,6 +4,62 @@ Entries rotated verbatim out of `.agents/state.md` when they stopped being
 live (handoff pruning rule). Newest rotation first; each block keeps its
 original wording and internal chronology.
 
+
+## Rotated 2026-11-17 (the `completionhub` race, repaired)
+
+Context for readers: this entry stood under Blockers. The race was
+repaired in the release's test pass (`2ab8ac5`, then `c3ea91d` for the
+codex hunt's tp-1 and tp-2); afterwards the scenario passed in the full
+runs at `c3ea91d`, `019c08b` and `dc3c9e8` in both players, and alone
+40 of 40 (embedded, `f2dcbc3`) and 20 of 20 embedded and 10 of 10
+external at each of `c3ea91d`, `019c08b` and `dc3c9e8`, as the entry
+asked before it could go. The entry, verbatim:
+
+- E2E `completionhub` fails now and then in the embedded player. First seen
+  2026-11-15: once in the full embedded run at `3505387` (which therefore
+  failed the parity verdict: 48 of 50), then in 2 of 49 runs of the scenario
+  alone on the same build. A product race, older than the Settings control
+  landed that day (which touches none of this code), and with next to no
+  effect on a real user:
+  - When a play ends, the tracker thread emits `playback-ended` and only
+    then hands the completion to the dispatcher (`src-tauri/src/commands.rs`,
+    the play's end notify: `app.emit("playback-ended", ...)` before
+    `advance.mark_ended(...)`). The dispatcher (`src-tauri/src/lib.rs`)
+    then records the clean completion locally (`admit_clean_completion`:
+    the session leaves recents and its identities are tombstoned), writes
+    "played" to the servers, and emits a second `playback-ended`.
+  - On the first event the page's `loadHome` asks for three things at
+    once: `get_hubs` (the server), and `get_recents` and
+    `get_continue_tombstones` (local, answered at once). When those two
+    are answered before the dispatcher's admission is written, the page
+    merges the server's Continue Watching, which still lists the finished
+    episode, with local state that does not yet hide it.
+  - Evidence, from the scenario made to print what the page showed (not
+    committed): in the failing run, after the first Home response that
+    follows the end, the page showed "Hub Series, S1 · E1 – Completed
+    Episode" where the scenario expects nothing, with the server's
+    "played" request arrived and unanswered; 3.9 s later, after that
+    answer and the second refresh, it showed "S1 · E2 – Follow-up
+    Episode". In every passing run the first look showed nothing.
+  - User-visible effect: the finished item can stay in Continue Watching
+    until the server has recorded it as played and the second refresh
+    lands. With a real server that is a fraction of a second, and the
+    second refresh normally supersedes the first before it is shown. The
+    scenario delays the server's answer by five seconds to look at the
+    state in between.
+  - The external player runs the same code; it has not been seen to fail
+    there.
+  - REPAIRED 2026-11-17 in the release's test pass (`2ab8ac5`, then
+    `c3ea91d` for tp-1 and tp-2): the first report of a clean end now
+    goes out from the completion dispatcher after the local admission has
+    been tried, unless the tracker already sent it (an EOF seen after the
+    tracker's end). The scenario alone passed 40 of 40 in the embedded
+    player at `f2dcbc3`. Remove this entry once the full runs after
+    `c3ea91d` show no `completionhub` failure.
+  - Until then: an embedded run that fails the verdict on `completionhub`
+    alone is this race until shown otherwise; run the scenario again by
+    itself before reading it as a regression.
+
 ## Rotated 2026-11-16 (the SvelteKit removal landed at `dee0f8b`; the `npm audit` blocker it cleared)
 
 Context for readers: four entries rotate here verbatim, all overtaken on
