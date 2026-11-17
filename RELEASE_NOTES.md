@@ -174,8 +174,9 @@ app.
 - The rare queued watch-edit race disclosed in 1.0.0 remains an accepted
   limitation.
 - The embedded player is experimental: on Linux it needs a Wayland session
-  (if Vela's window ever comes up blank, start Vela once with
-  `WEBKIT_DISABLE_DMABUF_RENDERER=1` and choose mpv's own window); on Linux and macOS
+  (if Vela's window ever comes up blank, start Vela with
+  `WEBKIT_DISABLE_DMABUF_RENDERER=1` in its environment and keep it there;
+  videos then play in mpv's own window); on Linux and macOS
   its picture is drawn by a different mpv renderer than mpv's own window; it
   does not crop HDR video. `docs/usage.md` lists the differences.
 - With two monitors of the same model, Vela cannot tell them apart, and the

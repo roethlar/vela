@@ -206,9 +206,13 @@ output, and has no effect on macOS or Windows. Vela used to turn that renderer
 off because it once crashed the webview on NVIDIA with Wayland; with a current
 WebKitGTK it works there (tested on an RTX 5090). If Vela closes before its
 window has loaded, the next start uses the renderer-off window and says why.
-If Vela's window comes up blank, start Vela once with
-`WEBKIT_DISABLE_DMABUF_RENDERER=1`, which starts it with the renderer off,
-and choose mpv's own window in Settings. A
+If Vela's window comes up blank, start Vela with
+`WEBKIT_DISABLE_DMABUF_RENDERER=1` in its environment (for example in the
+desktop file's `Exec` line, as `env WEBKIT_DISABLE_DMABUF_RENDERER=1 vela`),
+which starts it with the renderer off, and keep it there for as long as the
+blank window would come back: the player choice no longer changes how Vela
+starts, so choosing mpv's own window alone does not avoid the renderer. With
+the variable set, videos play in mpv's own window. A
 `WEBKIT_DISABLE_DMABUF_RENDERER` you set yourself is left as it is. It rules
 the embedded player out only when its value is nonempty and not `0`. An empty
 value or `0` does not cause that refusal; the other requirements for embedded
