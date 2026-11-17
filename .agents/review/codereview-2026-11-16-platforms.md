@@ -9,9 +9,10 @@ thirteen admitted (one HIGH, nine MEDIUM, three LOW), none declined.
 All but pl-9 are repaired and closed: codex wrote pl-1 to pl-6's, pl-8's,
 pl-11's, pl-12's and pl-14 to pl-19's repairs as coding tasks and the
 working agent's review closed them (adding the Windows half of pl-5); the
-working agent wrote pl-7's, pl-10's, pl-13's and pl-20 to pl-22's. A
+working agent wrote pl-7's, pl-10's, pl-13's and pl-20 to pl-26's. A
 ninth and tenth hunt, over pl-14 to pl-19's repairs, found pl-20 to pl-22;
-an eleventh, over those, is running.
+an eleventh, over those, found pl-23 to pl-26; a twelfth, over those, is
+running.
 pl-9 is about tests alone and waits for the release's test pass
 (`.agents/decisions.md`, 2026-11-14). pl-11 leaves one path open on
 purpose, stated in its section.
@@ -62,7 +63,11 @@ purpose, stated in its section.
 | pl-19 | MEDIUM  | macOS: a conditional profile can undo video-timing-offset=0, so video runs ahead of audio | `[x]` | `91c72f6` |
 | pl-20 | MEDIUM  | Windows set: the PE scanner reads the first of two overlapping sections, the loader a later one | `[x]` | `09c42c0` |
 | pl-21 | MEDIUM  | screens: a fullscreen start on Vela's fallback screen lost Linux's fullscreen output name | `[x]` | `0352976` |
-| pl-22 | LOW     | macOS: DYLD_ROOT_PATH, simulator-only, refused the embedded player for nothing | `[x]` | `2bc6e3c` |
+| pl-22 | LOW     | macOS: DYLD_ROOT_PATH, simulator-only, refused the embedded player for nothing | `[x]` | `2bc6e3c`, reversed by pl-25 |
+| pl-23 | MEDIUM  | Windows set: the overlap check left out the headers and a section's raw tail | `[x]` | `15a6be0` |
+| pl-24 | MEDIUM  | Windows set: the overlap check refused an empty section | `[x]` | `b7b035e` |
+| pl-25 | MEDIUM  | macOS: macOS 11's dyld honours DYLD_ROOT_PATH natively, so pl-22's exemption was wrong | `[x]` | `a2f9673` |
+| pl-26 | LOW     | screens: the remembered screen's doc comment sat on the fallback helper | `[x]` | `35d6757` |
 
 ### pl-1 (whost)
 
@@ -530,3 +535,71 @@ development launch inheriting DYLD_ROOT_PATH unnecessarily disables
 embedded playback."
 
 Admitted. Repair (`2bc6e3c`): DYLD_ROOT_PATH is no longer refused.
+
+## An eleventh hunt: the repairs of pl-20 to pl-22
+
+Dispatched by the working agent over `91c72f6..2bc6e3c` (slice `fix5`),
+the three repairs it wrote itself. Same harness and reviewer as above.
+**findings**: four candidates, all admitted: pl-23, pl-24 and pl-25
+(MEDIUM) and pl-26 (LOW). The working agent repaired all four; a twelfth
+hunt reads those repairs.
+
+### pl-23 (fix5)
+
+Reviewer, verbatim, evidence: "packaging/libmpv/windows-pe.py:40-55 checks
+sections against each other but excludes the headers. A fixture with
+SizeOfHeaders=0x2000 and a section at RVA 0x1000, backed at file offset
+0x2000, passes the check. location() reads zero-filled header bytes instead
+of that section's import descriptor. The scanner reports no imports and
+production check_closure succeeds without helper.dll; Wine LoadLibrary
+succeeds with helper.dll and fails with error 126 without it." Predicted
+failure: "The dependency-closure gate accepts an incomplete Windows library
+set whose DLL cannot load because a required dependency is missing."
+
+Admitted. Repair (`15a6be0`): the check uses location()'s own view, the
+headers' range and each section's larger extent of VirtualSize and
+SizeOfRawData (the second part found by the working agent while repairing:
+pl-20 took VirtualSize, so a next section inside a raw tail was still read
+through the first).
+
+### pl-24 (fix5)
+
+Reviewer, verbatim, evidence: "packaging/libmpv/windows-pe.py:52-54 rejects
+start < previous_end even when extent is zero. A fixture with a section
+spanning RVA 0x1000-0x3000 and an empty section at 0x2000
+(VirtualSize=SizeOfRawData=0) now fails production check_closure. The
+scanner before 09c42c0 extracts its dependency correctly, and Wine
+LoadLibrary successfully loads it with that dependency present." Predicted
+failure: "Windows library packaging rejects an otherwise loadable image
+even though the empty section maps no overlapping bytes."
+
+Admitted. Repair (`b7b035e`): a mapping of no bytes is skipped.
+
+### pl-25 (fix5)
+
+Reviewer, verbatim, evidence: "src-tauri/src/player/embedded/libmpv.rs:430-431
+permits DYLD_ROOT_PATH unconditionally, while
+scripts/build-libmpv-macos.sh:42 targets macOS 11.0. Apple's macOS 11.0.1
+manifest selects dyld-832.7.1. Its ImageLoader.h enables SUPPORT_ROOT_PATH
+for native macOS; dyld2.cpp parses this variable and prefixes absolute
+paths in loadPhase0. Thus an unhardened native launch with
+DYLD_ROOT_PATH=/mirror can select a library at
+/mirror<absolute-bundled-path>. This is established from source, not a
+native runtime test." Predicted failure: "On that supported native
+runtime, an outside library can execute initializers during dlopen before
+Vela's subsequent path check rejects it."
+
+Admitted. Repair (`a2f9673`): DYLD_ROOT_PATH is refused again, which
+reverses pl-22; a launch on macOS 12 or later that inherits it falls back
+to mpv's own window, the safe side.
+
+### pl-26 (fix5)
+
+Reviewer, verbatim, evidence: "src-tauri/src/player/launch.rs:616-630 now
+attaches the remembered-screen 'protected tail, after the user's options'
+documentation to fallback_screen_args. That function rejects remembered
+screens at line 631 and is called before user_args at lines 453-454."
+Predicted failure: "The source and generated API documentation describe
+the fallback helper with the opposite precedence contract."
+
+Admitted. Repair (`35d6757`): each function carries its own comment.
