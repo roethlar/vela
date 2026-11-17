@@ -1150,7 +1150,11 @@ test("overlay mode's renderer is made, drawn and freed on GTK's thread, which ne
     code(methodBody(overlay, '    pub(super) fn end(&self) -> Result<(), String> {', 'Target::end')),
     /let asked = on_gtk\(&self\.app, move \|\| \{\s+if \*phase\.lock\(\)\.unwrap_or_else\(\|e\| e\.into_inner\(\)\) == Phase::Drawing \{\s+if let Some\(area\) = area\(\) \{\s+end_drawing\(&area, true\);/,
   );
-  assert.equal(count(code(overlay), 'end_drawing('), 3, 'its definition and those two calls');
+  assert.equal(
+    count(code(overlay), 'end_drawing('),
+    4,
+    "its definition, the play's end, the window going, and a play that replaces it (below)",
+  );
   // The player goes only after that: the play's drop ends the drawing
   // first, and a renderer that may still exist keeps the play's thread, and
   // with it the player, for good.
@@ -1188,6 +1192,13 @@ test("overlay mode's renderer is made, drawn and freed on GTK's thread, which ne
     code(lib),
     /tauri::RunEvent::ExitRequested[\s\S]*?#\[cfg\(target_os = "linux"\)\]\s+let mut slot = player::embedded::lock_slot_on_window_thread\(&state\.current_child\);\s+#\[cfg\(not\(target_os = "linux"\)\)\]/,
   );
+
+  // A play that replaces another does not wait for it to stop, and there is
+  // one video area: the new play's begin ends the other's drawing, never
+  // refuses because of it (review finding ov-6).
+  const beginDrawing = code(functionBody(overlay, 'unsafe fn begin_drawing(', 'begin_drawing'));
+  assert.match(beginDrawing, /let area = area\(\)\.ok_or\("Vela's window has no video area"\)\?;\s+end_drawing\(&area, false\);\s+area\.show\(\);/);
+  assert.doesNotMatch(beginDrawing, /still drawing|overlay\.renderer\.is_some\(\)/);
 });
 
 test('the shipped library is tested itself, in every full embedded E2E run', () => {

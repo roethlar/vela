@@ -383,9 +383,10 @@ fn render(area: &gtk::GLArea, _context: &gtk::gdk::GLContext) -> gtk::glib::Prop
 }
 
 /// Free the play's renderer, with the area's context current, and hide the
-/// area when `hide`. Run by the play (`Target::end`) and by the area's
-/// unrealize, when the window goes away under a running play (which does not
-/// hide what is being taken down). GTK's thread only.
+/// area when `hide`. Run by the play (`Target::end`), by a play that replaces
+/// it (`begin_drawing`), and by the area's unrealize, when the window goes
+/// away under a running play (which does not hide what is being taken down).
+/// GTK's thread only.
 fn end_drawing(area: &gtk::GLArea, hide: bool) {
     let taken = OVERLAY.with(|slot| slot.borrow_mut().as_mut().and_then(|overlay| overlay.renderer.take()));
     if let Some((renderer, phase)) = taken {
@@ -413,9 +414,13 @@ unsafe fn begin_drawing(
     phase: Arc<Mutex<Phase>>,
 ) -> Result<(), String> {
     let area = area().ok_or("Vela's window has no video area")?;
-    if OVERLAY.with(|slot| slot.borrow().as_ref().is_some_and(|overlay| overlay.renderer.is_some())) {
-        return Err("another play is still drawing in Vela's window".to_string());
-    }
+    // A play that replaces another starts as soon as it has told the other
+    // to stop, without waiting for it (`commands::play_by_key_locked`), and
+    // there is one video area: what the other still draws is ended here,
+    // its renderer freed, and its own teardown then finds nothing to free.
+    // Refusing instead lost the new play to mpv's own window whenever its
+    // start came first (review finding ov-6).
+    end_drawing(&area, false);
     area.show();
     if !area.is_realized() {
         area.realize();

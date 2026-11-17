@@ -20,12 +20,12 @@ MEDIUM). One more, ov-6, found by the working agent while verifying ov-1.
 
 | ID   | Severity | Finding (one line)                                                      | Status | Commit |
 |------|----------|--------------------------------------------------------------------------|--------|--------|
-| ov-1 | HIGH     | An overlay start waits for GTK's thread while holding the player slot, which GTK's thread can be waiting for | `[x]` | the commit after `5c4e188` |
+| ov-1 | HIGH     | An overlay start waits for GTK's thread while holding the player slot, which GTK's thread can be waiting for | `[x]` | `4b91540` |
 | ov-2 | MEDIUM   | Exit waits on GTK's thread for an overlay play whose teardown needs GTK's thread | `[ ]` | |
 | ov-3 | MEDIUM   | A profile can change `video-timing-offset` after the overlay play starts, and frames are then shown early | `[ ]` | |
 | ov-4 | MEDIUM   | `embeddedlatestart` leaves a log request unhandled when its player goes away | `[x]` | `5c4e188` |
 | ov-5 | MEDIUM   | The overlay guard passes with the renderer never freed, or freed without its context current | `[ ]` | |
-| ov-6 | MEDIUM   | A play replacing an overlay play can be refused because the old one is still drawing | `[ ]` | |
+| ov-6 | MEDIUM   | A play replacing an overlay play can be refused because the old one is still drawing | `[x]` | the commit after `4b91540` |
 
 ### ov-1
 
@@ -112,3 +112,11 @@ window"), so whenever the new play's begin reaches GTK's thread before the
 old play's teardown, the new play falls back to mpv's own window and
 Vela's window is off for the rest of the run. `replaceplay` passed under
 X11 because the old play usually wins that race.
+
+Repaired: `begin_drawing` ends whatever is still drawing (freeing its
+renderer on GTK's thread with the context current, `end_drawing`) before it
+begins; the replaced play's own teardown then finds its phase `Done` and
+frees nothing. Only one embedded play is ever the current one, a replaced
+one has been told to stop, and a play that will not end is kept out by
+`session::unfinished_plays` before any start. The guard holds the call and
+that nothing refuses.
