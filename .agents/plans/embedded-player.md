@@ -2762,3 +2762,26 @@ what is not known is found by probes first, logged below.
   each platform has and lacks.
 
 ### Probe log (2026-11-17)
+- **Probe X1, the overlay route on X11: works, and holds 4K60.**
+  Throwaway Python with PyGObject (GTK 3.24, WebKitGTK 2.54) and Vela's
+  shipped Linux libmpv over `ctypes`, outside the repo. Under Xvfb (X11,
+  Mesa's software GL): a WebKit view moved, live, out of a `GtkBox` (where
+  wry packs it) into a `GtkOverlay` over a `GtkGLArea` keeps its page; the
+  transparent page shows the GL area's drawing through it, a half-black
+  band darkens it by half, an opaque bar hides it; two clicks through XTest
+  reach the page's button. mpv's render API draws the video into the GL
+  area's framebuffer (`mpv_render_context_render` with the bound FBO,
+  `FLIP_Y`, the update callback queueing a redraw on GTK's thread): the
+  screenshot shows the test pattern under the page's band, button and bar.
+  mpv needs `LC_NUMERIC=C` (GTK sets the user's locale). On the real GPU
+  (Radeon RX 9070 XT), X11 through Xwayland under a headless weston, 60 fps
+  clips, 10 s each: 1080p with the page 60 fps, no drop, 11% of one core
+  (7% without the page); 4K with the page 60 fps, no drop, 28% (16%
+  without); the same overlay under Wayland at 4K, 60 fps, no drop, 38%.
+  Decoding is VA-API with copy-back (`vaapi-copy`: GLX takes no VA-API
+  surface). With WebKit's DMABUF renderer off, as Vela runs on NVIDIA's
+  driver: under X11 the page still composites over the video (Xvfb), and
+  under Wayland 1080p60 drew with no drop at 16%. So one host, GTK's own
+  compositing, serves X11 and NVIDIA alike, in standard range (GTK 3
+  composites in 8-bit sRGB; mpv tone-maps HDR into it, as on macOS before
+  its EDR layer).
