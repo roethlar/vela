@@ -2497,5 +2497,88 @@ artifact keeps the probe's logs and screenshots.
   with the image audit passing; every other job passed too. The six codex
   hunts over the platform slices and their fixes are recorded in
   `.agents/review/codereview-2026-11-16-platforms.md`. Probe M2 (above)
-  found the macOS picture black; its repair is next, then M2 again, then
-  the owner's checks, listed once with what each platform has and lacks.
+  found the macOS picture black; three repairs later it plays (`cf23d90`,
+  `e3b4005`, `a45999c`); probe W2 found and verified the Windows privacy
+  check's repair (`96c0f4d`) and played on Windows. Linux unchanged
+  throughout (both suites in full at `cf23d90` and after). The owner's
+  checks follow.
+
+### For the owner: each platform, what it has, what to check (2026-11-17)
+
+Written once, at the end of the amendment's work, as the amendment asks.
+The builds are the artifacts of the release workflow run by hand at
+`cd4f4ee`, run 43991901348 (`gh run download 43991901348 --repo
+roethlar/vela`: `vela-macos` the DMG, `vela-windows` the NSIS installer and
+the MSI, `vela-linux` the AppImage, deb and rpm, `vela-arch`); if a later
+run replaces it, `.agents/state.md` names it. mpv's own window stays the
+default everywhere; Vela's window is the experimental choice: Settings →
+Player → Video player → "Vela's window (experimental)", then restart Vela.
+
+**Every platform has:** browsing Plex, Jellyfin and Emby; mpv's own window
+with progress, resume and the remembered window (fullscreen or not, size,
+and the screen, even when your own mpv options name a numbered screen);
+Vela's window with Vela's own controls, keys and mouse (the view you use on
+Linux); the library Vela's window needs, inside the package.
+
+**Linux (Wayland, as you use it now).**
+- Has: all of the above; HDR in Vela's window through the compositor.
+- Lacks: Vela's window on X11, and with NVIDIA's proprietary driver (the
+  video plays in mpv's own window and Settings says why).
+- Proven by machine: both end-to-end suites in full at every product
+  commit (48 of 48, 51 of 51, parity PASS).
+- Check by eye: nothing new beyond a play remembered fullscreen on your
+  second screen reopening there.
+
+**Windows.**
+- Has: all of the above; Vela's window shows mpv's own Direct3D 11 output
+  inside it; HDR there when Windows' HDR is on. Vela now also starts under
+  Windows' built-in Administrator account (`96c0f4d`).
+- Lacks: signed installers (SmartScreen: "More info", then "Run anyway").
+- Proven by machine: the release run unpacks both installers and plays the
+  library from each on a Windows runner; probe W2 played twice in Vela's
+  window on a Windows runner, the test pattern on screen (Direct3D 11 on
+  WARP, the software adapter; run 43987838828).
+- Not proven by machine: the end-to-end suite (its harness cannot yet open
+  a WebDriver session on the hosted runner: the release's test pass), a
+  real GPU, HDR, your keys and mouse on Windows.
+- Check by eye, in order:
+  1. Install mpv if it is not there (winget, scoop or Chocolatey, where
+     Vela finds it; anywhere else, give its path in Settings → Player),
+     then install Vela (NSIS or MSI).
+  2. Play in mpv's own window; make it fullscreen on your second screen;
+     play again: it reopens there.
+  3. Choose Vela's window, restart Vela, play: the picture inside Vela's
+     window under its controls; Space, the arrows, f, a double-click
+     (fullscreen), the wheel (volume), a right-click (pause), the Audio and
+     Subtitles lists, Escape and q; Close, then play another.
+  4. With Windows' HDR on, an HDR10 file: highlights brighter than Vela's
+     white, colours right. Move the window between screens while it plays.
+
+**macOS.**
+- Has: all of the above; on first start the app asks to find devices on
+  your local network (Allow); Vela's window draws through mpv's render API
+  under the page; HDR there through extended dynamic range on a screen
+  that has it (the MacBook Pro's).
+- Lacks: VideoToolbox hardware decoding straight to the picture (this mpv
+  cannot without Swift; decoding copies back, which can cost smoothness at
+  4K HDR: watch for it).
+- Proven by machine: the release run signs and notarizes the app with the
+  library inside and plays the library from the finished DMG on Apple
+  Silicon and under Rosetta; probe M2 played twice in Vela's window on a
+  hosted Mac, the test pattern on screen and the clock advancing (Apple's
+  software renderer, with mpv's fast profile; runs 43990824184 and after).
+- Not proven by machine: a real Mac's GPU at mpv's default settings, HDR,
+  your keys and mouse on a Mac. This is the platform where your eyes matter
+  most.
+- Check by eye, in order:
+  1. Install mpv (`brew install mpv`; Vela finds it). Open the DMG, drag
+     Vela to Applications, open it: no Gatekeeper warning; allow the local
+     network.
+  2. Play in mpv's own window; fullscreen on the other screen; play again.
+  3. Choose Vela's window, restart Vela, play an SDR file: the picture
+     inside Vela's window, smooth, the clock moving; keys and mouse as on
+     Linux; Close, then play another.
+  4. An HDR10 file on the MacBook's screen: highlights brighter than
+     Vela's white. A playlist going SDR, HDR, SDR: a brief black between,
+     no flash of wrong colour. Drag the window to an SDR screen while it
+     plays: it changes to standard range.
