@@ -5087,9 +5087,9 @@ enum PlayDestination {
     /// A Compatible copy was ranked for this output, by name, decided once
     /// before the copy was chosen (`screen_for_play`). The launch asks for
     /// it and looks at no screen again, whichever player ends up running the
-    /// play. `None` only when not even the screen holding Vela's window has
-    /// a name.
-    RankedFor(Option<String>),
+    /// play. The name and its provenance travel together; the name is `None`
+    /// only when not even the screen holding Vela's window has a name.
+    RankedFor(PlayScreen),
     /// No copy was ranked for a screen (Best, Fastest, Ask, or nothing to
     /// rank): the launch decides the screen once the stream is resolved
     /// (`screen_at_launch`).
@@ -5101,6 +5101,8 @@ enum PlayDestination {
 struct PlayScreen {
     /// The output, by name.
     name: Option<String>,
+    /// Whether this is a remembered placement or Vela's overridable default.
+    source: playback::ScreenSource,
     /// The play's observation the name was taken from, if it was: its size
     /// counts as the output's size for the ranking (`display::profile_basis`).
     observed: Option<display::ObservedDisplay>,
@@ -5128,6 +5130,7 @@ fn screen_for_play(
         let display = session.observation.display_snapshot();
         display.screen_name().cloned().map(|name| PlayScreen {
             name: Some(name),
+            source: playback::ScreenSource::Remembered,
             observed: Some(display),
         })
     };
@@ -5136,6 +5139,7 @@ fn screen_for_play(
             Some(last) => observed(last),
             None => saved_first_screen.map(|name| PlayScreen {
                 name: Some(name.to_string()),
+                source: playback::ScreenSource::Remembered,
                 observed: None,
             }),
         },
@@ -5156,6 +5160,7 @@ fn screen_for_play(
         })
         .unwrap_or_else(|| PlayScreen {
             name: screens.velas.clone(),
+            source: playback::ScreenSource::Fallback,
             observed: None,
         })
 }
@@ -5186,7 +5191,7 @@ fn rank_and_place(
         Ranking::ForScreen { screen, target } => (
             crate::selection::PlaybackSourcePolicy::Compatible,
             Some(target),
-            PlayDestination::RankedFor(screen.name),
+            PlayDestination::RankedFor(screen),
         ),
         Ranking::ByPolicy(policy) => (policy, None, PlayDestination::DecidedAtLaunch),
     };
@@ -5204,10 +5209,10 @@ fn rank_and_place(
 async fn screen_at_launch(
     destination: PlayDestination,
     decide: impl AsyncFnOnce() -> PlayScreen,
-) -> Option<String> {
+) -> PlayScreen {
     match destination {
-        PlayDestination::RankedFor(name) => name,
-        PlayDestination::DecidedAtLaunch => decide().await.name,
+        PlayDestination::RankedFor(screen) => screen,
+        PlayDestination::DecidedAtLaunch => decide().await,
     }
 }
 
@@ -5994,7 +5999,7 @@ async fn play_by_key_locked(
     // review of pw-1, comment 5), as for a play in mpv's own window: the
     // only player that uses it, also for a play the embedded player cannot
     // start.
-    let screen_name = screen_at_launch(selection.screen, async || {
+    let screen = screen_at_launch(selection.screen, async || {
         decide_play_screen(
             state,
             replace_session,
@@ -6204,7 +6209,8 @@ async fn play_by_key_locked(
             autocrop_shim,
             crop_script,
             inherited_window_state,
-            screen_name,
+            screen_name: screen.name,
+            screen_source: screen.source,
             window_observation: window_observation.clone(),
             screens: display::screens_for_mpv(state.app_handle.get()).await,
             markers_script,
@@ -9811,10 +9817,10 @@ mod tests {
             },
         )
         .unwrap();
-        let PlayDestination::RankedFor(name) = destination else {
+        let PlayDestination::RankedFor(screen) = destination else {
             panic!("a Compatible choice carries the screen it was ranked for: {destination:?}");
         };
-        (winner.version_id, name)
+        (winner.version_id, screen.name)
     }
 
     #[test]
@@ -9871,6 +9877,116 @@ mod tests {
             named(VELAS),
             "only an embedded play's successor keeps its observed screen"
         );
+    }
+
+    #[test]
+    fn previous_play_screen_is_remembered_even_when_it_is_velas_screen() {
+        use crate::player::PlayerKind::{Embedded, External};
+        let screens = screens_with("DP-1", &two_screens());
+        for player in [External, Embedded] {
+            let record = published([session_observed_on("last", player, &["DP-1"], None)]);
+            let screen = screen_for_play(&record, Some("last"), player, None, &screens);
+            assert_eq!(screen.name.as_deref(), Some("DP-1"));
+            assert_eq!(screen.source, playback::ScreenSource::Remembered);
+            assert!(screen.observed.is_some());
+        }
+    }
+
+    #[test]
+    fn saved_window_screen_is_remembered_without_an_observation() {
+        let cfg = config::AppConfig {
+            mpv_window: Some(config::MpvWindow {
+                screen: Some("DP-1".to_string()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let (_, saved) = config::first_window_of_run(&cfg).unwrap();
+        let screen = screen_for_play(
+            &PlaybackWindowRecord::default(),
+            None,
+            crate::player::PlayerKind::External,
+            saved.as_deref(),
+            &screens_with("HDMI-1", &two_screens()),
+        );
+        assert_eq!(screen.name.as_deref(), Some("DP-1"));
+        assert_eq!(screen.source, playback::ScreenSource::Remembered);
+        assert!(screen.observed.is_none());
+    }
+
+    #[test]
+    fn velas_screen_is_a_fallback_when_nothing_remembered_is_usable() {
+        use crate::player::PlayerKind::External;
+        let screens = screens_with("HDMI-1", &two_screens());
+        for record in [
+            PlaybackWindowRecord::default(),
+            published([session_observed_on("unobserved", External, &[], None)]),
+        ] {
+            let screen = screen_for_play(&record, None, External, None, &screens);
+            assert_eq!(screen.name.as_deref(), Some("HDMI-1"));
+            assert_eq!(screen.source, playback::ScreenSource::Fallback);
+            assert!(screen.observed.is_none());
+        }
+        for mode in ["fullscreen", "default"] {
+            let cfg = config::AppConfig {
+                mpv_window_mode: Some(mode.into()),
+                mpv_window: Some(config::MpvWindow {
+                    screen: Some("DP-1".into()),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            };
+            let (_, saved) = config::first_window_of_run(&cfg).unwrap();
+            let screen = screen_for_play(
+                &PlaybackWindowRecord::default(), None, External, saved.as_deref(), &screens,
+            );
+            assert_eq!(screen.name.as_deref(), Some("HDMI-1"));
+            assert_eq!(screen.source, playback::ScreenSource::Fallback);
+        }
+    }
+
+    #[test]
+    fn a_disconnected_remembered_screen_becomes_a_fallback() {
+        use crate::player::PlayerKind::External;
+        let screens = screens_with("HDMI-1", &[output(&["HDMI-1"], 1920, 1080)]);
+        for (record, saved) in [
+            (published([session_observed_on("last", External, &["DP-1"], None)]), None),
+            (PlaybackWindowRecord::default(), Some("DP-1")),
+        ] {
+            let screen = screen_for_play(&record, None, External, saved, &screens);
+            assert_eq!(screen.name.as_deref(), Some("HDMI-1"));
+            assert_eq!(screen.source, playback::ScreenSource::Fallback);
+            assert!(screen.observed.is_none());
+        }
+    }
+
+    #[test]
+    fn screen_provenance_survives_ranking_and_the_launch_decision() {
+        use playback::ScreenSource::{Fallback, Remembered};
+        for source in [Fallback, Remembered] {
+            let screen = PlayScreen {
+                name: Some("HDMI-1".into()),
+                source,
+                observed: None,
+            };
+            let target = target_for(
+                &screen,
+                &screens_with("HDMI-1", &two_screens()),
+                display::HdrState::Disabled,
+            );
+            let (_, ranked) = rank_and_place(
+                &mut two_copies(),
+                Ranking::ForScreen { screen: screen.clone(), target },
+            ).unwrap();
+            let selected = tauri::async_runtime::block_on(screen_at_launch(ranked, async || {
+                panic!("a ranked screen must keep its original decision")
+            }));
+            assert_eq!(selected, screen);
+            let selected = tauri::async_runtime::block_on(screen_at_launch(
+                PlayDestination::DecidedAtLaunch, async || screen.clone(),
+            ));
+            assert_eq!(selected, screen);
+        }
     }
 
     #[test]
@@ -9992,7 +10108,7 @@ mod tests {
         let screen = screen_for_play(&on_dp1, None, External, None, &only_hdmi);
         assert_eq!(
             screen,
-            PlayScreen { name: Some("HDMI-1".to_string()), observed: None },
+            PlayScreen { name: Some("HDMI-1".to_string()), ..Default::default() },
             "the last window's screen is gone: Vela's screen, and the observation does not count"
         );
         assert_eq!(
@@ -10133,7 +10249,7 @@ mod tests {
         };
         assert_eq!(
             rank(for_screen()),
-            ("1080p-sdr".to_string(), PlayDestination::RankedFor(Some("HDMI-1".to_string())))
+            ("1080p-sdr".to_string(), PlayDestination::RankedFor(screen.clone()))
         );
         let at_launch = PlayDestination::DecidedAtLaunch;
         assert_eq!(rank(Ranking::ByPolicy(Best)), ("4k-hdr".to_string(), at_launch.clone()));
@@ -10176,16 +10292,20 @@ mod tests {
                 screen_for_play(&slot.lock().unwrap(), None, External, None, &screens)
             }))
         };
-        assert_eq!(launch(destination), Some("HDMI-1".to_string()), "the late report counts");
+        assert_eq!(launch(destination).name, Some("HDMI-1".to_string()), "the late report counts");
         assert_eq!(decided.get(), 1, "decided once, at the launch");
         // A Compatible copy ranked for DP-1 is shown on DP-1, and the launch
         // looks at nothing.
         assert_eq!(
-            launch(PlayDestination::RankedFor(Some("DP-1".to_string()))),
+            launch(PlayDestination::RankedFor(PlayScreen {
+                name: Some("DP-1".to_string()),
+                source: playback::ScreenSource::Remembered,
+                observed: None,
+            })).name,
             Some("DP-1".to_string())
         );
         assert_eq!(decided.get(), 1, "a Compatible copy's screen is not decided again");
-        assert_eq!(launch(PlayDestination::RankedFor(None)), None);
+        assert_eq!(launch(PlayDestination::RankedFor(PlayScreen::default())).name, None);
         assert_eq!(decided.get(), 1);
         // A play that wants the embedded player is decided at the launch as
         // for mpv's own window, where it opens if the embedded player cannot
@@ -10313,7 +10433,8 @@ mod tests {
         };
         let mut spec = embedded_spec();
         spec.url = resolved.url;
-        spec.screen_name = destination;
+        spec.screen_name = destination.name;
+        spec.screen_source = destination.source;
         spec.inherited_window_state = opening_window(&record, Default::default());
         let launcher = FailingLauncher {
             asked: Arc::new(Mutex::new(Vec::new())),

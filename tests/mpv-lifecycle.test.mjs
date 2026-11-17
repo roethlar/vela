@@ -123,6 +123,9 @@ test('Advanced arguments are still applied inside base_args', () => {
   );
   assert.ok(body.lastIndexOf('LaunchArg::set(') < taken[1], 'no external default follows them');
   assert.ok(body.lastIndexOf('LaunchArg::flag(') < taken[1]);
+  const fallback = body.indexOf('if spec.screen_source == ScreenSource::Fallback');
+  assert.ok(fallback > taken[0] && fallback < taken[1], 'the external fallback belongs before Advanced options');
+  assert.match(body.slice(fallback, taken[1]), /args\.extend\(screen_name_arg\(spec\.screen_name\.as_deref\(\), &spec\.screens\)\);/);
 });
 
 test("the embedded player's required options follow everything the user controls", () => {

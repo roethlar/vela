@@ -190,7 +190,7 @@ test('the real launch seeds and shares the complete opening window state', () =>
   );
   assert.match(
     play,
-    /let spec = playback::PlaySpec \{[^}]*\binherited_window_state,\s+screen_name,\s+window_observation: window_observation\.clone\(\),/,
+    /let spec = playback::PlaySpec \{[^}]*\binherited_window_state,\s+screen_name: screen\.name,\s+screen_source: screen\.source,\s+window_observation: window_observation\.clone\(\),/,
     'the IPC reader must receive the observation seeded from the actual launch state',
   );
   assert.match(
@@ -258,7 +258,7 @@ test('a Compatible play is shown on the screen its copy was ranked for, any othe
   const place = bodyOf(commands, 'fn rank_and_place(');
   assert.match(
     place,
-    /\) -> Option<[^{]*\{\s+let \(policy, target, destination\) = match ranking \{\s+Ranking::ForScreen \{ screen, target \} => \(\s+crate::selection::PlaybackSourcePolicy::Compatible,\s+Some\(target\),\s+PlayDestination::RankedFor\(screen\.name\),\s+\),\s+Ranking::ByPolicy\(policy\) => \(policy, None, PlayDestination::DecidedAtLaunch\),\s+\};\s+crate::selection::rank_candidates\(candidates, policy, target\);\s+candidates\s+\.first\(\)\s+\.cloned\(\)\s+\.map\(\|winner\| \(winner, destination\)\)$/,
+    /\) -> Option<[^{]*\{\s+let \(policy, target, destination\) = match ranking \{\s+Ranking::ForScreen \{ screen, target \} => \(\s+crate::selection::PlaybackSourcePolicy::Compatible,\s+Some\(target\),\s+PlayDestination::RankedFor\(screen\),\s+\),\s+Ranking::ByPolicy\(policy\) => \(policy, None, PlayDestination::DecidedAtLaunch\),\s+\};\s+crate::selection::rank_candidates\(candidates, policy, target\);\s+candidates\s+\.first\(\)\s+\.cloned\(\)\s+\.map\(\|winner\| \(winner, destination\)\)$/,
   );
   // Nothing else makes either: a ranking for a screen is made only in the
   // Compatible arm, a screen ranked for only by rank_and_place.
@@ -354,12 +354,12 @@ test('a Compatible play is shown on the screen its copy was ranked for, any othe
   // saved first screen, through decide_play_screen and nothing else.
   assert.match(
     bodyOf(commands, 'async fn screen_at_launch('),
-    /\) -> Option<String> \{\s+match destination \{\s+PlayDestination::RankedFor\(name\) => name,\s+PlayDestination::DecidedAtLaunch => decide\(\)\.await\.name,\s+\}$/,
+    /\) -> PlayScreen \{\s+match destination \{\s+PlayDestination::RankedFor\(screen\) => screen,\s+PlayDestination::DecidedAtLaunch => decide\(\)\.await,\s+\}$/,
   );
   assert.equal(count(production, 'screen_at_launch('), 2, 'defined, and called by the launch only');
   const playBody = bodyOf(commands, 'async fn play_by_key_locked(');
   const decidedAt = playBody.search(
-    /let screen_name = screen_at_launch\(selection\.screen, async \|\| \{\s+decide_play_screen\(\s+state,\s+replace_session,\s+crate::player::PlayerKind::External,\s+saved_first_screen\.as_deref\(\),\s+\)\s+\.await\s+\.0\s+\}\)\s+\.await;/,
+    /let screen = screen_at_launch\(selection\.screen, async \|\| \{\s+decide_play_screen\(\s+state,\s+replace_session,\s+crate::player::PlayerKind::External,\s+saved_first_screen\.as_deref\(\),\s+\)\s+\.await\s+\.0\s+\}\)\s+\.await;/,
   );
   assert.ok(decidedAt > 0, 'the launch takes the screen through screen_at_launch');
   const resolvedEnd = playBody.indexOf(
@@ -380,8 +380,9 @@ test('a Compatible play is shown on the screen its copy was ranked for, any othe
   assert.equal([...playBody.matchAll(/\bsaved_first_screen\b/g)].length, 2, 'read once, used once');
   assert.equal(count(playBody, 'selection.screen'), 1, 'what the choice of copy handed on is read once');
   assert.equal(count(playBody, 'decide_play_screen('), 1);
-  assert.match(playBody, /\n\s+screen_name,\n/, 'and handed to the launch');
-  assert.equal([...playBody.matchAll(/\bscreen_name\b/g)].length, 2, 'untouched in between');
+  assert.match(playBody, /\n\s+screen_name: screen\.name,\n\s+screen_source: screen\.source,\n/, 'name and provenance reach the launch together');
+  assert.equal(count(playBody, 'screen.name'), 1, 'the chosen name is handed on once');
+  assert.equal(count(playBody, 'screen.source'), 1, 'its provenance is handed on once');
   assert.doesNotMatch(
     playBody,
     /current_screen_name|look_at_screens|screen_for_play|detect_profile|profile_of|profile_basis|hdr_of|inherited_screen_name|display_snapshot|PlayDestination::/,

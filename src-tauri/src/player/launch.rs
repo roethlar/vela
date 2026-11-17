@@ -9,7 +9,7 @@
 use std::io::Write;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::playback::{PlaySpec, PlaybackScreens, PlaybackWindowState};
+use crate::playback::{PlaySpec, PlaybackScreens, PlaybackWindowState, ScreenSource};
 use crate::player::PlayerKind;
 
 #[cfg(any(target_os = "macos", test))]
@@ -385,7 +385,11 @@ fn parse_extra_mpv_args(raw: &str) -> Vec<String> {
 /// (credentials, IPC, title, resume point, scripts, and URL) are added by
 /// [`build_launch`]; keeping the defaults here makes their ordering directly
 /// testable.
-fn base_args(cfg: &crate::config::AppConfig, player: PlayerKind) -> (Vec<LaunchArg>, LaunchEnv) {
+fn base_args(
+    spec: &PlaySpec,
+    cfg: &crate::config::AppConfig,
+    player: PlayerKind,
+) -> (Vec<LaunchArg>, LaunchEnv) {
     if player == PlayerKind::Embedded {
         let mut args = embedded_default_args();
         args.extend(user_args(cfg));
@@ -445,6 +449,10 @@ fn base_args(cfg: &crate::config::AppConfig, player: PlayerKind) -> (Vec<LaunchA
 
     // User-supplied advanced options remain last among defaults, so repeated
     // mpv options retain their documented last-option-wins behavior.
+    // Vela's own screen is only a default, unlike a remembered placement.
+    if spec.screen_source == ScreenSource::Fallback {
+        args.extend(screen_name_arg(spec.screen_name.as_deref(), &spec.screens));
+    }
     args.extend(user_args(cfg));
 
     (args, env)
@@ -617,7 +625,7 @@ fn screen_name_arg(name: Option<&str>, screens: &PlaybackScreens) -> Option<Laun
 /// screen's name; macOS and Windows go fullscreen on the restored window's
 /// screen once no number overrides it.
 fn restored_screen_args(spec: &PlaySpec, player: PlayerKind, linux: bool) -> Vec<LaunchArg> {
-    if player != PlayerKind::External {
+    if player != PlayerKind::External || spec.screen_source != ScreenSource::Remembered {
         return Vec::new();
     }
     let Some(screen) = screen_name_arg(spec.screen_name.as_deref(), &spec.screens) else {
@@ -904,7 +912,7 @@ pub(crate) fn build_launch_for(
     // Which player this launch is for decides a handful of options, here and
     // in `base_args`. The list is never edited afterwards, by either player.
     let embedded = player == PlayerKind::Embedded;
-    let (mut args, mut env) = base_args(cfg, player);
+    let (mut args, mut env) = base_args(spec, cfg, player);
 
     // Bundled mpv autocrop script (Settings → Advanced). Placed with the user
     // extra args (before the re-asserted IPC/title/URL block) so it can't clobber
@@ -1100,6 +1108,7 @@ mod tests {
             crop_script: None,
             inherited_window_state: PlaybackWindowState::default(),
             screen_name: None,
+            screen_source: ScreenSource::Remembered,
             screens: PlaybackScreens::Named,
             window_observation: crate::playback::WindowStateObservation::default(),
             markers_script: None,
@@ -1135,7 +1144,8 @@ mod tests {
     }
 
     fn base_command_args(cfg: crate::config::AppConfig) -> Vec<String> {
-        cli(base_args(&cfg, PlayerKind::External).0)
+        let spec = plain_spec(PlayerKind::External, "https://media.invalid/video.mkv");
+        cli(base_args(&spec, &cfg, PlayerKind::External).0)
     }
 
     fn window_state_args(state: PlaybackWindowState) -> Vec<String> {
@@ -1377,6 +1387,121 @@ mod tests {
         );
         assert_eq!(screen_name_arg(Some("  ")), None);
         assert_eq!(screen_name_arg(None), None);
+    }
+
+    fn check_screen_precedence(linux: bool, screens: PlaybackScreens, name: &str, option: &str) {
+        let mut failures = Vec::new();
+        for source in [ScreenSource::Remembered, ScreenSource::Fallback] {
+            for fullscreen in [false, true] {
+                for own_config in [false, true] {
+                    for user in [
+                        "",
+                        "--screen=1",
+                        "--fs-screen=0",
+                        "--screen-name=other",
+                        "--screen=1\n--fs-screen=0\n--screen-name=other",
+                        "--screen=1\n--fs-screen=0\n--screen-name=other\n--fs-screen-name=other",
+                    ] {
+                        let spec = PlaySpec {
+                            screen_name: Some(name.into()),
+                            screen_source: source,
+                            screens: screens.clone(),
+                            inherited_window_state: PlaybackWindowState {
+                                fullscreen: Some(fullscreen),
+                                ..Default::default()
+                            },
+                            ..plain_spec(PlayerKind::External, "https://media.invalid/video.mkv")
+                        };
+                        let cfg = crate::config::AppConfig {
+                            mpv_extra_args: Some(user.into()),
+                            mpv_use_own_config: Some(own_config),
+                            ..Default::default()
+                        };
+                        let mut expected = Vec::new();
+                        if source == ScreenSource::Fallback {
+                            expected.push(option.to_string());
+                        }
+                        expected.extend(user.lines().map(str::to_string));
+                        if source == ScreenSource::Remembered {
+                            expected.push(option.to_string());
+                            if matches!(screens, PlaybackScreens::Named) {
+                                expected.push("--screen=default".into());
+                            }
+                            if fullscreen {
+                                if linux {
+                                    expected.push(format!("--fs-screen-name={name}"));
+                                }
+                                expected.push("--fs-screen=current".into());
+                            }
+                        }
+                        // Exercise each platform's rules on every host, and
+                        // the complete launch on its native named backend
+                        // and on Windows' explicitly enumerated backend.
+                        let (mut args, _) = base_args(&spec, &cfg, PlayerKind::External);
+                        args.extend(restored_screen_args(&spec, PlayerKind::External, linux));
+                        let mut groups = vec![("screen groups", cli(args))];
+                        if linux == cfg!(target_os = "linux")
+                            || matches!(screens, PlaybackScreens::Windows(_))
+                        {
+                            groups.push(("complete launch", cli(build_launch_for(
+                                &spec, PlayerKind::External, &cfg, "screen-test.sock",
+                            ).unwrap().args)));
+                        }
+                        for (group, args) in groups {
+                            let actual: Vec<_> = args.into_iter().filter(|arg| {
+                                arg.starts_with("--screen=") || arg.starts_with("--screen-name=")
+                                    || arg.starts_with("--fs-screen=") || arg.starts_with("--fs-screen-name=")
+                            }).collect();
+                            if actual != expected {
+                                failures.push(format!(
+                                    "{group}: {source:?}, fullscreen={fullscreen}, own_config={own_config}, user={user:?}: {actual:?} != {expected:?}"
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    #[test]
+    fn linux_screen_provenance_controls_option_precedence() {
+        check_screen_precedence(true, PlaybackScreens::Named, "DP-2", "--screen-name=DP-2");
+    }
+
+    #[test]
+    fn macos_screen_provenance_controls_option_precedence() {
+        check_screen_precedence(false, PlaybackScreens::Named, "Studio Display (1234)", "--screen-name=Studio Display (1234)");
+    }
+
+    #[test]
+    fn windows_screen_provenance_controls_option_precedence() {
+        check_screen_precedence(false, PlaybackScreens::Windows(
+            [r"\\.\DISPLAY1", r"\\.\DISPLAY2", r"\\.\DISPLAY3"]
+                .map(|name| Some(name.to_string())).to_vec(),
+        ), r"\\.\DISPLAY3", "--screen=2");
+    }
+
+    #[test]
+    fn a_fallback_screen_places_only_the_external_player_including_a_retry() {
+        let spec = PlaySpec {
+            screen_name: Some("DP-2".into()),
+            screen_source: ScreenSource::Fallback,
+            ..plain_spec(PlayerKind::Embedded, "https://media.invalid/video.mkv")
+        };
+        let cfg = crate::config::AppConfig {
+            mpv_extra_args: Some("--screen-name=other".into()),
+            ..Default::default()
+        };
+        for (player, expected) in [
+            (PlayerKind::Embedded, vec!["--screen-name=other"]),
+            (PlayerKind::External, vec!["--screen-name=DP-2", "--screen-name=other"]),
+        ] {
+            let args = cli(build_launch_for(&spec, player, &cfg, "screen-test.sock").unwrap().args);
+            assert_eq!(args.iter().filter(|arg| arg.starts_with("--screen-name="))
+                .map(String::as_str).collect::<Vec<_>>(), expected);
+        }
     }
 
     #[test]

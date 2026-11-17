@@ -530,6 +530,9 @@ pub struct PlaySpec {
     /// holding Vela's window. Only mpv's own window is placed with it, which
     /// includes a play the embedded player could not start.
     pub screen_name: Option<String>,
+    /// Remembered placement overrides the user's options; Vela's own screen
+    /// is only an overridable default when no remembered screen is usable.
+    pub(crate) screen_source: ScreenSource,
     /// The backend's screen addressing, with a fresh, unfiltered enumeration
     /// on Windows. The launch builder resolves screen_name against this list.
     pub screens: PlaybackScreens,
@@ -573,6 +576,15 @@ pub struct PlaySpec {
     /// Steps this LOGICAL play has already taken, carried into the new
     /// detector so the cap counts plays rather than mpv processes.
     pub steps_taken: u32,
+}
+
+/// Why a play was assigned its screen, carried from the command's decision
+/// through to the launch even when the copy was ranked for that screen.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum ScreenSource {
+    Remembered,
+    #[default]
+    Fallback,
 }
 
 /// What a play given the embedded player shows when that player could not
@@ -2327,6 +2339,7 @@ mod tests {
             crop_script: None,
             inherited_window_state: PlaybackWindowState::default(),
             screen_name: None,
+            screen_source: ScreenSource::Fallback,
             screens: PlaybackScreens::Named,
             window_observation: WindowStateObservation::default(),
             markers_script: None,
