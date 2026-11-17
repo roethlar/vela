@@ -525,6 +525,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   with the plan's Windows checks: "works, but there's no working second
   screen to test". NOT TESTED on Windows: the remembered second screen and
   moving a playing window between screens (no second screen there).
+  MACOS, 2026-11-17, the same release run (its macOS bundle passed on a
+  second attempt after GitHub found no Mac runner): the owner, with the
+  plan's macOS checks: "looks fine on mac". Second-screen checks not done.
 
 - FOUND 2026-11-17, NOT FIXED: Vela's Linux AppImage always runs under
   X11. Tauri's bundler puts linuxdeploy's GTK plugin hook in it
