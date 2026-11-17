@@ -500,6 +500,26 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Blockers
 
+- RELEASES BLOCKED BY npm audit, 2026-11-17, OWNER DECISION ASKED: advisory
+  GHSA-fc5q-39xc-vjpf (high, ReDoS) covers every `picomatch` up to 4.0.7,
+  the newest published, so no fix exists yet; release run 44158190579
+  failed its `npm audit` job and skipped every build. picomatch reaches
+  Vela only through build tools (vite, svelte-check, tinyglobby, fdir):
+  `npm audit --omit=dev` finds 0 vulnerabilities. The decision of
+  2026-11-02 allows no overrides or per-advisory suppression, so the gate
+  stands until the owner rules (wait for picomatch, or audit production
+  dependencies only, or otherwise).
+- SETTINGS RESTRUCTURE (`.agents/plans/settings-restructure.md`) LANDED and
+  verified: S1 `0e4aef7`, S2 `47b2fc0`, S3 `ce6e96d`; hunt findings st-1 to
+  st-8 repaired (`.agents/review/codereview-2026-11-17-settings.md`); both
+  Linux suites in full at `0e4aef7`, `ce6e96d` and `d61b194` (48 of 48,
+  51 of 51, parity PASS). For the owner's look, an Arch package of
+  `a65f521` built locally with the libmpv set and passing
+  `packaging/libmpv/check-package.sh`, on the NVIDIA machine as
+  `~/vela-nv-test/vela-1.0.68-1-settings-x86_64.pkg.tar.zst` (sha256
+  `455a9f3d…b142`). Not yet run on these commits: the Windows suite (no
+  release builds while the audit gate fails; CI's own jobs ran).
+
 - FOUND 2026-11-17, NOT FIXED: Vela's Linux AppImage always runs under
   X11. Tauri's bundler puts linuxdeploy's GTK plugin hook in it
   (`apprun-hooks/linuxdeploy-plugin-gtk.sh`), which does
