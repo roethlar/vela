@@ -200,6 +200,29 @@ patch("src-tauri/src/player/embedded/macos_host.rs", [
                 if let Some(view) = views.get(&id) {"""),
 ])
 
+# Bisection variants (probes/m2-nofmt, probes/m2-nocs set M2_VARIANT): leave
+# out the layer's contents format, or its colour space and EDR flag, which
+# the HDR slice added and probe M1's layer (which showed frames) never set.
+import os
+variants = set(filter(None, os.environ.get("M2_VARIANT", "").split(",")))
+if "nofmt" in variants:
+    patch("src-tauri/src/player/embedded/macos_gl.rs", [(
+"""        layer.setContentsFormat(unsafe {
+            if float {
+                kCAContentsFormatRGBA16Float
+            } else {
+                kCAContentsFormatRGBA8Uint
+            }
+        });""",
+"""        let _ = (float, unsafe { (kCAContentsFormatRGBA16Float, kCAContentsFormatRGBA8Uint) });
+        eprintln!("probe-variant: no contents format");""")])
+if "nocs" in variants:
+    patch("src-tauri/src/player/embedded/macos_gl.rs", [(
+"""        self.setColorspace(Some(&space));
+        self.setWantsExtendedDynamicRangeContent(range != Range::Sdr);""",
+"""        let _ = (&space, range);
+        eprintln!("probe-variant: no colour space or EDR flag");""")])
+
 # Why a settings or connections file is "unavailable" at start (the page shows
 # only a generic sentence), and, on Windows, the ACL the privacy check read
 # back (probe W2 found Vela refusing its own settings on a hosted runner).

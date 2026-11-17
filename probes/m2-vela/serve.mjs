@@ -29,7 +29,8 @@ fs.writeFileSync(
     sources: [mockSource(mock)],
     player: 'embedded',
     // mpv's own account of the plays, as the Advanced options would give it.
-    mpv_extra_args: `--log-file=${path.join(root, 'mpv.log')}\n--msg-level=all=v`,
+    // profile=fast: hosted runners draw with a software renderer.
+    mpv_extra_args: `--log-file=${path.join(root, 'mpv.log')}\n--msg-level=all=v\n--profile=fast`,
   }),
   { mode: 0o600 },
 );
