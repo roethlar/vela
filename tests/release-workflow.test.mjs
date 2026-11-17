@@ -76,7 +76,8 @@ test("release artifacts fail closed through a final inventory", () => {
   );
   assert.match(workflow, /  arch:\n    name: Arch package\n    needs: \[npm-audit, cargo-audit, libmpv\]\n/);
   // A known vulnerability fails the release as it fails CI, in either ecosystem.
-  assert.match(workflow, /  npm-audit:\n[\s\S]*?- run: npm audit --audit-level=moderate\n/);
+  // What ships is the gate; the build tools' advisories are only reported (2026-11-17).
+  assert.match(workflow, /  npm-audit:\n[\s\S]*?- run: npm audit --omit=dev --audit-level=moderate\n/);
   assert.match(workflow, /  cargo-audit:\n[\s\S]*?- run: cargo audit --file src-tauri\/Cargo\.lock\n/);
   assert.match(workflow, /  libmpv:\n[\s\S]*?    needs: \[npm-audit, cargo-audit\]\n/);
   // The inventory takes what is released and nothing that merely travelled

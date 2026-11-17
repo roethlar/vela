@@ -2594,3 +2594,24 @@ How to apply:
 - Supersedes the second of the plan's assumptions put to the owner ("Not
   offered on the NVIDIA proprietary driver yet", A2) and the Xvfb venue
   of 2026-11-12 (`.agents/machines.md`).
+
+## 2026-11-17 - npm audit gates what ships; the build tools' advisories are reported only
+
+Status: OWNER DECISION (2026-11-17). Narrows the gate of 2026-11-02.
+
+Decision:
+Advisory GHSA-fc5q-39xc-vjpf (high) covers every published `picomatch`,
+which reaches Vela only through its build tools (vite, svelte-check), and
+blocked every release. The owner, verbatim: "I don't care. we release
+binaries, so if users want to roll their own, they need to live with it.
+audit what ships." So the gate in CI, the release workflow and the local
+verification set is `npm audit --omit=dev --audit-level=moderate`: known
+advisories of moderate severity and above in the production dependencies
+fail closed. The full audit, build tools included, runs beside it and is
+reported, never a gate. Everything else of 2026-11-02 stands: no
+`npm audit fix --force`, no `overrides`, no per-advisory suppression, and
+Cargo audit fails on every advisory.
+
+How to apply:
+- A build-tool advisory is not a blocker; one in a production dependency
+  is, as before.

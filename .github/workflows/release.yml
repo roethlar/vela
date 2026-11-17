@@ -46,7 +46,10 @@ jobs:
           npm install --global npm@12.0.2
           node scripts/check-js-toolchain.mjs
       - run: npm ci
-      - run: npm audit --audit-level=moderate
+      - run: npm audit --omit=dev --audit-level=moderate
+      # What the build tools pull in is reported, never a gate (decision
+      # 2026-11-17): Vela ships built binaries, not its build tools.
+      - run: npm audit --audit-level=moderate || true
 
   # The same gate as ci.yml's job of this name: a known vulnerability in a
   # Rust dependency fails the release as it fails CI. An advisory can be

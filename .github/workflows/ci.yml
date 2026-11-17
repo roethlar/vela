@@ -97,7 +97,10 @@ jobs:
           npm install --global npm@12.0.2
           node scripts/check-js-toolchain.mjs
       - run: npm ci
-      - run: npm audit --audit-level=moderate
+      - run: npm audit --omit=dev --audit-level=moderate
+      # What the build tools pull in is reported, never a gate (decision
+      # 2026-11-17): Vela ships built binaries, not its build tools.
+      - run: npm audit --audit-level=moderate || true
       # The package-check tests (run by `npm run check`) pack and unpack
       # stand-in packages with bsdtar, and one of them reads a real squashfs;
       # the marker script's tests run it under LuaJIT and Lua 5.2, the two

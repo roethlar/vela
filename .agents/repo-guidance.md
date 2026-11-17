@@ -62,9 +62,12 @@ from the retired `.agents/repo-map.json`, 2026-07-08; verified against
   workflows' `npm install --global npm@<version>` are only CI's tested
   baseline.
 - `npm ci` (repo root) — clean, lockfile-exact JavaScript install.
-- `npm audit --audit-level=moderate` (repo root) — fail closed on known npm
-  vulnerabilities of moderate severity and above; low advisories are reported
-  but do not fail the gate (decision `.agents/decisions.md` 2026-11-02).
+- `npm audit --omit=dev --audit-level=moderate` (repo root) — fail closed on
+  known npm vulnerabilities of moderate severity and above in what ships (the
+  production dependencies); low advisories are reported but do not fail the
+  gate, and the build tools' advisories (`npm audit` without `--omit=dev`)
+  are reported only (decisions `.agents/decisions.md` 2026-11-02 and
+  2026-11-17).
 - `npm run check` (repo root) — frontend type and Svelte validation.
 - `npm run build` (repo root) — production frontend build plus its post-build
   layout check (`scripts/check-frontend-build.mjs`), for any change that can
