@@ -19,6 +19,7 @@ import {
   stopPlayAsUser,
   waitForPageUncovered,
   velaConnected,
+  settingValue,
 } from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
 import { shown } from '../proof.mjs';
@@ -238,11 +239,7 @@ export default {
       'the seeded Continue Watching flow',
     );
     await openPlayerSettings(driver);
-    assert.equal(
-      await driver.exec(`return document.querySelector('select#continue-playing')?.value`),
-      'only-tv',
-      'missing config must render the TV-only default',
-    );
+    await settingValue(driver, 'select#continue-playing', 'only-tv', 'missing config must render the TV-only default');
     await driver.click(await driver.find('css selector', 'button[aria-label="Close"]'));
 
     // `playback-ended` also refreshes after a user closes mpv. That refresh

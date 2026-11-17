@@ -16,6 +16,7 @@ import {
   pollUntil,
   seedConfig,
   velaConnected,
+  settingValue,
 } from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
 import { isWindows } from '../windows.mjs';
@@ -259,11 +260,7 @@ export default {
 
     // Leaving remember deletes the remembered window in the same write.
     await openPlayerSettings(driver);
-    assert.equal(
-      await driver.exec(`return document.querySelector('select#player-window')?.value`),
-      'remember',
-      'a missing setting shows as remember',
-    );
+    await settingValue(driver, 'select#player-window', 'remember', 'a missing setting shows as remember');
     await driver.exec(
       `const select = document.querySelector('select#player-window');
        select.value = 'fullscreen';
@@ -306,10 +303,7 @@ export default {
       'default mode must leave the first play to mpv',
     );
     await openPlayerSettings(driver);
-    assert.equal(
-      await driver.exec(`return document.querySelector('select#player-window')?.value`),
-      'default',
-    );
+    await settingValue(driver, 'select#player-window', 'default', 'select#player-window shows default');
     await driver.click(await driver.find('css selector', 'button[aria-label="Close"]'));
     const afterThird = await quitAndWaitForEnd(third);
     assert.deepEqual(afterThird.mpv_window, { fullscreen: true }, 'default mode writes nothing');

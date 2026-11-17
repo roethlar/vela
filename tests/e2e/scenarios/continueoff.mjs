@@ -14,6 +14,7 @@ import {
   seedConfig,
   velaConnected,
   runPlayer,
+  settingValue,
 } from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
 import { shown } from '../proof.mjs';
@@ -103,11 +104,7 @@ export default {
       'two Continue Watching choices',
     );
     await openPlayerSettings(driver);
-    assert.equal(
-      await driver.exec(`return document.querySelector('select#continue-playing')?.value`),
-      'on',
-      'the persisted starting mode must load',
-    );
+    await settingValue(driver, 'select#continue-playing', 'on', 'the persisted starting mode must load');
     await driver.exec(
       `const select = document.querySelector('select#continue-playing');
        select.value = 'off';
@@ -158,11 +155,7 @@ export default {
 
     await restart();
     await openPlayerSettings(driver);
-    assert.equal(
-      await driver.exec(`return document.querySelector('select#continue-playing')?.value`),
-      'off',
-      'Off must survive an app restart',
-    );
+    await settingValue(driver, 'select#continue-playing', 'off', 'Off must survive an app restart');
     await screenshot('02-off-persisted');
     // The end of its proof of its rows in this player (proof.mjs).
     shown('4', '14');

@@ -101,6 +101,23 @@ export function seedPlaylists(configRoot, playlists) {
   return file;
 }
 
+// A Settings control shows the product default until its setting's load
+// answers (Settings.svelte, createDraft: a choice made before then wins), so
+// a value read the moment a tab opens can be that default on a slow machine
+// (the first Windows runs). Wait, bounded, for the expected value, and say
+// what the control showed if it never comes.
+export async function settingValue(driver, selector, expected, what) {
+  let shown;
+  try {
+    await pollUntil(async () => {
+      shown = await driver.exec(`return document.querySelector(${JSON.stringify(selector)})?.value`);
+      return shown === expected;
+    }, what, { timeoutMs: 10000 });
+  } catch {
+    throw new Error(`${what}: ${selector} shows ${JSON.stringify(shown)}, not ${JSON.stringify(expected)}`);
+  }
+}
+
 export async function pollUntil(fn, what, { timeoutMs = 15000, intervalMs = 250 } = {}) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
