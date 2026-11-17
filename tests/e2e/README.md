@@ -46,16 +46,17 @@ npm run e2e -- --embedded      # the same suite, played in the embedded player
   inode, size and modification time were noted; before each session starts
   (a restart included), the client checks them again and refuses to start a
   file that was written over or put in its place since.
-- Linux requires `tauri-driver` (`cargo install tauri-driver`), `Xvfb`
-  (`xorg-server-xvfb`), `bsdtar`, `curl`, `openssl`, and — for the playback-driving
+- Linux requires `tauri-driver` (`cargo install tauri-driver`), `weston`,
+  `bsdtar`, `curl`, `openssl`, and — for the playback-driving
   scenarios — `ffmpeg` and `mpv`. Server flows run against in-process mock
   Jellyfin servers (`mockjf.mjs`) whose Range-capable streams serve
   ffmpeg-generated clips; no real server or network is touched.
-- Runs headless on a private Xvfb display by default — screenshots on the
-  live Wayland desktop hang whenever the test window is occluded/unfocused
-  (no frame callbacks). `VELA_E2E_HEADED=1` opts into the real desktop to
-  watch a run; `VELA_E2E_DISPLAY=:N` picks the Xvfb display;
-  `VELA_E2E_DEBUG=1` logs each WebDriver call with timing.
+- Runs headless in a private weston (a Wayland compositor) by default, for
+  both players — screenshots on the live Wayland desktop hang whenever the
+  test window is occluded/unfocused (no frame callbacks). No X11 display is
+  used: Vela on Linux is Wayland's. `VELA_E2E_HEADED=1` opts into the real
+  desktop to watch a run; `VELA_E2E_DEBUG=1` logs each WebDriver call with
+  timing.
 - First run downloads the vendored driver via `fetch-driver.sh` into
   `vendor/` (gitignored, sha256-pinned).
 - Screenshots and driver logs land in `artifacts/` (gitignored) for owner
@@ -69,7 +70,7 @@ npm run e2e -- --embedded      # the same suite, played in the embedded player
 
 The same mock-server suites drive the real debug `vela.exe` through
 `tauri-driver --native-driver <msedgedriver.exe>`, on the runner's interactive
-desktop. No Xvfb or weston is started. The hosted desktop is 1024×768; each
+desktop. No weston is started. The hosted desktop is 1024×768; each
 new app window is placed at 1000×700 so it fits and fullscreen has a larger
 client area. This venue does not establish HDR or multiple-monitor behaviour.
 The executable is still the exact path Cargo reports for the build.
@@ -171,9 +172,8 @@ environment fails rather than appearing empty. The environment reader supports
 x64 processes only and reads Windows' native process structures.
 
 All existing scenario meanings and assertions remain. Windows runs 47 external
-and 51 embedded scenarios. `playerfallback` is skipped on Windows: it specifically
-asserts X11's "needs a Wayland session" notice, while Windows supports embedding
-on its desktop. `embeddedlatestart` still exercises a failed embedded startup
+and 51 embedded scenarios. `playerfallback` is skipped on Windows: Linux runs
+it, and on Windows `embeddedlatestart` exercises a failed embedded startup
 and external fallback. The ordinary player-only exclusions remain:
 
 - External runs skip `embeddedcontrols`, `embeddedcrop`, `embeddedfullscreenend`,
@@ -479,8 +479,8 @@ one (`.agents/plans/embedded-player.md`). Two things change:
   it always did, through mpv's IPC socket; the mpv on the other end is the
   library inside Vela's own process.
 - The venue is a private headless Wayland compositor (`weston
-  --backend=headless --fake-seat --renderer=gl --idle-time=0`) instead of
-  Xvfb, because that player needs Wayland. Weston has no colour management
+  --backend=headless --fake-seat --renderer=gl --idle-time=0`), the same
+  one the external player's runs use. Weston has no colour management
   and no fractional scaling, so nothing about HDR or scaled displays is
   exercised here. `--fake-seat` gives it a seat: without one weston never
   activates the app's window, so the page never has focus (`:focus` never
@@ -508,9 +508,8 @@ mpv's target. If they fail,
 or cannot load the set, the run fails before any scenario. A run of named
 scenarios skips them and says so; `npm run test:libmpv` runs them alone.
 
-So there are two venues: an ordinary run (the external player, on a private
-Xvfb display) and an `--embedded` run (the embedded player, on a private
-weston). A scenario can belong to one player with `onlyPlayer: 'embedded'`
+So there are two runs, in one venue (a private weston): an ordinary run (the
+external player) and an `--embedded` run (the embedded player). A scenario can belong to one player with `onlyPlayer: 'embedded'`
 or `onlyPlayer: 'external'` (and `onlyPlayerWhy`). In a run of the other
 player it is reported as `SKIP` and not counted; named explicitly, it fails
 instead.
@@ -576,7 +575,7 @@ the command of the recovery screens' Exit Vela button, because neither
 venue can press a window's close button and WebDriver's "close window"
 does not exit Tauri). `markerbutton` (external only) presses the skip
 button mpv draws, through mpv's own input commands over IPC, on a real
-video output (`--vo=x11` on Xvfb).
+video output (`--vo=wlshm`, Wayland's software output, on the private weston).
 
 A scenario branches on the player only where the behaviour itself differs
 (the user's stop; the page cannot be used while the view covers it; what

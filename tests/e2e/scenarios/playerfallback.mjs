@@ -1,4 +1,4 @@
-// The player setting where the embedded player cannot run
+// The player setting where the embedded player cannot be used
 // (.agents/plans/embedded-player.md, Slice 2; decisions D1 and D3).
 //
 // A config that asks for the embedded player must still play: in the external
@@ -6,9 +6,15 @@
 // rather than at the start of every play. A config that does not ask for it
 // gets no such line.
 //
-// "Cannot run" here is the suite's ordinary venue, an X11 display: the
-// embedded player needs Wayland. In a run of the embedded player itself
-// there is nothing to fall back from, so this scenario is not part of it.
+// "Cannot be used" here is the start-up marker a start in Vela's window leaves
+// until its page has loaded (src-tauri/src/player/embedded/startup.rs). Found
+// at the next start, it means the last one did not get that far (a crash in
+// Vela's window, as on a driver where WebKit's GPU renderer fails), so that
+// start is today's window, and it removes the marker so the start after tries
+// Vela's window again. The scenario leaves one while the app is down. (Until
+// 2026-11-17 the premise was an X11 display; Linux's end-to-end runs now use
+// Wayland only, as Vela does.) A run of the embedded player plays in Vela's
+// window, so this scenario is not part of it.
 //
 // mpv runs with `--vo=null` here, so nothing is drawn. The notice is observed
 // where it arrives: Vela sends it as a `show-text` command over mpv's IPC, and
@@ -20,10 +26,22 @@ import { MpvIpc, mpvSocketSnapshot, waitForNewMpvSocket } from '../mpv.mjs';
 import { makeClips, mockSource, openDetailAndPlay, openLibraryGrid, pollUntil, seedConfig } from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
 
-const NOTICE = 'Embedded player: needs a Wayland session';
+const NOTICE = 'Embedded player: off after a failed start';
 let mock;
 let logFile;
 let configRootPath;
+
+// The marker of a start in Vela's window (startup.rs, `marker_path`), in the
+// app's config directory, beside config.json.
+function markerPath() {
+  return path.join(configRootPath, 'config', 'vela', 'embedded-window-starting');
+}
+
+// Leave the marker as a start that never got as far as its page would. Call it
+// while the app is down.
+function leaveMarker() {
+  fs.writeFileSync(markerPath(), '');
+}
 
 // Change only the player setting, in the config the app itself has been
 // writing. Call it while the app is down.
@@ -101,10 +119,10 @@ async function waitForHome(driver) {
 
 export default {
   name: 'playerfallback',
-  skipOnWindows: 'Tests the X11-only "needs a Wayland session" fallback notice; Windows supports embedding on its desktop. embeddedlatestart tests startup fallback on Windows.',
+  skipOnWindows: 'Linux runs it; on Windows embeddedlatestart exercises a failed embedded start and its fallback to the external player.',
   onlyPlayer: 'external',
   onlyPlayerWhy:
-    'its premise is a venue where the embedded player cannot run (X11), so the play goes to the external player; in a run of the embedded player there is nothing to fall back from',
+    'its premise, a start in today\'s window because the last start in Vela\'s window did not finish, sends every play to the external player; a run of the embedded player plays in Vela\'s window',
   // Not row 11. Its notice is the D3 fallback notice, for a play the user DID
   // ask for; row 11's notice is for a play the user did not ask for, a
   // step-down (playback.rs, osd_notice), which no venue here can force. The
@@ -113,7 +131,7 @@ export default {
   // exemptions, not a proof of the row (guard finding atk-2).
   rows: [],
   noRows:
-    'decision D3, the fallback notice where the embedded player cannot run; it rides the delivery row 11 uses (spawn_osd_notice), but is not the unrequested-play notice of row 11',
+    'decision D3, the fallback notice where the embedded player cannot be used; it rides the delivery row 11 uses (spawn_osd_notice), but is not the unrequested-play notice of row 11',
 
   async seed({ configRoot }) {
     configRootPath = configRoot;
@@ -134,6 +152,7 @@ export default {
       mpv_extra_args: `--vo=null\n--ao=null\n--msg-level=cplayer=trace\n--log-file=${logFile}`,
       player: 'embedded',
     });
+    leaveMarker();
   },
 
   async cleanup() {
@@ -142,9 +161,14 @@ export default {
 
   async run({ driver, restart }) {
     await waitForHome(driver);
+    assert.equal(
+      fs.existsSync(markerPath()),
+      false,
+      'a start that found the marker removes it, so the start after tries Vela\'s window again',
+    );
 
-    // 1. Embedded is asked for and cannot run: the play still starts, in mpv,
-    //    and says why exactly once.
+    // 1. Embedded is asked for and cannot be used: the play still starts, in
+    //    mpv, and says why exactly once.
     const first = await playAndReadNotice(driver);
     assert.equal(first.length, 1, `one notice on the first fallback play, got: ${first.join(' | ')}`);
     assert.ok(first[0].includes(NOTICE), `the notice must say why: ${first[0]}`);
@@ -154,9 +178,11 @@ export default {
     const second = await playAndReadNotice(driver);
     assert.deepEqual(second, [], 'the same fallback is not announced on every play');
 
-    // 3. A new run of Vela tells the user again, once.
-    await restart();
+    // 3. A new run of Vela after another failed start tells the user again,
+    //    once.
+    await restart(() => leaveMarker());
     await waitForHome(driver);
+    assert.equal(fs.existsSync(markerPath()), false, 'every start that finds the marker removes it');
     const afterRestart = await playAndReadNotice(driver);
     assert.equal(afterRestart.length, 1, 'a new run explains the fallback again');
     assert.ok(afterRestart[0].includes(NOTICE));

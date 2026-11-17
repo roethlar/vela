@@ -2878,9 +2878,11 @@ what is not known is found by probes first, logged below.
 
 ## Amendment, 2026-11-17 (2): NVIDIA offered; Linux's end-to-end runs on Wayland only (owner's answers)
 
-Status: APPROVED by the owner, 2026-11-17 ("Approve both"). N1 landed
-(the NVIDIA refusal is gone; `.agents/state.md` names its commit and the
-release run with the owner's builds); W1 next.
+Status: APPROVED by the owner, 2026-11-17 ("Approve both"). N1 and W1
+landed; `.agents/state.md` names their commits, the release run with the
+owner's builds and the runs that prove W1. `playerfallback`'s two claims
+were red-proved: with the start-up decision ignoring the marker, the first
+play got no notice; with the marker never removed, the new check failed.
 
 The owner's answers of 2026-11-17 (`.agents/decisions.md`, that date):
 offer Vela's window on NVIDIA's proprietary driver ("I have a couple of

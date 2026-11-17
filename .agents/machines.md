@@ -364,7 +364,10 @@ Recorded and verified 2026-11-12, locally on the host.
   webkit2gtk-4.1 2.54.2, libsoup3 3.8.1, mpv 0.41.0. `ldd /usr/bin/vela`
   resolves every library and `desktop-file-validate` accepts the desktop
   entry (both re-run against 1.0.63-1). Remove with `sudo pacman -R vela`.
-- E2E venue since 2026-11-12: the owner installed `xorg-server-xvfb` and
+- E2E venue since 2026-11-17: a private headless weston for both players
+  (`tests/e2e/run.mjs`); Xvfb is no longer used, and removing
+  `xorg-server-xvfb` is the owner's. Before that, since 2026-11-12: the
+  owner installed `xorg-server-xvfb` and
   `tauri-driver` (`cargo install tauri-driver --locked`, in
   `~/.cargo/bin`); `ffmpeg`, `bsdtar`, `curl` and `mpv` were already
   present. `npm run e2e` works here: the harness's SHA-pinned

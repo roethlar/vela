@@ -4,7 +4,7 @@
 // draws it on mpv's own on-screen display.
 //
 // The external player only: it is mpv's window the button is drawn in. The
-// play here has a real video output on the run's private X display (no
+// play here has a real video output on the run's private weston (no
 // `--vo=null`, which publishes no OSD size and so draws no button; that is
 // why `markers` covers only the automatic skip), and the script draws its
 // button, publishes its rectangle (`user-data/vela-markers/button-bounds`, in
@@ -104,11 +104,11 @@ export default {
     mock.state.setMediaSegments('m1', [
       { Type: 'Intro', StartTicks: 2_000 * TICKS_PER_MS, EndTicks: INTRO_END * 1000 * TICKS_PER_MS },
     ]);
-    // A real video output on the run's private display, and no sound. mpv's
-    // default output (gpu-next) did not come up within 15 s on that display
-    // (Xvfb, no GPU); `x11` draws the same OSD in software.
+    // A real video output on the run's private display, and no sound. On
+    // Linux that display is a headless weston; `wlshm`, Wayland's software
+    // output, draws the same OSD as mpv's default output would.
     seedConfig(configRoot, [mockSource(mock)], {
-      mpv_extra_args: isWindows ? '--ao=null\n--vo=gpu-next\n--gpu-api=d3d11' : '--ao=null\n--vo=x11',
+      mpv_extra_args: isWindows ? '--ao=null\n--vo=gpu-next\n--gpu-api=d3d11' : '--ao=null\n--vo=wlshm',
       skip_intros: 'button',
       skip_credits: 'off',
       skip_commercials: 'off',

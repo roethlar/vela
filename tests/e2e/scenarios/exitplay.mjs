@@ -15,8 +15,8 @@
 // the recovery screens (app.exit). A user closes the window instead, which
 // Tauri turns into the same exit request (RunEvent::ExitRequested, then
 // RunEvent::Exit) that the sweep handles; neither venue can press a window's
-// close button (no window manager on the private X display; weston's
-// decorations are drawn by GTK inside the window, out of WebDriver's reach),
+// close button (weston's decorations are drawn by GTK inside the window, out
+// of WebDriver's reach),
 // and WebDriver's "close window" destroys only the web view, which does not
 // exit Tauri. So what is proven is what Vela does once its exit is under way;
 // that a window close starts it is Tauri's, and not proven here.

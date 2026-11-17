@@ -31,7 +31,7 @@
 //
 // In the external player this play has no `--vo=null` (there
 // must be nothing in the Advanced options), so its mpv opens a window on the
-// run's private display (Xvfb), never on a real desktop.
+// run's private display (a headless weston), never on a real desktop.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';

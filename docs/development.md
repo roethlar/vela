@@ -95,8 +95,8 @@ the two Luas mpv runs it with (`luajit` and `lua5.2`); a Lua that is not
 installed is skipped, with that reason, except in a CI run (`CI=true`, as
 GitHub sets it), where it fails the check.
 
-Linux end-to-end tests drive the real debug app, WebKitGTK, and mpv on a private
-Xvfb display with a throwaway Vela config:
+Linux end-to-end tests drive the real debug app, WebKitGTK, and mpv in a private
+headless weston (a Wayland compositor) with a throwaway Vela config:
 
 ```bash
 npm run e2e                    # build and run every scenario
@@ -104,7 +104,7 @@ npm run e2e -- --skip-build    # reuse the current debug binary
 npm run e2e -- playback        # run one scenario by name
 ```
 
-The E2E venue needs `tauri-driver`, Xvfb, ffmpeg, mpv, bsdtar, and curl. The
+The E2E venue needs `tauri-driver`, weston, ffmpeg, mpv, bsdtar, and curl. The
 first run downloads the pinned WebKitWebDriver described in
 [tests/e2e/README.md](../tests/e2e/README.md); artifacts land under
 `tests/e2e/artifacts/`. A run that builds starts the executable that

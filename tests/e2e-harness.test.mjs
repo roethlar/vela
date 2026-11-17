@@ -180,7 +180,7 @@ test('Windows: private backups and process token checks retain native evidence',
 
 test('Windows: platform-specific scenarios keep the same assertions on native equivalents', () => {
   assert.match(harnessText('scenarios/windowsetting.mjs'), /assert\.equal\(await first\.mpv\.getProp\('screen'\), 0,/);
-  assert.match(harnessText('scenarios/markerbutton.mjs'), /isWindows \? '--ao=null\\n--vo=gpu-next\\n--gpu-api=d3d11' : '--ao=null\\n--vo=x11'/);
+  assert.match(harnessText('scenarios/markerbutton.mjs'), /isWindows \? '--ao=null\\n--vo=gpu-next\\n--gpu-api=d3d11' : '--ao=null\\n--vo=wlshm'/);
   assert.match(harnessText('windows.mjs'), /embeddedVideoOutput = isWindows \? 'gpu-next' : 'libmpv'/);
   for (const name of ['embeddedplay', 'embeddedownconfig', 'mpvargs']) {
     assert.match(harnessText(`scenarios/${name}.mjs`), /processName\(pid\)/);
@@ -191,7 +191,7 @@ test('Windows: platform-specific scenarios keep the same assertions on native eq
 });
 
 test('Windows: skip reasons are validated, judged, and never count as parity coverage', () => {
-  const scenario = { name: 'fallback', rows: [], noRows: 'venue-only', skipOnWindows: 'X11 requires Wayland', run() {} };
+  const scenario = { name: 'fallback', rows: [], noRows: 'venue-only', skipOnWindows: 'a Linux-only premise', run() {} };
   assert.deepEqual(scenarioProblems(scenario, 'fallback'), []);
   assert.match(scenarioProblems({ ...scenario, skipOnWindows: '' }, 'fallback').join(' '), /non-empty reason/);
   assert.equal(skipOutcome(scenario, 'external', 'linux'), null);

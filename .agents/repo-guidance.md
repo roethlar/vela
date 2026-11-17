@@ -79,8 +79,9 @@ from the retired `.agents/repo-map.json`, 2026-07-08; verified against
 - `cargo audit --file Cargo.lock` (from `src-tauri/`) — fail closed on known
   Rust vulnerabilities; unsoundness/unmaintained notices remain visible.
 - `npm run e2e` (repo root) — end-to-end UI/playback validation on Linux
-  (drives the real debug app; needs tauri-driver, Xvfb, ffmpeg, mpv, bsdtar,
-  curl — see `tests/e2e/README.md`). `-- --skip-build` reuses the existing
+  (drives the real debug app in a private headless weston; needs
+  tauri-driver, weston, ffmpeg, mpv, bsdtar, curl — see
+  `tests/e2e/README.md`). No X11 display is used (owner, 2026-11-17). `-- --skip-build` reuses the existing
   debug binary; `-- <name>` runs one scenario.
 - `scripts/check-other-platforms.sh` (repo root) — for any change to Rust
   that compiles on Windows or macOS: type-checks both targets from Linux

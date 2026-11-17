@@ -330,7 +330,7 @@ fs.rmSync(artifactsDir, { recursive: true, force: true });
 fs.mkdirSync(artifactsDir, { recursive: true });
 if (isWindows) fs.writeFileSync(path.join(artifactsDir, 'webdriver.json'), JSON.stringify(windowsDriver, null, 2));
 
-// Default to a private Xvfb display: on the live Wayland session a test
+// Default to a private headless weston: on the live Wayland session a test
 // window that opens unfocused/occluded stops getting frame callbacks and
 // WebKit's snapshot then hangs — screenshots only render reliably when
 // nothing contends for visibility. VELA_E2E_HEADED=1 runs on the real
@@ -373,11 +373,13 @@ if (runPlayer === 'embedded') {
   }
 }
 if (isWindows) {
-  console.log('e2e: using the Windows interactive desktop (no Xvfb/weston)');
-} else if (!process.env.VELA_E2E_HEADED && runPlayer === 'embedded') {
-  // A private, headless Wayland compositor: Xvfb is X11, where the embedded
-  // player cannot run. It draws with the GPU (the web view and the video
-  // both need that) and shows nothing on any screen.
+  console.log('e2e: using the Windows interactive desktop (no weston)');
+} else if (!process.env.VELA_E2E_HEADED) {
+  // A private, headless Wayland compositor, for both players: Vela on Linux
+  // is Wayland's, and X11 is not supported in any way (.agents/repo-guidance.md;
+  // the owner's decision of 2026-11-17 took the external player's runs off
+  // Xvfb). It draws with the GPU (the embedded player's web view and video
+  // need that) and shows nothing on any screen.
   const socket = `vela-e2e-${process.pid}`;
   const runtimeDir = process.env.XDG_RUNTIME_DIR;
   if (!runtimeDir) {
@@ -415,21 +417,6 @@ if (isWindows) {
   activeKills.add(() => weston.kill());
   await waitUntil(() => fs.existsSync(path.join(runtimeDir, socket)), `weston on ${socket}`);
   displayEnv = { ...displayEnv, GDK_BACKEND: 'wayland', WAYLAND_DISPLAY: socket, DISPLAY: '' };
-} else if (!process.env.VELA_E2E_HEADED) {
-  const display = process.env.VELA_E2E_DISPLAY ?? ':97';
-  if (fs.existsSync(`/tmp/.X${display.slice(1)}-lock`)) {
-    console.error(`e2e: display ${display} is taken — set VELA_E2E_DISPLAY or remove the stale lock`);
-    process.exit(1);
-  }
-  const xvfb = spawn('Xvfb', [display, '-screen', '0', '1920x1080x24'], { stdio: 'ignore' });
-  xvfb.on('error', () => {
-    console.error('e2e: Xvfb not found — install it (xorg-server-xvfb) or set VELA_E2E_HEADED=1');
-    process.exit(1);
-  });
-  process.on('exit', () => xvfb.kill());
-  activeKills.add(() => xvfb.kill());
-  await waitUntil(() => fs.existsSync(`/tmp/.X11-unix/X${display.slice(1)}`), `Xvfb on ${display}`);
-  displayEnv = { ...displayEnv, GDK_BACKEND: 'x11', DISPLAY: display, WAYLAND_DISPLAY: '' };
 }
 
 const tauriDriverBin = resolveTauriDriver();

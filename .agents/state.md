@@ -33,11 +33,15 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     runs (the same entry).
   - THE PLAN FOR BOTH: `.agents/plans/embedded-player.md`, "Amendment,
     2026-11-17 (2)", APPROVED by the owner 2026-11-17 ("Approve both").
-    Slice N1 LANDED: the NVIDIA refusal is gone (`startup.rs`,
-    `select.rs`), with the docs and release notes; next, a release run by
-    hand gives the owner Linux builds for the NVIDIA test (steps in the
-    slice). Then Slice W1 (the venue; `playerfallback` proves the start-up
-    marker's recovery instead of X11's refusal).
+    Slice N1 LANDED at `daa182c`: the NVIDIA refusal is gone
+    (`startup.rs`, `select.rs`), with the docs and release notes; release
+    run by hand 44098988278 at `daa182c` builds the owner's Linux packages
+    for the NVIDIA test (steps in the slice); a codex hunt over it
+    (`review-final` slice `n1`). Slice W1 LANDED in the commit after it:
+    both suites run in a private headless weston, no X11 display;
+    `markerbutton` draws with `--vo=wlshm`; `playerfallback` proves the
+    start-up marker's recovery instead of X11's refusal, red-proved twice.
+    Its full runs in a clean worktree follow.
   - Landed: the macOS app declares why it reaches the local network
     (`d6a8033`; the notarized app of a release run carries the sentence);
     the player window finds its remembered screen on a Mac, Retina
