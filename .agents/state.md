@@ -470,10 +470,14 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   not on its path. The tracker posts `/Stopped` once its position reader
   sees the player end (`playback.rs`, `start_tracking_jellyfin`); a
   libmpv-initiated shutdown that is slow to close the IPC connection
-  would delay it. A diagnostic full embedded run (a worktree
-  `diag-markers` at `019c08b` with mpv's verbose log for the scenario's
-  plays and the time from quit to `/Stopped`; not committed) looks for
-  it.
+  would delay it. Also seen on Windows: the embedded `markers` of run
+  44018219446 at `019c08b`. A diagnostic full embedded run at `019c08b`
+  passed everything, every leg's `/Stopped` 250 ms after the quit (mpv
+  closes its IPC clients within a millisecond of `quit`). Since then the
+  scenario keeps evidence in every run: mpv's verbose log per player and
+  leg in the suite's artifacts (`markers-mpv-<player>-leg<N>.log`), and a
+  failure says how long it waited and which check-ins came. Read those
+  the next time it fails.
   - Until then: an embedded run that fails the verdict on `completionhub`
     alone is this race until shown otherwise; run the scenario again by
     itself before reading it as a regression.

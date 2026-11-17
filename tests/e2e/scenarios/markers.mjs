@@ -15,7 +15,8 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { pollUntil, openLibraryGrid, mockSource, seedConfig } from '../helpers.mjs';
+import { fileURLToPath } from 'node:url';
+import { DISPLAYLESS_MPV_ARGS, pollUntil, openLibraryGrid, mockSource, runPlayer, seedConfig } from '../helpers.mjs';
 import { MpvIpc, mpvSocketSnapshot, waitForNewMpvSocket } from '../mpv.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
 import { shown } from '../proof.mjs';
@@ -45,9 +46,23 @@ function segment(type, startMs, endMs) {
   return { Type: type, StartTicks: startMs * TICKS_PER_MS, EndTicks: endMs * TICKS_PER_MS };
 }
 
+// Evidence for an intermittent failure (.agents/state.md, Blockers: the
+// Stopped check-in sometimes never came after the scenario's quit in the
+// embedded player, in full runs only): each play writes mpv's verbose log
+// to the suite's artifacts directory, kept by CI's upload, named by player
+// and leg, and endSession says how long it waited and what arrived.
+const artifactsDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'artifacts');
+let leg = 0;
+function mpvArgsForNextLeg() {
+  leg += 1;
+  fs.mkdirSync(artifactsDir, { recursive: true });
+  const log = path.join(artifactsDir, `markers-mpv-${runPlayer}-leg${leg}.log`);
+  return `${DISPLAYLESS_MPV_ARGS}\n--log-file=${log}\n--msg-level=all=v`;
+}
+
 // Every play reloads config, so the next launch sees these.
 function setPolicies(policies) {
-  seedConfig(configRootPath, [mockSource(mock)], policies);
+  seedConfig(configRootPath, [mockSource(mock)], { ...policies, mpv_extra_args: mpvArgsForNextLeg() });
 }
 
 async function gridPlay(driver) {
@@ -165,12 +180,20 @@ export async function proveSkippedPast(mpv, what, rangeStart, rangeEnd, { clock 
 }
 
 async function endSession(mpv) {
+  const quitAt = Date.now();
   mpv.quit();
   mpv.close();
-  await pollUntil(
-    () => mock.state.checkins.some((c) => c.endpoint === '/Stopped'),
-    'the Stopped check-in',
-  );
+  try {
+    await pollUntil(
+      () => mock.state.checkins.some((c) => c.endpoint === '/Stopped'),
+      'the Stopped check-in',
+    );
+  } catch (error) {
+    throw new Error(
+      `${error.message} (leg ${leg}, ${Date.now() - quitAt} ms after the quit; check-ins: ` +
+        `${JSON.stringify(mock.state.checkins.map((c) => c.endpoint))}; mpv's log: markers-mpv-${runPlayer}-leg${leg}.log)`,
+    );
+  }
   mock.state.checkins.length = 0;
 }
 
