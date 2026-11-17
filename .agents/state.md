@@ -520,8 +520,18 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   no "Error 71" and no WebKit renderer error, and its page loaded (the
   start-up marker was gone within a second). The window DRAWS: the owner,
   looking at that machine's screen, "looks correct with the add source
-  prompt" (2026-11-17). Not yet known: a play in Vela's window there (no
-  media source in the throwaway config).
+  prompt" (2026-11-17). PLAYS on NVIDIA with the system's WebKitGTK: the
+  deb build's binary (system WebKitGTK 2.54.2), driven through
+  tauri-driver with the owner's Plex added in the test session, played a
+  1 h 41 min film in Vela's window, its clock advancing 0:01 to 0:19 over
+  20 s, with `get_player` answering offered, "Videos play in Vela's
+  window". The owner's own test, on the AppImage, failed ("it doesn't
+  play. there's no mpv window"): SECOND APPIMAGE DEFECT, the AppImage's
+  bundled WebKitGTK (built on Ubuntu 22.04) loses its page about 2 s
+  into a play in Vela's window on NVIDIA (the page's text goes empty; no
+  core dump; Vela's process stays up). The Arch package of run
+  44098988278 is on that machine (`~/vela-nv-test/`) for the owner to
+  install (`sudo`). What to do with the AppImage is the owner's decision.
 
 - No known product blocker.
 - A timing failure in a local end-to-end run proves nothing until the
