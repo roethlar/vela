@@ -46,8 +46,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
       progress (codex, `mdraw2`).
     - Windows: probe W2 (`probes/w2-vela`) found Vela refusing its own
       settings under the built-in Administrator account (the privacy check
-      matches SDDL text, which names that account `LA`); repair in progress
-      (codex, `wacl`).
+      matched SDDL text, which names that account `LA`); repaired at
+      `96c0f4d`, after which W2 played twice in Vela's window on a hosted
+      Windows runner with the test pattern on screen (run 43987838828).
     - The six hunts' thirteen findings are closed but pl-9, about tests
       alone (`.agents/review/codereview-2026-11-16-platforms.md`).
   - Linux unchanged through all of it: both end-to-end suites in full at

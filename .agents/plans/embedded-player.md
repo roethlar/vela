@@ -2394,8 +2394,16 @@ artifact keeps the probe's logs and screenshots.
   the SDDL alias `LA`, and `storage.rs` `windows_private::verify`, which
   looks for the numeric SID in that text, calls it "not private". A defect
   for anyone running Vela as that account (Windows Server, an enabled
-  built-in Administrator, every GitHub-hosted Windows runner). Repair in
-  progress (codex, `wacl`): compare SIDs, not text; then W2 again.
+  built-in Administrator, every GitHub-hosted Windows runner). Repaired at
+  `96c0f4d` (codex): the check compares SIDs, never text.
+- **2026-11-17, W2 at `96c0f4d`: Vela's window plays on Windows.** Run
+  43987838828 (Windows Server 2025, Direct3D 11 on WARP, the "Microsoft
+  Basic Render Driver"). Vela starts under the built-in Administrator; the
+  page turns into the player view and back twice; mpv draws with
+  `gpu-next` on Direct3D 11 in its own window inside Vela's, and the
+  screenshots show the test pattern there; the clock advances; each play
+  closes from the page. The first time Vela's Windows embedded code
+  (`6b206ec` and its fixes) played video on Windows.
 
 ### Design that follows (2026-11-16)
 
