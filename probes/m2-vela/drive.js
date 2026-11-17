@@ -66,5 +66,6 @@
     note('DONE');
   } catch (error) {
     note(`ERROR ${error?.message ?? error} ${JSON.stringify(page())}`);
+    note(`page text: ${document.body.innerText.replace(/\s+/g, ' ').slice(0, 400)}`);
   }
 })();

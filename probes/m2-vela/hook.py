@@ -126,3 +126,20 @@ patch("src-tauri/src/player/embedded/macos_host.rs", [
             self.video.isHidden()
         );"""),
 ])
+
+# Why a settings or connections file is "unavailable" at start (the page shows
+# only a generic sentence), and, on Windows, the ACL the privacy check read
+# back (probe W2 found Vela refusing its own settings on a hosted runner).
+patch("src-tauri/src/durable.rs", [(
+"""fn status_for_error(error: &io::Error, layout: DurableLayout) -> DurableFileStatus {
+    DurableFileStatus {""",
+"""fn status_for_error(error: &io::Error, layout: DurableLayout) -> DurableFileStatus {
+    eprintln!("probe-durable: {:?}: {error}", error.kind());
+    DurableFileStatus {""")])
+
+patch("src-tauri/src/storage.rs", [(
+"""        let actual = read_dacl_sddl(path)?;
+        let current_user_ace = format!(";;;{sid})");""",
+"""        let actual = read_dacl_sddl(path)?;
+        eprintln!("probe-acl: {} sid={sid} dacl={actual}", path.display());
+        let current_user_ace = format!(";;;{sid})");""")])
