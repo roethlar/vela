@@ -427,8 +427,10 @@ fn refuse_macos_loader_environment(
         "DYLD_INSERT_LIBRARIES",
         "DYLD_VERSIONED_LIBRARY_PATH",
         "DYLD_VERSIONED_FRAMEWORK_PATH",
-        // Not DYLD_ROOT_PATH: dyld applies it only to simulator executables
-        // (dyld/DyldProcessConfig.cpp), never to a native Vela.
+        // dyld 4 (macOS 12 on) applies this only to simulator executables,
+        // but macOS 11's dyld-832 prefixes it to a native process's absolute
+        // load paths, and the set supports macOS 11 (pl-25).
+        "DYLD_ROOT_PATH",
     ];
     for name in names {
         if let Some(redirect) = REDIRECTS
@@ -1323,6 +1325,8 @@ mod macos_environment_tests {
             "DYLD_INSERT_LIBRARIES",
             "DYLD_VERSIONED_LIBRARY_PATH",
             "DYLD_VERSIONED_FRAMEWORK_PATH",
+            // pl-25: native on macOS 11, whose dyld-832 honours it.
+            "DYLD_ROOT_PATH",
         ] {
             let error = refuse_macos_loader_environment(["PATH", name, "HOME"]).expect_err(name);
             assert!(error.contains(name));
@@ -1340,8 +1344,6 @@ mod macos_environment_tests {
             "DYLD_PRINT_SEARCHING",
             "DYLD_LIBRARY_PATH_EXTRA",
             "dyld_library_path",
-            // Simulator-only (pl-22): a native launch is not redirected by it.
-            "DYLD_ROOT_PATH",
         ])
         .is_ok());
     }
