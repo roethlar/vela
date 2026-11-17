@@ -500,6 +500,28 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Blockers
 
+- FOUND 2026-11-17, NOT FIXED: Vela's Linux AppImage always runs under
+  X11. Tauri's bundler puts linuxdeploy's GTK plugin hook in it
+  (`apprun-hooks/linuxdeploy-plugin-gtk.sh`), which does
+  `export GDK_BACKEND=x11` unconditionally ("Crash with Wayland backend on
+  Wayland", tauri-apps/tauri#8541). So the AppImage gets no HDR path and
+  Vela's window is always refused there (`NotWayland`), against the rule
+  that X11 is not supported in any way (`.agents/repo-guidance.md`). Seen
+  on the owner's NVIDIA machine (`.agents/machines.md`): with `DISPLAY`
+  unset the AppImage cannot start at all ("Trying x11 backend", then GTK
+  fails). The deb, rpm and Arch packages carry no such hook. A fix
+  changes packaging: it needs a plan and the owner's go.
+- NVIDIA, Slice N1, first machine evidence (2026-11-17, the owner's
+  machine: RTX 5090, NVIDIA open kernel module 620.70.06, KDE Plasma
+  Wayland, Arch): run 44098988278's AppImage, extracted with the hook's
+  `GDK_BACKEND=x11` line removed so it starts on Wayland, with a
+  throwaway config asking for Vela's window. It started in embedded window
+  mode (no refusal line, which a refused start prints), stayed up 20 s with
+  no "Error 71" and no WebKit renderer error, and its page loaded (the
+  start-up marker was gone within a second). Not yet known: whether the
+  window draws (no screenshot tool there; the owner's eyes), and a play
+  (no media source configured in the throwaway config).
+
 - No known product blocker.
 - A timing failure in a local end-to-end run proves nothing until the
   machine is known to be quiet: check `uptime`, and look for stray
