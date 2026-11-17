@@ -2615,3 +2615,24 @@ Cargo audit fails on every advisory.
 How to apply:
 - A build-tool advisory is not a blocker; one in a production dependency
   is, as before.
+## 2026-11-17 - Always do it the proper way; never offer dropping or a shortcut instead
+
+Status: OWNER RULING (2026-11-17), standing.
+
+Decision:
+Asked whether to drop the Linux AppImage (it forces X11 and bundles a
+WebKitGTK that fails on NVIDIA) or fix it, the owner, verbatim: "do not
+drop the appimage if it can be fixed. the general, overarching rule is
+always do it the proper way. if the choice is drop it or take a shortcut
+vs do it correctly even though it's slower and more difficult, don't even
+bother to ask me. just to it correctly."
+
+How to apply:
+- When a defect can be fixed, fix it correctly; do not propose removing
+  the feature, a workaround or a shortcut as an alternative, and do not
+  ask the owner to choose between them.
+- The plan and review rules still apply to the correct fix; the owner's
+  ruling is the go for doing it the correct way.
+- Ask only when the correct way itself is genuinely unclear, or when a
+  decision is the owner's for another reason (cost, accounts, by-eye
+  judgment, tagging and publishing).

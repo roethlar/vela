@@ -29,6 +29,10 @@
   code path, mode, fallback or claim of support, and X11 is never a gap,
   a "platform" or a defect under the 2026-11-16 ruling. Before listing
   anything as missing, read the plans' Non-goals and the decisions.
+- Always do it the proper way (owner, 2026-11-17, .agents/decisions.md):
+  when a defect can be fixed, fix it correctly, however slow or hard; never
+  offer dropping the feature, a workaround or a shortcut instead, and do not
+  ask the owner to choose between them.
 - The frontend is a single-page Svelte 5 app built by Vite (no SvelteKit;
   decision `.agents/decisions.md` 2026-10-23). Root `index.html` loads
   `src/main.ts`, which mounts the root component. `$lib` is defined only in
