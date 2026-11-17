@@ -118,8 +118,7 @@ exactly where credentials can appear locally, are in
 - HDR fidelity ultimately depends on mpv, its GPU backend, the display, and the
   operating system's color-management path.
 - Playing inside Vela's own window is experimental and off by default; on
-  Linux it does not yet work with the NVIDIA proprietary driver, and under
-  X11 its picture is in standard range. See
+  Linux it needs a Wayland session. See
   [docs/usage.md](docs/usage.md#playing-in-velas-own-window-experimental).
 
 Known issues and follow-up work are tracked in [ISSUES.md](ISSUES.md).

@@ -98,10 +98,9 @@ impl Drop for MarkerPayload {
 /// Everything a play needs to start.
 pub(crate) struct Start {
     pub(crate) lib: Arc<LibMpv>,
-    /// Vela's place on the window's connection to the compositor; none for a
-    /// play GTK composites (`overlay.rs`), which needs no connection.
+    /// Vela's place on the window's connection to the compositor.
     #[cfg(target_os = "linux")]
-    pub(crate) guest: Option<Arc<Guest>>,
+    pub(crate) guest: Arc<Guest>,
     /// The playback session this play belongs to.
     pub(crate) session_id: String,
     /// The user's own mpv configuration files, when they asked for them.
@@ -371,13 +370,8 @@ pub(crate) fn wait_for_unfinished_plays(limit: Duration) -> bool {
     LEFTOVERS.wait(limit)
 }
 
-/// What a Linux play draws on: the Wayland host's surface under Vela's
-/// window, or under X11 GTK's own compositing (`overlay.rs`).
 #[cfg(target_os = "linux")]
-pub(crate) enum VideoTarget {
-    Surface(Box<VideoSurface>),
-    Overlay(super::overlay::Target),
-}
+pub(crate) type VideoTarget = VideoSurface;
 #[cfg(target_os = "windows")]
 pub(crate) type VideoTarget = usize;
 #[cfg(target_os = "macos")]
@@ -616,190 +610,18 @@ fn configure(player: &Player, start: &Start) -> Result<(), String> {
     Ok(())
 }
 
-/// Build a play around what the window's thread made for it.
-#[cfg(target_os = "linux")]
-fn set_up(start: &Start, target: VideoTarget, shared: &Arc<Shared>) -> Result<LinuxLive, String> {
-    match target {
-        VideoTarget::Surface(surface) => set_up_surface(start, *surface, shared)
-            .map(|live| LinuxLive::Surface(Box::new(live))),
-        VideoTarget::Overlay(target) => set_up_overlay(start, target, shared).map(LinuxLive::Overlay),
-    }
-}
-
-/// A Linux play: on the Wayland host's surface, or composited by GTK.
-#[cfg(target_os = "linux")]
-enum LinuxLive {
-    Surface(Box<Live>),
-    Overlay(OverlayLive),
-}
-
-#[cfg(target_os = "linux")]
-impl LinuxLive {
-    fn load(&self, url: &str) -> Result<(), String> {
-        match self {
-            LinuxLive::Surface(play) => play.load(url),
-            LinuxLive::Overlay(play) => play.load(url),
-        }
-    }
-}
-
-#[cfg(target_os = "linux")]
-impl PlayLoop for LinuxLive {
-    fn wait(&mut self, shared: &Shared, timeout_ms: i32) -> bool {
-        match self {
-            LinuxLive::Surface(play) => play.wait(shared, timeout_ms),
-            LinuxLive::Overlay(play) => play.wait(shared, timeout_ms),
-        }
-    }
-
-    fn request_quit(&self) {
-        match self {
-            LinuxLive::Surface(play) => play.request_quit(),
-            LinuxLive::Overlay(play) => play.request_quit(),
-        }
-    }
-
-    fn turn(&mut self, shared: &Shared, stopping: &Stopping) -> bool {
-        match self {
-            LinuxLive::Surface(play) => play.turn(shared, stopping),
-            LinuxLive::Overlay(play) => play.turn(shared, stopping),
-        }
-    }
-}
-
-/// A play GTK composites (`overlay.rs`). The player is this thread's; its
-/// renderer lives on GTK's thread, made there by `target`, and `Drop` has it
-/// freed there before the player goes.
-#[cfg(target_os = "linux")]
-struct OverlayLive {
-    target: super::overlay::Target,
-    player: Player,
-}
-
-/// Build a play that GTK composites. Nothing here touches Vela's window but
-/// `target`, which asks GTK's thread.
-#[cfg(target_os = "linux")]
-fn set_up_overlay(
-    start: &Start,
-    target: super::overlay::Target,
-    shared: &Arc<Shared>,
-) -> Result<OverlayLive, String> {
-    let player = Player::create(start.lib.clone())?;
-    configure(&player, start)?;
-    // GTK's thread draws, and must never wait for a frame's time: frames are
-    // handed over when they are due (render.h pairs this with drawing that
-    // does not block, `Renderer::draw_into_framebuffer`). After the user's
-    // options and Vela's, so that it holds whatever they said.
-    player
-        .set_option("video-timing-offset", "0")
-        .map_err(|_| "mpv did not take the player's timing".to_string())?;
-    player
-        .initialize()
-        .map_err(|reason| format!("mpv could not start ({reason})"))?;
-    // mpv says "success" for an options file it could not read or parse;
-    // reading these two back shows the list arrived (as `set_up_surface`).
-    if player.property("input-ipc-server").as_deref() != Some(start.ipc_path.as_str())
-        || player.property("vo").as_deref() != Some("libmpv")
-    {
-        return Err("mpv did not take the player's options".to_string());
-    }
-    // SAFETY: `shared` is held by this thread until after the play, and with
-    // it the player, has been dropped.
-    unsafe { player.set_wakeup(wake_from_mpv, Arc::as_ptr(shared) as *mut c_void) };
-    if let Err(reason) = target.begin(&player) {
-        if target.drawing() {
-            // GTK's thread made a renderer from this player and it could
-            // not be freed: mpv must not go while it exists.
-            keep_forever(&reason);
-        }
-        return Err(reason);
-    }
-    Ok(OverlayLive { target, player })
-}
-
-/// Never let mpv go while its renderer may still exist on GTK's thread: keep
-/// this thread, and with it the player. The leftover policy then refuses new
-/// embedded plays and bounds the wait as Vela exits.
-#[cfg(target_os = "linux")]
-fn keep_forever(reason: &str) -> ! {
-    eprintln!("vela: the embedded player could not free its drawing safely ({reason}); keeping the play");
-    loop {
-        std::thread::park();
-    }
-}
-
-#[cfg(target_os = "linux")]
-impl OverlayLive {
-    fn load(&self, url: &str) -> Result<(), String> {
-        self.player
-            .command(&["loadfile", url])
-            .map_err(|reason| format!("mpv would not load the stream ({reason})"))
-    }
-}
-
-#[cfg(target_os = "linux")]
-impl PlayLoop for OverlayLive {
-    fn wait(&mut self, shared: &Shared, timeout_ms: i32) -> bool {
-        let mut wake = libc::pollfd {
-            fd: shared.wake.as_raw_fd(),
-            events: libc::POLLIN,
-            revents: 0,
-        };
-        // SAFETY: one valid pollfd, for the length of the call.
-        unsafe { libc::poll(&mut wake, 1, timeout_ms) };
-        // The window went away under the play: nothing draws it any more.
-        !self.target.ended()
-    }
-
-    fn request_quit(&self) {
-        self.player.request_quit();
-    }
-
-    fn turn(&mut self, _shared: &Shared, stopping: &Stopping) -> bool {
-        // GTK's thread draws; this one only reads mpv's events.
-        loop {
-            if stopping.expired(Instant::now()) {
-                return false;
-            }
-            match self.player.next_event() {
-                Event::None => return true,
-                // The file ended, or quit was requested here or over IPC.
-                Event::Shutdown => return false,
-                // GTK composites in standard range, so this play asks mpv
-                // for no target and sets none (`set_up_overlay`): neither
-                // comes, and nothing else needs an answer.
-                Event::Answer { .. } | Event::TargetChanged { .. } | Event::Other => {}
-            }
-        }
-    }
-}
-
-#[cfg(target_os = "linux")]
-impl Drop for OverlayLive {
-    fn drop(&mut self) {
-        if let Err(reason) = self.target.end() {
-            keep_forever(&reason);
-        }
-        // Then the fields: the target, and the player, which ends mpv.
-    }
-}
-
 /// Build a play around `surface`, which the window's thread made for it
 /// (`VideoSurface::create`). Nothing here touches Vela's window.
 #[cfg(target_os = "linux")]
-fn set_up_surface(start: &Start, mut surface: VideoSurface, shared: &Arc<Shared>) -> Result<Live, String> {
+fn set_up(start: &Start, mut surface: VideoSurface, shared: &Arc<Shared>) -> Result<Live, String> {
     // The waiting the window's thread was spared: learn the surface's scale.
     surface.settle()?;
     let (width, height) = surface.buffer_size();
-    let guest = start
-        .guest
-        .as_ref()
-        .ok_or("the play has no connection to the compositor")?;
     // SAFETY: the connection the surface is on, which lives as long as the
     // process, and a surface that `Live` drops after the window that draws
     // into it.
     let window = unsafe {
-        egl::Window::create(guest.display().0, surface.wl_surface(), width, height)
+        egl::Window::create(start.guest.display().0, surface.wl_surface(), width, height)
     }?;
     // Something to show from the first moment: black, not whatever the
     // compositor has behind the window.

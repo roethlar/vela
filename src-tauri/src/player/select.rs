@@ -52,14 +52,10 @@ pub(crate) enum EmbeddedUnavailable {
     /// showing the page, so this one started the ordinary way.
     #[cfg(any(test, target_os = "linux", target_os = "windows", target_os = "macos"))]
     FailedLastStart,
-    /// The Wayland host found Vela's window outside Wayland: the start was
-    /// prepared for the Wayland session it saw, and GTK opened the window
-    /// under X11 instead. (A start that sees X11 starts overlay mode,
-    /// `embedded::startup`.)
+    /// The session is X11, or GTK was told to use X11.
     #[cfg(any(test, target_os = "linux"))]
     NotWayland,
-    /// The NVIDIA proprietary driver is in use: Vela's window needs WebKit's
-    /// GPU renderer, which misbehaves on that driver (`embedded::startup`).
+    /// The NVIDIA proprietary driver is in use; untested there.
     #[cfg(any(test, target_os = "linux"))]
     NvidiaDriver,
     /// The user's environment turns off the WebKit renderer it depends on.
@@ -95,7 +91,7 @@ impl EmbeddedUnavailable {
             #[cfg(any(test, target_os = "linux", target_os = "windows", target_os = "macos"))]
             EmbeddedUnavailable::FailedLastStart => "off after a failed start",
             #[cfg(any(test, target_os = "linux"))]
-            EmbeddedUnavailable::NotWayland => "window opened under X11",
+            EmbeddedUnavailable::NotWayland => "needs a Wayland session",
             #[cfg(any(test, target_os = "linux"))]
             EmbeddedUnavailable::NvidiaDriver => "not on NVIDIA drivers yet",
             #[cfg(any(test, target_os = "linux"))]
@@ -129,7 +125,7 @@ impl EmbeddedUnavailable {
             #[cfg(any(test, target_os = "linux", target_os = "windows", target_os = "macos"))]
             Self::FailedLastStart => "Videos play in mpv's own window because Vela did not finish starting with video in its window last time; this run started without it, and the next start tries again.",
             #[cfg(any(test, target_os = "linux"))]
-            Self::NotWayland => "Videos play in mpv's own window because Vela's window opened under X11 although the session is Wayland.",
+            Self::NotWayland => "Videos play in mpv's own window because video in Vela's window requires a Wayland session.",
             #[cfg(any(test, target_os = "linux"))]
             Self::NvidiaDriver => "Videos play in mpv's own window because video in Vela's window does not support the NVIDIA proprietary driver yet.",
             #[cfg(any(test, target_os = "linux"))]
@@ -157,9 +153,10 @@ pub(crate) fn settings_note(
     available: Result<(), EmbeddedUnavailable>,
     known: Result<(), EmbeddedUnavailable>,
 ) -> Option<&'static str> {
+    use super::embedded::startup::WindowMode;
     let reason = if saved == PlayerKind::External {
         known.err()?
-    } else if started.mode.plays_in_window() {
+    } else if started.mode == WindowMode::Embedded {
         match available {
             Ok(()) => return Some("Videos play in Vela's window."),
             Err(reason) => reason,
@@ -282,8 +279,6 @@ mod tests {
         use PlayerKind::*;
         let today = Decision { mode: WindowMode::Today, refused: None };
         let active = Decision { mode: WindowMode::Embedded, refused: None };
-        // GTK-composited, under X11: Vela's window all the same.
-        let overlay = Decision { mode: WindowMode::Overlay, refused: None };
         let recovered = Decision { mode: WindowMode::Today, refused: Some(FailedLastStart) };
         let missing = "Videos play in mpv's own window because this copy of Vela does not include the library needed for video in Vela's window.";
         let restarting = "Videos play in mpv's own window until you restart Vela to use Vela's window.";
@@ -294,8 +289,6 @@ mod tests {
             (External, active.clone(), Err(StartFailed), Ok(()), None),
             (External, today.clone(), Err(NeedsRestart), Err(LibraryMissing), Some(missing)),
             (Embedded, active.clone(), Ok(()), Ok(()), Some("Videos play in Vela's window.")),
-            (Embedded, overlay.clone(), Ok(()), Ok(()), Some("Videos play in Vela's window.")),
-            (Embedded, overlay.clone(), Err(NoGpuFormat), Ok(()), Some("Videos play in mpv's own window because this graphics driver cannot draw video in Vela's window.")),
             // Removing the file cannot unload a library already in use.
             (Embedded, active.clone(), Ok(()), Err(LibraryMissing), Some("Videos play in Vela's window.")),
             (Embedded, today.clone(), Err(NeedsRestart), Ok(()), Some(restarting)),
@@ -308,7 +301,7 @@ mod tests {
             (NotOnThisSystem, "Videos play in mpv's own window because video in Vela's window is only available on Linux."),
             (NeedsRestart, restarting),
             (FailedLastStart, failed_start),
-            (NotWayland, "Videos play in mpv's own window because Vela's window opened under X11 although the session is Wayland."),
+            (NotWayland, "Videos play in mpv's own window because video in Vela's window requires a Wayland session."),
             (NvidiaDriver, "Videos play in mpv's own window because video in Vela's window does not support the NVIDIA proprietary driver yet."),
             (RendererOff, "Videos play in mpv's own window because your environment disables the renderer needed for video in Vela's window."),
             (LibraryMissing, "Videos play in mpv's own window because the library needed for video in Vela's window could not be loaded."),
@@ -318,8 +311,7 @@ mod tests {
             (StartFailed, "Videos play in mpv's own window because a video failed to start in Vela's window earlier in this run; restarting Vela tries again."),
         ] {
             cases.push((Embedded, active.clone(), Err(reason), Ok(()), Some(expected)));
-            // The reasons the start-up decision itself gives.
-            if matches!(reason, NvidiaDriver | RendererOff) {
+            if matches!(reason, NotWayland | NvidiaDriver | RendererOff) {
                 cases.push((External, today.clone(), Err(NeedsRestart), Err(reason), Some(expected)));
                 cases.push((Embedded, today.clone(), Err(NeedsRestart), Err(reason), Some(expected)));
                 cases.push((Embedded, Decision { mode: WindowMode::Today, refused: Some(reason) }, Err(reason), Ok(()), Some(expected)));

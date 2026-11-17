@@ -38,17 +38,6 @@ if (!['external', 'embedded'].includes(runPlayer)) {
   console.error(`e2e: unknown player "${runPlayer}" (VELA_E2E_PLAYER is external or embedded)`);
   process.exit(1);
 }
-// `--x11` with `--embedded`: the embedded player on an X11 display (weston's
-// Xwayland, below), where Vela composites the video itself (overlay mode,
-// overlay.rs), instead of on the Wayland compositor. Its results go to their
-// own file, which the parity verdict does not read: that verdict is the
-// Wayland run's.
-const embeddedX11 = runPlayer === 'embedded' && (argv.includes('--x11') || !!process.env.VELA_E2E_EMBEDDED_X11);
-if (argv.includes('--x11') && runPlayer !== 'embedded') {
-  console.error('e2e: --x11 is for a run of the embedded player (--embedded); the external player always runs on X11 here');
-  process.exit(1);
-}
-const resultsName = embeddedX11 ? 'embedded-x11' : runPlayer;
 
 // Node skips 'exit' handlers when dying to a default signal disposition,
 // and the detached driver group never sees the terminal's SIGINT — so an
@@ -385,10 +374,10 @@ if (runPlayer === 'embedded') {
 }
 if (isWindows) {
   console.log('e2e: using the Windows interactive desktop (no Xvfb/weston)');
-} else if (!process.env.VELA_E2E_HEADED && runPlayer === 'embedded' && !embeddedX11) {
-  // A private, headless Wayland compositor, for the Wayland host (the video
-  // on a surface under the window). It draws with the GPU (the web view and
-  // the video both need that) and shows nothing on any screen.
+} else if (!process.env.VELA_E2E_HEADED && runPlayer === 'embedded') {
+  // A private, headless Wayland compositor: Xvfb is X11, where the embedded
+  // player cannot run. It draws with the GPU (the web view and the video
+  // both need that) and shows nothing on any screen.
   const socket = `vela-e2e-${process.pid}`;
   const runtimeDir = process.env.XDG_RUNTIME_DIR;
   if (!runtimeDir) {
@@ -426,56 +415,6 @@ if (isWindows) {
   activeKills.add(() => weston.kill());
   await waitUntil(() => fs.existsSync(path.join(runtimeDir, socket)), `weston on ${socket}`);
   displayEnv = { ...displayEnv, GDK_BACKEND: 'wayland', WAYLAND_DISPLAY: socket, DISPLAY: '' };
-} else if (!process.env.VELA_E2E_HEADED && embeddedX11) {
-  // X11, for overlay mode: the X server a private, headless weston runs
-  // (Xwayland), not Xvfb. On X11 a GTK window goes fullscreen only when a
-  // window manager makes it so, and Xvfb has none; weston has its own for X11
-  // windows. Its X server also draws OpenGL with the GPU, as an X11 desktop
-  // does, where Xvfb draws it in software. The screen is larger than Vela's
-  // window, so that fullscreen shows (on X11 the window's frame is drawn
-  // outside its content). Weston writes the X display it listens on to its
-  // log.
-  const socket = `vela-e2e-x11-${process.pid}`;
-  const runtimeDir = process.env.XDG_RUNTIME_DIR;
-  if (!runtimeDir) {
-    console.error('e2e: XDG_RUNTIME_DIR is not set; weston needs it');
-    process.exit(1);
-  }
-  const westonLog = path.join(artifactsDir, 'weston-x11.log');
-  fs.rmSync(westonLog, { force: true });
-  const weston = spawn(
-    'weston',
-    // As for the Wayland venue above (--idle-time=0, --fake-seat), with
-    // weston's X server.
-    [
-      '--backend=headless',
-      '--fake-seat',
-      '--renderer=gl',
-      '--xwayland',
-      `--socket=${socket}`,
-      '--width=1920',
-      '--height=1080',
-      '--idle-time=0',
-      `--log=${westonLog}`,
-    ],
-    { stdio: 'ignore' },
-  );
-  weston.on('error', () => {
-    console.error('e2e: weston not found — install it, or set VELA_E2E_HEADED=1 to use the desktop');
-    process.exit(1);
-  });
-  process.on('exit', () => weston.kill());
-  activeKills.add(() => weston.kill());
-  let display = null;
-  await waitUntil(() => {
-    const log = fs.existsSync(westonLog) ? fs.readFileSync(westonLog, 'utf8') : '';
-    display = /xserver listening on display (:\d+)/.exec(log)?.[1] ?? null;
-    return display !== null;
-  }, `weston's X server (${westonLog})`);
-  displayEnv = { ...displayEnv, GDK_BACKEND: 'x11', DISPLAY: display, WAYLAND_DISPLAY: '' };
-} else if (embeddedX11) {
-  // Headed: the desktop's own X server (Xwayland, on a Wayland desktop).
-  displayEnv = { ...displayEnv, GDK_BACKEND: 'x11', WAYLAND_DISPLAY: '' };
 } else if (!process.env.VELA_E2E_HEADED) {
   const display = process.env.VELA_E2E_DISPLAY ?? ':97';
   if (fs.existsSync(`/tmp/.X${display.slice(1)}-lock`)) {
@@ -550,7 +489,7 @@ if (!live) {
   }
   fs.mkdirSync(resultsDir, { recursive: true });
   fs.writeFileSync(
-    path.join(resultsDir, `${resultsName}.json`),
+    path.join(resultsDir, `${runPlayer}.json`),
     JSON.stringify(
       {
         player: runPlayer,
@@ -580,7 +519,7 @@ if (!live) {
 // finding pa-5). A run whose file fails them fails.
 let unreadableResults = false;
 if (!live) {
-  const resultsFile = path.join(resultsDir, `${resultsName}.json`);
+  const resultsFile = path.join(resultsDir, `${runPlayer}.json`);
   const unreadable = resultsFileProblems(JSON.parse(fs.readFileSync(resultsFile, 'utf8')), runPlayer);
   if (unreadable.length > 0) {
     unreadableResults = true;

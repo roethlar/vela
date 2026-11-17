@@ -16,31 +16,22 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   what that platform has and lacks. The agent recommended holding the tag
   until the embedded player works on macOS and Windows; the tag is the
   owner's. Where it stands (2026-11-16, evening):
-  - THE THREE GAPS THAT REMAINED (the plan's "Amendment, 2026-11-17" and
-    its Probe log; 2026-11-17):
-    - X11: Vela's window plays under X11 in overlay mode: GTK composites
-      the video under the page, in standard range, with WebKit's GPU
-      renderer on (`overlay.rs`; the commit that adds it). The embedded
-      suite has a venue under X11, weston's X server (`npm run e2e --
-      --embedded --x11`).
+  - WHAT THE PLAN'S "Amendment, 2026-11-17" LISTED AS GAPS:
+    - X11: NOT A GAP. Listing it was the working agent's error, against
+      the plan's own non-goals, the README and the reason Vela exists (see
+      `.agents/repo-guidance.md`, Mission Detail). The overlay mode built
+      for it (`671cba9`, `4b91540`, `9303cee`, `d41a926`) is removed in
+      the commit that records this.
     - macOS, VideoToolbox straight to the picture: done (`1e9905e`; probe
       M2's run 44061797549 decoded that way on a hosted Mac, the plan's
       Probe log).
-    - NVIDIA's proprietary driver: OWNER DECISION ASKED. Context: on
-      Linux, Vela's window needs a transparent page over the video, and
-      WebKitGTK draws a transparent page right only with its GPU renderer
-      (found 2026-11-17, the plan's Probe log); that renderer is the one
-      known to fail on NVIDIA's proprietary driver (blank windows,
-      Wayland's "Error 71"; no fixed version), and no NVIDIA machine is
-      at hand. So on NVIDIA videos play in mpv's own window, and Settings
-      says why. Question: is that the one approved difference until an
-      NVIDIA machine can be tried, or should Vela get a second look for
-      NVIDIA? Approve: nothing changes. Build: on NVIDIA the video would
-      sit above a strip of Vela's controls instead of under them (no
-      transparent page), written and tested here on AMD with the renderer
-      off, never seen on NVIDIA before it ships. Recommendation: approve;
-      the owner has no NVIDIA machine, and the second look would be
-      untested where it matters.
+    - NVIDIA's proprietary driver: OWNER DECISION ASKED. On Linux, Vela's
+      window needs WebKitGTK's GPU renderer, which is known to fail on
+      NVIDIA's proprietary driver (blank windows, Wayland's "Error 71"; no
+      fixed version), and no NVIDIA machine is at hand; so on NVIDIA
+      videos play in mpv's own window, and Settings says why. Question:
+      approve that as a difference? Anything else would be a path without
+      HDR, which is out of scope.
   - Landed: the macOS app declares why it reaches the local network
     (`d6a8033`; the notarized app of a release run carries the sentence);
     the player window finds its remembered screen on a Mac, Retina

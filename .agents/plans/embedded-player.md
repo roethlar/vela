@@ -2630,9 +2630,6 @@ installer and the macOS app).
 
 **Linux (Wayland, as you use it now).**
 - Has: all of the above; HDR in Vela's window through the compositor.
-  Under X11 too, Vela's window (overlay mode, added 2026-11-17), in
-  standard range: HDR video is tone-mapped there, and hardware decoding
-  copies frames back (4K60 without a dropped frame in probe X1).
 - Lacks: Vela's window with NVIDIA's proprietary driver (the video plays
   in mpv's own window and Settings says why); whether that stays the one
   approved difference is asked of you in `.agents/state.md`.
@@ -2715,6 +2712,17 @@ installer and the macOS app).
      plays: it changes to standard range.
 
 ## Amendment, 2026-11-17: the platform gaps that remained (owner ruling)
+
+**Corrected the same day: the X11 item below was the working agent's
+error.** "X11 embedding" is one of this plan's Non-goals, X11 is not an
+HDR path (`README.md`), and HDR on Wayland is the reason Vela exists
+(`.agents/decisions.md`, 2026-11-12); the owner: "X11 is not a fallback,
+X11 is not supported in ANY way", "this is not a new ruling", "nothing
+that does not support HDR should be involved in any of this" (now in
+`.agents/repo-guidance.md`). Overlay mode, which the item led to
+(`671cba9`, `4b91540`, `9303cee`, `d41a926`), is removed; the embedded
+player on Linux is Wayland's alone, and an X11 start refuses it as
+before. The probe log below keeps what was found, as history.
 
 The ruling of 2026-11-16 (`.agents/decisions.md`, "Vela works the same on
 every platform") names "Linux under Wayland only" among the differences

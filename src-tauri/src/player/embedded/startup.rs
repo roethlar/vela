@@ -12,24 +12,18 @@
 //! need none of those Linux renderer/driver restrictions; only the saved
 //! choice and the recovery marker determine its window mode.
 //!
-//! So there are three ways to start. **Today's**: an opaque window with that
+//! So there are two ways to start. **Today's**: an opaque window with that
 //! renderer off, exactly as before this player existed, and what every start
 //! is unless the user has chosen the embedded player. **Embedded window
-//! mode**: a transparent window with the renderer on, for the Wayland host.
-//! **Overlay mode**, under X11: an opaque window with the renderer on, where
-//! GTK composites the video under the page itself (`overlay.rs`). Its page is
-//! transparent, and WebKitGTK draws a transparent web view right only with
-//! that renderer (found 2026-11-17, the plan's Probe log: without it the
-//! page's later repaints are lost). Neither mode is entered on NVIDIA's
-//! driver, where that renderer fails. Changing the setting therefore takes
-//! effect at the next start.
+//! mode**: a transparent window with the renderer on. Changing the setting
+//! therefore takes effect at the next start.
 //!
-//! Because either mode changes how the whole window is drawn, a failure
-//! there could leave the user unable to reach Settings to turn it off.
-//! Before entering one Vela leaves a marker file; the page removes it once it
-//! has loaded. A marker found at the next start means the last one did not
-//! get that far: that start uses today's mode, and removes the marker so the
-//! one after tries again.
+//! Because embedded window mode changes how the whole window is drawn, a
+//! failure there could leave the user unable to reach Settings to turn it
+//! off. Before entering it Vela leaves a marker file; the page removes it
+//! once it has loaded. A marker found at the next start means the last one
+//! did not get that far: that start uses today's mode, and removes the
+//! marker so the one after tries again.
 
 use crate::player::EmbeddedUnavailable;
 
@@ -40,25 +34,6 @@ pub(crate) enum WindowMode {
     Today,
     /// Transparent window; on Linux, WebKit's GPU renderer is on.
     Embedded,
-    /// Linux, X11 only: an opaque window with WebKit's GPU renderer on, and
-    /// the embedded player composited by GTK under the page (`overlay.rs`).
-    #[cfg(target_os = "linux")]
-    Overlay,
-}
-
-impl WindowMode {
-    /// Whether this run plays videos in Vela's window: embedded window mode,
-    /// or overlay mode. Either changes how WebKit draws the whole window (on
-    /// Linux its GPU renderer stays on), so either is entered only behind the
-    /// start-up marker.
-    pub(crate) fn plays_in_window(self) -> bool {
-        match self {
-            WindowMode::Today => false,
-            WindowMode::Embedded => true,
-            #[cfg(target_os = "linux")]
-            WindowMode::Overlay => true,
-        }
-    }
 }
 
 /// What is known when the process starts, before any window exists.
@@ -86,8 +61,7 @@ pub(crate) struct Decision {
 }
 
 /// Decide how this run starts. Anything short of "the user chose the
-/// embedded player and nothing known rules it out" is today's start; under
-/// Wayland it is embedded window mode, under X11 overlay mode.
+/// embedded player and nothing known rules it out" is today's start.
 #[cfg(target_os = "linux")]
 pub(crate) fn decide(facts: Facts<'_>) -> Decision {
     let today = |refused| Decision {
@@ -100,21 +74,19 @@ pub(crate) fn decide(facts: Facts<'_>) -> Decision {
     if facts.marker_left_behind {
         return today(Some(EmbeddedUnavailable::FailedLastStart));
     }
+    if !facts.wayland_session {
+        return today(Some(EmbeddedUnavailable::NotWayland));
+    }
     if facts.nvidia_driver {
-        // Both modes need WebKit's GPU renderer, and on this driver it has
-        // crashed under Wayland and drawn blank windows, with no fixed version
-        // named upstream; no NVIDIA machine has tried either mode.
+        // The renderer embedded window mode needs is the one that crashed on
+        // this driver, and nothing here has been run on NVIDIA hardware.
         return today(Some(EmbeddedUnavailable::NvidiaDriver));
     }
     if facts.renderer_turned_off_by_user {
         return today(Some(EmbeddedUnavailable::RendererOff));
     }
     Decision {
-        mode: if facts.wayland_session {
-            WindowMode::Embedded
-        } else {
-            WindowMode::Overlay
-        },
+        mode: WindowMode::Embedded,
         refused: None,
     }
 }
@@ -343,10 +315,9 @@ pub(crate) fn prepare() -> WindowMode {
             let _ = std::fs::remove_file(path);
         }
     }
-    if decision.mode.plays_in_window() {
-        // No marker, no embedded window mode or overlay mode: both change how
-        // WebKit draws the whole window, and without the marker a start that
-        // fails would simply be repeated.
+    if decision.mode == WindowMode::Embedded {
+        // No marker, no embedded window mode: without it a start that fails
+        // would simply be repeated.
         let left = marker
             .as_ref()
             .is_some_and(|path| std::fs::write(path, b"").is_ok());
@@ -450,54 +421,29 @@ mod tests {
         );
     }
 
-    // The ruling of 2026-11-16: an X11 session is no reason to refuse the
-    // embedded player; it starts overlay mode. What WebKit's GPU renderer
-    // rules out (NVIDIA's driver, the user's own environment) still says why,
-    // whatever the session; a failed start still forces today's.
     #[test]
-    fn x11_starts_overlay_mode_and_each_refusal_says_why_in_either_session() {
-        for wayland_session in [false, true] {
-            let facts = Facts {
-                wayland_session,
+    fn each_thing_that_rules_embedded_window_mode_out_does_so_alone_and_says_why() {
+        assert_eq!(
+            decide(Facts {
+                wayland_session: false,
                 ..WILLING
-            };
-            assert_eq!(
-                decide(facts),
-                Decision {
-                    mode: if wayland_session {
-                        WindowMode::Embedded
-                    } else {
-                        WindowMode::Overlay
-                    },
-                    refused: None,
-                },
-                "{facts:?}"
-            );
-            assert_eq!(
-                decide(Facts {
-                    nvidia_driver: true,
-                    ..facts
-                }),
-                today(Some(EmbeddedUnavailable::NvidiaDriver)),
-                "{facts:?}"
-            );
-            assert_eq!(
-                decide(Facts {
-                    renderer_turned_off_by_user: true,
-                    ..facts
-                }),
-                today(Some(EmbeddedUnavailable::RendererOff)),
-                "{facts:?}"
-            );
-            assert_eq!(
-                decide(Facts {
-                    marker_left_behind: true,
-                    ..facts
-                }),
-                today(Some(EmbeddedUnavailable::FailedLastStart)),
-                "{facts:?}"
-            );
-        }
+            }),
+            today(Some(EmbeddedUnavailable::NotWayland))
+        );
+        assert_eq!(
+            decide(Facts {
+                nvidia_driver: true,
+                ..WILLING
+            }),
+            today(Some(EmbeddedUnavailable::NvidiaDriver))
+        );
+        assert_eq!(
+            decide(Facts {
+                renderer_turned_off_by_user: true,
+                ..WILLING
+            }),
+            today(Some(EmbeddedUnavailable::RendererOff))
+        );
     }
 
     #[test]

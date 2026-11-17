@@ -24,9 +24,7 @@ use super::options;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use super::session::Rect;
 use super::session::{self, Lifecycle, MarkerPayload, Session, Start, VideoTarget};
-use super::startup;
-#[cfg(target_os = "linux")]
-use super::startup::WindowMode;
+use super::startup::{self, WindowMode};
 #[cfg(target_os = "linux")]
 use super::surface::{Guest, VideoSurface, WlDisplay};
 use crate::player::launch::LaunchPlan;
@@ -87,7 +85,7 @@ pub(crate) fn load_delay(development_build: bool, asked: Option<&std::ffi::OsStr
 }
 
 /// Run `ask` on the window's thread and wait for its answer.
-pub(super) fn on_window_thread<T: Send + 'static>(
+fn on_window_thread<T: Send + 'static>(
     app: &tauri::AppHandle,
     ask: impl FnOnce() -> T + Send + 'static,
 ) -> Result<T, String> {
@@ -144,7 +142,7 @@ const _: fn() = || {
 /// Find the web view inside the window. Tauri puts it in a box under the
 /// window; this walks down rather than assuming how deep.
 #[cfg(target_os = "linux")]
-pub(super) fn find_web_view(widget: &gtk::Widget) -> Option<gtk::Widget> {
+fn find_web_view(widget: &gtk::Widget) -> Option<gtk::Widget> {
     if widget.type_().name() == "WebKitWebView" {
         return Some(widget.clone());
     }
@@ -269,16 +267,9 @@ pub(crate) fn rect_in_window(page: Rect, reported: Rect) -> Rect {
 struct Ready {
     lib: Arc<LibMpv>,
     /// Vela's place on the window's connection to the compositor. Joined
-    /// here, once: see `surface.rs` for why never per play. None in overlay
-    /// mode, where GTK composites the video and no connection is needed.
+    /// here, once: see `surface.rs` for why never per play.
     #[cfg(target_os = "linux")]
-    guest: Option<Arc<Guest>>,
-}
-
-/// Whether this run's embedded plays are GTK-composited (`overlay.rs`).
-#[cfg(target_os = "linux")]
-fn overlay_mode() -> bool {
-    startup::decision().mode == WindowMode::Overlay
+    guest: Arc<Guest>,
 }
 
 /// The whole page, as a rectangle relative to the page.
@@ -392,14 +383,7 @@ impl Host {
     /// cost and stopping at the first that is not.
     fn check(&self, app: &tauri::AppHandle) -> Result<Ready, EmbeddedUnavailable> {
         #[cfg(target_os = "linux")]
-        let guest = if overlay_mode() {
-            on_window_thread(app, {
-                let app = app.clone();
-                move || super::overlay::check(&app)
-            })
-            .map_err(|_| EmbeddedUnavailable::WindowNotReady)??;
-            None
-        } else {
+        let guest = {
             let display = on_window_thread(app, {
                 let app = app.clone();
                 move || window_facts(&app).map(|facts| facts.display)
@@ -417,7 +401,7 @@ impl Host {
                 eprintln!("vela: the embedded player is unavailable: {detail}");
                 EmbeddedUnavailable::NoGpuFormat
             })?;
-            Some(guest)
+            guest
         };
         #[cfg(target_os = "windows")]
         on_window_thread(app, {
@@ -453,7 +437,7 @@ impl Host {
 
     fn library(&self, app: &tauri::AppHandle) -> Result<Ready, EmbeddedUnavailable> {
         let decided = startup::decision();
-        if !decided.mode.plays_in_window() {
+        if decided.mode != WindowMode::Embedded {
             return Err(decided.refused.unwrap_or(EmbeddedUnavailable::NeedsRestart));
         }
         if self.start_failed.load(std::sync::atomic::Ordering::SeqCst) {
@@ -486,44 +470,31 @@ impl Host {
         #[cfg(any(target_os = "windows", target_os = "macos"))]
         let Ready { lib } = self.library(app).map_err(|reason| reason.notice())?;
         #[cfg(target_os = "linux")]
-        let surface = match guest.clone() {
-            // Overlay mode: the overlay is in the window (put there as Vela
-            // started; here again if that failed), and its video area fills
-            // the page, as the player view does; GTK's thread makes the
-            // renderer when the play's player exists (`Target::begin`).
-            None => {
-                on_window_thread(app, {
-                    let app = app.clone();
-                    move || super::overlay::install(&app)
-                })?
-                .map_err(|reason| reason.notice())?;
-                session::VideoTarget::Overlay(super::overlay::Target::new(app.clone()))
-            }
-            Some(guest) => {
-                let reported = *self.reported.lock().unwrap_or_else(|e| e.into_inner());
-                // The play's surface is made here, on the window's thread, where the
-                // window it is made under cannot be closed in the middle (review
-                // finding ec-1). Only the finished surface leaves that thread.
-                let surface = on_window_thread(app, {
-                    let app = app.clone();
-                    move || {
-                        let facts = window_facts(&app)?;
-                        let rect = rect_in_window(facts.page, reported.unwrap_or(whole(facts.page)));
-                        // SAFETY: on the window's own thread, with the surface of a
-                        // window that was alive a moment ago on this same thread, on
-                        // the connection `guest` joined.
-                        unsafe { VideoSurface::create(&guest, facts.surface, rect.width, rect.height) }
-                            .map_err(|detail| {
-                                eprintln!(
-                                    "vela: the embedded player could not make its surface: {detail}"
-                                );
-                                EmbeddedUnavailable::WindowNotReady
-                            })
-                    }
-                })?
-                .map_err(|reason| reason.notice())?;
-                session::VideoTarget::Surface(Box::new(surface))
-            }
+        let surface = {
+            let reported = *self.reported.lock().unwrap_or_else(|e| e.into_inner());
+            // The play's surface is made here, on the window's thread, where the
+            // window it is made under cannot be closed in the middle (review
+            // finding ec-1). Only the finished surface leaves that thread.
+            let surface = on_window_thread(app, {
+                let app = app.clone();
+                let guest = guest.clone();
+                move || {
+                    let facts = window_facts(&app)?;
+                    let rect = rect_in_window(facts.page, reported.unwrap_or(whole(facts.page)));
+                    // SAFETY: on the window's own thread, with the surface of a
+                    // window that was alive a moment ago on this same thread, on
+                    // the connection `guest` joined.
+                    unsafe { VideoSurface::create(&guest, facts.surface, rect.width, rect.height) }
+                        .map_err(|detail| {
+                            eprintln!(
+                                "vela: the embedded player could not make its surface: {detail}"
+                            );
+                            EmbeddedUnavailable::WindowNotReady
+                        })
+                }
+            })?
+            .map_err(|reason| reason.notice())?;
+            surface
         };
         #[cfg(target_os = "windows")]
         let surface = on_window_thread(app, {
@@ -581,10 +552,6 @@ impl Host {
     /// window's thread.
     #[cfg(target_os = "linux")]
     fn place_again(&self, app: &tauri::AppHandle, session: Option<&Session>) {
-        if overlay_mode() {
-            // GTK lays the video area out with the page, which it fills.
-            return;
-        }
         let (Some(session), Ok(facts)) = (session, window_facts(app)) else {
             return;
         };
@@ -599,8 +566,8 @@ pub(crate) struct Prepared {
     app: tauri::AppHandle,
     lib: Arc<LibMpv>,
     #[cfg(target_os = "linux")]
-    guest: Option<Arc<Guest>>,
-    /// The play's surface, already under the window, or the overlay.
+    guest: Arc<Guest>,
+    /// The play's surface, already under the window.
     surface: VideoTarget,
     session_id: String,
 }
@@ -722,7 +689,7 @@ impl Prepared {
 #[cfg(target_os = "linux")]
 fn place_running_play(app: &tauri::AppHandle) {
     let state = app.state::<crate::AppState>();
-    let slot = super::overlay::lock_slot_on_window_thread(&state.current_child);
+    let slot = state.current_child.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(crate::player::PlayerHandle::Embedded(session)) = slot.as_ref() {
         state.embedded.place_again(app, Some(session));
     }

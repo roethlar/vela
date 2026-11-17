@@ -61,7 +61,7 @@ async function settled(stopReportsBefore) {
 // takes a while). A shared `--log-file` will not do: both players took the
 // same options, so both mpvs wrote one file, each at its own offset, and the
 // late embedded player's last lines landed on the external player's notice
-// (found 2026-11-17, in overlay mode, whose player logs more as it starts).
+// (found 2026-11-17).
 async function playerAt(socketPath) {
   let mpv;
   try {

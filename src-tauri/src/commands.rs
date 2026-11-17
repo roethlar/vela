@@ -6557,10 +6557,6 @@ pub fn player_set_rect(
             width: width.round() as i32,
             height: height.round() as i32,
         };
-        // A synchronous command: this runs on the window's thread.
-        #[cfg(target_os = "linux")]
-        let slot = crate::player::embedded::lock_slot_on_window_thread(&state.current_child);
-        #[cfg(target_os = "macos")]
         let slot = state
             .current_child
             .lock()

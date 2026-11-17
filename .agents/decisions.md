@@ -2546,7 +2546,10 @@ NO IT [...] IS NOT."
 User-visible platform differences known on 2026-11-16 (each is now a
 defect to fix, or, for the last two, the owner's own choice):
 - The embedded player (Settings, Player, Video player): Linux under
-  Wayland only; absent on macOS and Windows.
+  Wayland only; absent on macOS and Windows. [The agent's wording. Linux
+  here means Wayland: X11 is not supported in any way, and reading
+  "under Wayland only" as an X11 gap, on 2026-11-17, was the agent's
+  error; see `.agents/repo-guidance.md`, Mission Detail.]
 - The player window's remembered screen: on macOS the names tao gives
   screens ("Monitor #123") do not translate to mpv's, so a play cannot
   reopen on the screen it was left on (review finding `pw-1`); on Windows

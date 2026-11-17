@@ -1,5 +1,11 @@
 # Codereview 2026-11-17 — overlay mode (the embedded player under X11)
 
+**Withdrawn, 2026-11-17: the code this hunt reviewed is removed.** Overlay
+mode existed only to give X11 the embedded player, and X11 is not supported
+in any way (`.agents/repo-guidance.md`); building it was the working agent's
+error. ov-3 and ov-5 were not repaired, and the repairs of ov-1, ov-2 and
+ov-6 went with the code. ov-4 (a test) stands.
+
 Outcome: a codereview codex hunt over `39b400f..dea0793` (overlay mode,
 `671cba9`; `embeddedlatestart`'s notice, `ea93dff`; `MpvIpc.close`,
 `dea0793`): **findings**, five candidates, all admitted (one HIGH, four
@@ -21,10 +27,10 @@ MEDIUM). One more, ov-6, found by the working agent while verifying ov-1.
 | ID   | Severity | Finding (one line)                                                      | Status | Commit |
 |------|----------|--------------------------------------------------------------------------|--------|--------|
 | ov-1 | HIGH     | An overlay start waits for GTK's thread while holding the player slot, which GTK's thread can be waiting for | `[x]` | `4b91540` |
-| ov-2 | MEDIUM   | Exit waits on GTK's thread for an overlay play whose teardown needs GTK's thread | `[x]` | the commit after `9303cee` |
-| ov-3 | MEDIUM   | A profile can change `video-timing-offset` after the overlay play starts, and frames are then shown early | `[ ]` | |
+| ov-2 | MEDIUM   | Exit waits on GTK's thread for an overlay play whose teardown needs GTK's thread | `[x]` | `d41a926` (since removed) |
+| ov-3 | MEDIUM   | A profile can change `video-timing-offset` after the overlay play starts, and frames are then shown early | `[-]` | withdrawn: code removed |
 | ov-4 | MEDIUM   | `embeddedlatestart` leaves a log request unhandled when its player goes away | `[x]` | `5c4e188` |
-| ov-5 | MEDIUM   | The overlay guard passes with the renderer never freed, or freed without its context current | `[ ]` | |
+| ov-5 | MEDIUM   | The overlay guard passes with the renderer never freed, or freed without its context current | `[-]` | withdrawn: code removed |
 | ov-6 | MEDIUM   | A play replacing an overlay play can be refused because the old one is still drawing | `[x]` | `9303cee` |
 
 ### ov-1

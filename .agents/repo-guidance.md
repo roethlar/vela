@@ -21,6 +21,14 @@
   offered in Settings (Player, "Video player"), marked experimental, by the
   owner's ruling of that day (`.agents/decisions.md`): the owner is Vela's
   only user, and what is built is to be usable from the app.
+- Vela exists for HDR video playback; on Linux that means Wayland. The
+  owner, verbatim (2026-11-17, restating what the README, the embedded
+  player plan's Non-goals and `.agents/decisions.md` 2026-11-12 already
+  said): "nothing that does not support HDR should be involved in any of
+  this"; "X11 is not a fallback, X11 is not supported in ANY way". No X11
+  code path, mode, fallback or claim of support, and X11 is never a gap,
+  a "platform" or a defect under the 2026-11-16 ruling. Before listing
+  anything as missing, read the plans' Non-goals and the decisions.
 - The frontend is a single-page Svelte 5 app built by Vite (no SvelteKit;
   decision `.agents/decisions.md` 2026-10-23). Root `index.html` loads
   `src/main.ts`, which mounts the root component. `$lib` is defined only in

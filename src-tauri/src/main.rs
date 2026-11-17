@@ -14,10 +14,9 @@ fn main() {
     // Linux-only: macOS uses WKWebView and Windows uses WebView2, where this var
     // has no effect.
     //
-    // The exceptions are embedded window mode and overlay mode, which need
-    // that renderer: a transparent window, or the transparent page of the
-    // player view, does not repaint without it. Neither is entered on the
-    // NVIDIA driver.
+    // The one exception is embedded window mode, which needs that renderer: a
+    // transparent window does not repaint without it. That mode is never
+    // entered on the NVIDIA driver.
     #[cfg(target_os = "linux")]
     if !embedded_window && std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
         std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");

@@ -189,14 +189,14 @@ impl AppState {
 
 /// Decide, before any window exists, how this run of Vela creates its window,
 /// and do what that decision needs done first. Call once, first thing in
-/// `main`. Returns whether this run is in embedded window mode or overlay
-/// mode, in which WebKit's GPU renderer must be left on; every other run is
-/// started exactly as it always was. The reasoning is in
-/// `player::embedded::startup`.
+/// `main`. Returns whether this run is in embedded window mode, in which
+/// WebKit's GPU renderer must be left on; every other run is started exactly
+/// as it always was. The reasoning is in `player::embedded::startup`.
 pub fn prepare_startup() -> bool {
     #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
     {
-        player::embedded::startup::prepare().plays_in_window()
+        use player::embedded::startup;
+        startup::prepare() == startup::WindowMode::Embedded
     }
     #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
     {
@@ -331,11 +331,6 @@ pub fn run() {
             // What the window's fullscreen really is, for the player view.
             #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
             player::embedded::follow_fullscreen(app.handle());
-
-            // Overlay mode (Linux under X11): the page goes over the video
-            // area now, before anything is played (overlay.rs).
-            #[cfg(target_os = "linux")]
-            player::embedded::prepare_overlay(app.handle());
 
             // Automatic's step-down dispatcher. Deliberately NOT folded into the
             // completion dispatcher below, and deliberately declared BEFORE its
@@ -520,22 +515,11 @@ pub fn run() {
                 // either sees the flag and never launches, or has already
                 // registered its child here for us to kill — no orphan window.
                 {
-                    // On the window's thread (Linux: through the overlay's
-                    // queue, review finding ov-1).
-                    #[cfg(target_os = "linux")]
-                    let mut slot = player::embedded::lock_slot_on_window_thread(&state.current_child);
-                    #[cfg(not(target_os = "linux"))]
                     let mut slot = state
                         .current_child
                         .lock()
                         .unwrap_or_else(|e| e.into_inner());
                     state.shutting_down.store(true, Ordering::SeqCst);
-                    // Before any play is dropped below and waited for: an
-                    // overlay play's renderer is freed on this thread now,
-                    // not asked of it by that play during the wait (review
-                    // finding ov-2).
-                    #[cfg(target_os = "linux")]
-                    player::embedded::end_overlay_drawing_before_exit();
                     if let Some(mut child) = slot.take() {
                         let _ = child.remove_consumed_header_include();
                         let _ = child.kill();
