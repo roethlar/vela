@@ -9,9 +9,6 @@ export { setRunApp } from './app-binary.mjs';
 
 export class WebDriverError extends Error {}
 
-// The W3C web element reference key, for passing an element to a script.
-const ELEMENT_KEY = 'element-6066-11e4-a52f-4f735466cecf';
-
 export class Driver {
   // WebDriver's codes for the keys that are not characters.
   static KEY = {
@@ -150,11 +147,23 @@ export class Driver {
       // take the click a person would make after scrolling the element clear:
       // the first Windows run, whose window is smaller, showed it. Centre the
       // element in its scroll area and click once more; whatever still covers
-      // it then fails the click.
-      await this.exec(
-        "arguments[0].scrollIntoView({ block: 'center', inline: 'nearest' });",
-        [{ [ELEMENT_KEY]: elementId }],
+      // it then fails the click. Edge WebDriver did not hand a script an
+      // element passed to it by reference (the third Windows run: "arguments[0]
+      // .scrollIntoView is not a function"), so the element is found again
+      // where WebDriver says it is: the topmost element with its tag among
+      // all those at its centre, the covered ones included.
+      const rect = await this.#cmd('GET', this.#s(`/element/${elementId}/rect`));
+      const tag = String(await this.#cmd('GET', this.#s(`/element/${elementId}/name`))).toLowerCase();
+      const centred = await this.exec(
+        `const [x, y, tag] = arguments;
+         const found = document.elementsFromPoint(x - window.scrollX, y - window.scrollY)
+           .find((element) => element.tagName.toLowerCase() === tag);
+         if (!found) return false;
+         found.scrollIntoView({ block: 'center', inline: 'nearest' });
+         return true;`,
+        [rect.x + rect.width / 2, rect.y + rect.height / 2, tag],
       );
+      if (!centred) throw error;
       await this.#cmd('POST', this.#s(`/element/${elementId}/click`), {});
     }
   }

@@ -815,13 +815,22 @@ test('a click a fixed overlay intercepts is retried once with the element centre
   };
   const intercepted = [400, { error: 'element click intercepted', message: 'Other element would receive the click' }];
   try {
-    const retried = await run([intercepted, [200, null], [200, null]]);
+    const rect = [200, { x: 700, y: 630, width: 100, height: 30 }];
+    const retried = await run([intercepted, rect, [200, 'BUTTON'], [200, true], [200, null]]);
     assert.equal(retried.error, null);
-    assert.deepEqual(retried.calls.map((c) => c.path), ['/session/s/element/el-1/click', '/session/s/execute/sync', '/session/s/element/el-1/click']);
-    assert.match(retried.calls[1].body.script, /scrollIntoView\(\{ block: 'center'/);
-    assert.deepEqual(retried.calls[1].body.args, [{ 'element-6066-11e4-a52f-4f735466cecf': 'el-1' }]);
-    const stillCovered = await run([intercepted, [200, null], intercepted]);
+    assert.deepEqual(retried.calls.map((c) => c.path), [
+      '/session/s/element/el-1/click', '/session/s/element/el-1/rect', '/session/s/element/el-1/name',
+      '/session/s/execute/sync', '/session/s/element/el-1/click',
+    ]);
+    // Found again at its centre, by its tag, among all the elements there.
+    assert.match(retried.calls[3].body.script, /document\.elementsFromPoint\(x - window\.scrollX, y - window\.scrollY\)/);
+    assert.match(retried.calls[3].body.script, /scrollIntoView\(\{ block: 'center'/);
+    assert.deepEqual(retried.calls[3].body.args, [750, 645, 'button']);
+    const stillCovered = await run([intercepted, rect, [200, 'BUTTON'], [200, true], intercepted]);
     assert.equal(stillCovered.error?.code, 'element click intercepted', 'a second interception fails the click');
+    const notFound = await run([intercepted, rect, [200, 'BUTTON'], [200, false]]);
+    assert.equal(notFound.error?.code, 'element click intercepted', 'an element not found again fails the click');
+    assert.equal(notFound.calls.length, 4, 'and is not clicked again');
     const other = await run([[404, { error: 'no such element', message: 'gone' }]]);
     assert.equal(other.error?.code, 'no such element');
     assert.equal(other.calls.length, 1, 'any other error is not retried');
