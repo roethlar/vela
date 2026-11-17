@@ -553,7 +553,9 @@ test('Settings marks the embedded player as experimental, not the Video player s
   const start = settings.indexOf('{#if videoPlayer.offered}');
   assert.notEqual(start, -1, 'the Video player section exists');
   const section = settings.slice(start, settings.indexOf('</section>', start));
-  assert.match(section, /<h3>Video player<\/h3>/);
+  // The heading may carry its explanation behind an InfoTip (2026-11-17),
+  // never a badge (checked next).
+  assert.match(section, /<h3>Video player(?:<InfoTip label="Video player">[\s\S]*?<\/InfoTip>)?<\/h3>/);
   assert.doesNotMatch(section, /badge/);
   assert.match(section, /<option value="embedded">Vela's window \(experimental\)<\/option>/);
   assert.match(section, /<option value="external">mpv's own window<\/option>/);

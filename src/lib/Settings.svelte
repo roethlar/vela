@@ -202,6 +202,7 @@
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
   import { onMount, onDestroy } from "svelte";
   import Icon from "$lib/Icon.svelte";
+  import InfoTip from "$lib/InfoTip.svelte";
   import ServerLogo from "$lib/ServerLogo.svelte";
   import type { DisplayProfile } from "$lib/types";
 
@@ -823,7 +824,9 @@
     {#if activeTab === "playback"}
     {#if videoPlayer.offered}
     <section>
-      <h3>Video player</h3>
+      <h3>Video player<InfoTip label="Video player">
+        <span class="tipline">Vela's window shows video inside Vela with Vela's own controls, using a copy of mpv that comes with Vela. It is experimental and works on macOS, Windows, and Linux with Wayland. Either choice applies to the next video; no restart is needed. When it cannot be used, videos play in mpv's own window and a line on screen says why.</span>
+      </InfoTip></h3>
       {@render saveError(videoPlayerDraft.feedback.error)}
       <div class="form">
         <div class="field">
@@ -832,14 +835,6 @@
             <option value="external">mpv's own window</option>
             <option value="embedded">Vela's window (experimental)</option>
           </select>
-          <p class="muted small">
-            Vela's window shows video inside Vela with Vela's own controls,
-            using a copy of mpv that comes with Vela.
-            It is experimental and works on macOS, Windows, and Linux with Wayland.
-            Either choice applies to the next video; no restart is needed.
-            When it cannot be used, videos play in mpv's own window and a line
-            on screen says why.
-          </p>
           {#if videoPlayer.note}
             <p class="muted small">{videoPlayer.note}</p>
           {/if}
@@ -849,7 +844,9 @@
     {/if}
 
     <section>
-      <h3>Continue Playing</h3>
+      <h3>Continue Playing<InfoTip label="Continue Playing">
+        <span class="tipline">TV only follows the show's episode order and rolls into the next season. On walks the same Continue Watching list shown on Home.</span>
+      </InfoTip></h3>
       {@render saveError(continueDraft.feedback.error)}
       <div class="form">
         <div class="field">
@@ -859,16 +856,14 @@
             <option value="on">On — continue through Continue Watching</option>
             <option value="only-tv">TV only — play the next episode</option>
           </select>
-          <p class="muted small">
-            TV only follows the show's episode order and rolls into the next season.
-            On walks the same Continue Watching list shown on Home.
-          </p>
         </div>
       </div>
     </section>
 
     <section>
-      <h3>Skipping</h3>
+      <h3>Skipping<InfoTip label="Skipping">
+        <span class="tipline">Uses the intro, credits and commercial markers your media server publishes — Vela never guesses where they are, so titles without markers are unaffected. <b>Button</b> shows a skip button on the video: click it, or press <code>Space</code> while it is visible. <b>Auto-skip</b> jumps past the range on its own.</span>
+      </InfoTip></h3>
       <div class="form">
         <div class="field">
           <label for="skip-intros">Skip intros</label>
@@ -895,19 +890,14 @@
             <option value="button">Button — ask on screen</option>
             <option value="autoskip">Auto-skip</option>
           </select>
-          <p class="muted small">
-            Uses the intro, credits and commercial markers your media server
-            publishes — Vela never guesses where they are, so titles without
-            markers are unaffected. <b>Button</b> shows a skip button on the
-            video: click it, or press <code>Space</code> while it is visible.
-            <b>Auto-skip</b> jumps past the range on its own.
-          </p>
         </div>
       </div>
     </section>
 
     <section>
-      <h3>Playback quality</h3>
+      <h3>Playback quality<InfoTip label="Playback quality">
+        <span class="tipline">How the copy you play is <b>delivered</b>. Original streams the file untouched and is the only setting that keeps HDR. Anything else asks your server to convert it, which costs HDR and container chapters. <b>Automatic</b> starts at Original and drops a step only if playback can't keep up — at most twice, and never back up. Set this to suit where you are — a slow connection now, a fast one later — and change it whenever that changes; it isn't remembered per title. A title's own right-click menu can override it for one play.</span>
+      </InfoTip></h3>
       <div class="form">
         <div class="field">
           <label for="playback-quality">Playback quality</label>
@@ -927,16 +917,6 @@
                  cache, and steps down a tier when either persists. -->
             <option value="automatic">Automatic</option>
           </select>
-          <p class="muted small">
-            How the copy you play is <b>delivered</b>. Original streams the file
-            untouched and is the only setting that keeps HDR. Anything else asks
-            your server to convert it, which costs HDR and container chapters.
-            <b>Automatic</b> starts at Original and drops a step only if playback
-            can't keep up — at most twice, and never back up. Set this to suit
-            where you are — a slow connection now, a fast one later — and change
-            it whenever that changes; it isn't remembered per title. A title's
-            own right-click menu can override it for one play.
-          </p>
           {#if sources.some((s) => s.kind === "emby")}
             <!-- Owner ruling 2026-07-25: Emby transcoding is best-effort and
                  must be labelled limited rather than claimed. The Jellyfin and
@@ -958,7 +938,9 @@
 
     {#if activeTab === "picture"}
     <section>
-      <h3>Display</h3>
+      <h3>Display<InfoTip label="Display">
+        <span class="tipline">Leave both on Auto unless native detection is unavailable or wrong. Resolution and HDR can be overridden independently.</span>
+      </InfoTip></h3>
       <div class="form">
         {#if playbackPreferences}
           <div class="displaystatus" aria-live="polite">
@@ -977,9 +959,6 @@
 
         <details class="advanced-display">
           <summary>Advanced display override</summary>
-          <p class="muted small">
-            Leave both on Auto unless native detection is unavailable or wrong. Resolution and HDR can be overridden independently.
-          </p>
           <div class="overridegrid">
             <div class="field">
               <label for="playback-resolution-override">Resolution</label>
@@ -1006,7 +985,9 @@
     </section>
 
     <section>
-      <h3>Player window</h3>
+      <h3>Player window<InfoTip label="Player window">
+        <span class="tipline">Each later video opens the way you left the one before it: full screen, maximized, its screen and its size. This only chooses how the first one opens. It applies to mpv's own window.</span>
+      </InfoTip></h3>
       {@render saveError(playerWindowDraft.feedback.error)}
       <div class="form">
         <div class="field">
@@ -1016,17 +997,14 @@
             <option value="fullscreen">Full screen</option>
             <option value="default">Default — as mpv and your options say</option>
           </select>
-          <p class="muted small">
-            Each later video opens the way you left the one before it: full
-            screen, maximized, its screen and its size. This only chooses how
-            the first one opens. It applies to mpv's own window.
-          </p>
         </div>
       </div>
     </section>
 
     <section>
-      <h3>Black-bar cropping</h3>
+      <h3>Black-bar cropping<InfoTip label="Black-bar cropping">
+        <span class="tipline">Loads mpv's bundled <code>autocrop.lua</code> to remove black bars. <b>Manual</b> only crops when you press <code>Shift+C</code> during playback. <b>Automatic</b> crops every video on its own. In Vela's window, cropping is done by Vela's own script (the Crop button or <code>Shift+C</code>) and does not crop HDR video.</span>
+      </InfoTip></h3>
       <div class="form">
         <div class="field">
           <label for="mpv-autocrop">Black-bar cropping (mpv autocrop)</label>
@@ -1035,13 +1013,6 @@
             <option value="manual">Manual — press Shift+C to crop</option>
             <option value="auto">Automatic — crop every video</option>
           </select>
-          <p class="muted small">
-            Loads mpv's bundled <code>autocrop.lua</code> to remove black bars.
-            <b>Manual</b> only crops when you press <code>Shift+C</code> during
-            playback. <b>Automatic</b> crops every video on its own.
-            In Vela's window, cropping is done by Vela's own script (the Crop
-            button or <code>Shift+C</code>) and does not crop HDR video.
-          </p>
           {#if advanced.autocrop === "auto"}
             <p class="warn small">
               <span class="inlineicon"><Icon name="alert" size={14} stroke={2.25} /></span>Automatic cropping runs at the start of every video and can be
@@ -1058,7 +1029,11 @@
 
     {#if activeTab === "mpv"}
     <section>
-      <h3>mpv</h3>
+      <h3>mpv<InfoTip label="mpv">
+        <span class="tipline">One mpv option per line, appended when launching mpv — so these override Vela's defaults. Vela's playback tracking (its IPC socket) and the media URL are protected and can't be overridden. Lines starting with <code>#</code> are ignored. A bad option just makes mpv fail to start.</span>
+        <span class="tipline">By default Vela launches mpv with <code>--no-config</code> for a predictable setup. Tick this to load your own <code>mpv.conf</code> instead — it can then change anything, including settings that disable HDR or break playback.</span>
+        <span class="tipline">These options are passed straight to mpv, exactly as written. Wrong or unsupported options can degrade quality or stop playback. If you're not comfortable with mpv's command-line options, leave this blank — Vela's defaults are already tuned for HDR.</span>
+      </InfoTip></h3>
       {#if mpv}
         <p class="muted small">
           {#if mpv.available}
@@ -1100,18 +1075,9 @@
           <input type="checkbox" aria-busy={!advancedSetting.confirmed.known} bind:checked={advanced.useOwnConfig} onchange={(e) => changeDraft(advancedDraft, "useOwnConfig", e.currentTarget.checked, saveMpvAdvanced)} />
           Use my own mpv config (<code>~/.config/mpv/mpv.conf</code>)
         </label>
-        <p class="muted small">
-          By default Vela launches mpv with <code>--no-config</code> for a predictable
-          setup. Tick this to load your own <code>mpv.conf</code> instead — it can then
-          change anything, including settings that disable HDR or break playback.
-        </p>
 
         <div class="warn">
-          <b><span class="inlineicon"><Icon name="alert" size={14} stroke={2.25} /></span>Advanced — requires mpv knowledge.</b>
-          These options are passed straight to mpv, exactly as written. Wrong or
-          unsupported options can degrade quality or stop playback. If you're not
-          comfortable with mpv's command-line options, leave this blank — Vela's
-          defaults are already tuned for HDR.
+          <b><span class="inlineicon"><Icon name="alert" size={14} stroke={2.25} /></span>Advanced — passed to mpv exactly as written; a wrong option can stop playback.</b>
         </div>
 
         <div class="field">
@@ -1125,12 +1091,6 @@
             oninput={() => advancedDraft.edit("extraArgs")}
             onblur={blurMpvAdvanced}
           ></textarea>
-          <p class="muted small">
-            One mpv option per line, appended when launching mpv — so these override
-            Vela's defaults. Vela's playback tracking (its IPC socket) and the media
-            URL are protected and can't be overridden. Lines starting with
-            <code>#</code> are ignored. A bad option just makes mpv fail to start.
-          </p>
         </div>
 
         <div class="btnrow">
@@ -1157,7 +1117,9 @@
     </section>
 
     <section>
-      <h3>Server certificates</h3>
+      <h3>Server certificates<InfoTip label="Server certificates">
+        <span class="tipline">The player checks HTTPS server certificates by default. Turning this check off sends your sign-in token without knowing who receives it. For a server signed by a private authority, you can instead name that authority's certificate file to mpv with <code>tls-ca-file</code> in Advanced options or your own mpv configuration. Applies to the next video; plain HTTP is unchanged.</span>
+      </InfoTip></h3>
       <div class="form">
         <label class="check">
           <input
@@ -1171,11 +1133,7 @@
           Skip server certificate checks
         </label>
         <p id="player-certificate-help" class="muted small">
-          The player checks HTTPS server certificates by default. Turning this check off
-          sends your sign-in token without knowing who receives it. For a server signed
-          by a private authority, you can instead name that authority's certificate file
-          to mpv with <code>tls-ca-file</code> in Advanced options or your own mpv configuration.
-          Applies to the next video; plain HTTP is unchanged.
+          Turning this off sends your sign-in token without checking who receives it.
         </p>
         {@render saveError(tlsDraft.feedback.error ?? tlsLoadError)}
       </div>
@@ -1189,7 +1147,9 @@
     </section>
 
     <section>
-      <h3>Add a Jellyfin / Emby server</h3>
+      <h3>Add a Jellyfin / Emby server<InfoTip label="Add a Jellyfin / Emby server">
+        <span class="tipline">Add as many servers as you like — connect one, then fill this in again for the next. Each appears under <b>Connected</b> and is browsed alongside the rest.</span>
+      </InfoTip></h3>
       <div class="form">
         <div class="field">
           <label for="srv-kind">Type</label>
@@ -1227,21 +1187,19 @@
         <button class="primary" disabled={busy} onclick={addServer}>
           {busy ? "Adding…" : "Add"}
         </button>
-        <p class="muted small">
-          Add as many servers as you like — connect one, then fill this in again for the
-          next. Each appears under <b>Connected</b> and is browsed alongside the rest.
-        </p>
       </div>
     </section>
 
     <section>
-      <h3>When a title is on more than one server</h3>
+      <h3>When a title is on more than one server<InfoTip label="When a title is on more than one server">
+        <span class="tipline">This chooses <b>which copy</b> plays, not how it is delivered — that's Playback quality, on the Playback tab. It does nothing when a title exists in only one place.</span>
+        <span class="tipline"><b>How Vela decides</b></span>
+        <span class="tipline"><b>Best:</b> resolution → HDR within that resolution → bitrate. A 4K SDR copy beats a 1080p HDR copy.</span>
+        <span class="tipline"><b>Compatible:</b> stay at or below the playback display's resolution and match its current HDR state when possible.</span>
+        <span class="tipline"><b>Fastest:</b> this machine → local network → internet, then Best within that tier.</span>
+        <span class="tipline"><b>Manual override:</b> <b>Play Version</b> on a title's menu permanently chooses a server for the three automatic modes. In Ask Every Time it answers only that play and is never saved. During a playlist or TV continuation, Ask keeps the first choice only for that playback session and asks again if the chosen server lacks a later item.</span>
+      </InfoTip></h3>
       <div class="form">
-        <p class="muted small">
-          This chooses <b>which copy</b> plays, not how it is delivered — that's
-          Playback quality, on the Playback tab. It does nothing when a title exists in
-          only one place.
-        </p>
         <fieldset class="policygrid">
           <legend>When the same title exists on more than one server</legend>
           {#each playbackPolicies as policy}
@@ -1261,17 +1219,6 @@
           {/each}
         </fieldset>
 
-        <div class="helpbox">
-          <b>How Vela decides</b>
-          <p><b>Best:</b> resolution → HDR within that resolution → bitrate. A 4K SDR copy beats a 1080p HDR copy.</p>
-          <p><b>Compatible:</b> stay at or below the playback display's resolution and match its current HDR state when possible.</p>
-          <p><b>Fastest:</b> this machine → local network → internet, then Best within that tier.</p>
-          <p>
-            <b>Manual override:</b> <b>Play Version</b> on a title's menu permanently chooses a server for the three automatic modes.
-            In Ask Every Time it answers only that play and is never saved. During a playlist or TV continuation, Ask keeps the first
-            choice only for that playback session and asks again if the chosen server lacks a later item.
-          </p>
-        </div>
       </div>
     </section>
     {/if}
@@ -1297,7 +1244,6 @@
           {/each}
         </div>
       {/each}
-      <p class="muted small">Choose a palette for your screen and room.</p>
     </section>
     {/if}
       </div>
@@ -1434,7 +1380,6 @@
     color: var(--text-muted);
     line-height: 1.35;
   }
-  .helpbox,
   .displaystatus {
     border: 1px solid var(--border);
     border-radius: 7px;
@@ -1442,9 +1387,6 @@
     background: var(--surface);
     font-size: 0.82rem;
     line-height: 1.4;
-  }
-  .helpbox p {
-    margin: 0.35rem 0 0;
   }
   .displaystatus {
     display: flex;
