@@ -226,7 +226,20 @@ export class MpvIpc {
     this.#sock.write(JSON.stringify({ command: ['quit'] }) + '\n');
   }
 
+  // Close this connection without losing what was last sent on it. mpv's
+  // IPC client thread writes the events it has pending before it reads, and
+  // when a write fails it drops the client without reading what the client
+  // sent (mpv 0.42, input/ipc-unix.c, client_thread). A connection destroyed
+  // straight after a `quit` therefore lost the quit whenever mpv had an event
+  // to send at that moment: the `markers` intermittent (2026-11-17: in the
+  // leg that failed, mpv's log has "Write error (Broken pipe)" on the
+  // scenario's connection at the instant the scenario closed it, and no
+  // quit). A half-close lets mpv go on writing, so it reads the rest; it
+  // closes its side once it has read to the end. The destroy is for an mpv
+  // that never does.
   close() {
-    this.#sock.destroy();
+    if (this.#sock.destroyed) return;
+    this.#sock.end();
+    setTimeout(() => this.#sock.destroy(), 2000).unref();
   }
 }

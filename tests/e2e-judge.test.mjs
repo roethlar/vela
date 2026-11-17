@@ -1154,6 +1154,9 @@ for (const player of ['external', 'embedded']) {
         ? play.mpv.getProp(command[1]) : play.mpv.setProp(command[1], command[2]);
       void answer.then((data) => socket.emit('data', JSON.stringify({ request_id, error: 'success', data }) + '\n'));
     };
+    // MpvIpc.close half-closes (end) and destroys later: the end is the moment
+    // the scenario lets go of the connection.
+    socket.end = () => { if (!closed) endedWhenClosed = play.endedAtMs; closed = true; };
     socket.destroy = () => { if (!closed) endedWhenClosed = play.endedAtMs; closed = true; };
     const mpv = new MpvIpc(socket);
     t.after(() => mpv.close());

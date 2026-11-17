@@ -482,24 +482,6 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 ## Blockers
 
 - No known product blocker.
-- E2E `markers` fails now and then in the embedded player, only in full
-  runs: at `f2dcbc3` (second leg) and `019c08b` (first leg), "timed out
-  waiting for the Stopped check-in" 15 s after the scenario's IPC `quit`;
-  it passed in the full run at `c3ea91d` between them, 10 of 10 alone and
-  in repeated runs of it after `markerpayload`. The clip is 30 s, so the
-  quit is an ordinary stop: the clean-end report change of `2ab8ac5` is
-  not on its path. The tracker posts `/Stopped` once its position reader
-  sees the player end (`playback.rs`, `start_tracking_jellyfin`); a
-  libmpv-initiated shutdown that is slow to close the IPC connection
-  would delay it. Also seen on Windows: the embedded `markers` of run
-  44018219446 at `019c08b`. A diagnostic full embedded run at `019c08b`
-  passed everything, every leg's `/Stopped` 250 ms after the quit (mpv
-  closes its IPC clients within a millisecond of `quit`). Since then the
-  scenario keeps evidence in every run: mpv's verbose log per player and
-  leg in the suite's artifacts (`markers-mpv-<player>-leg<N>.log`), and a
-  failure says how long it waited and which check-ins came. Read those
-  the next time it fails. (The machine's load during those runs was not
-  recorded; see the next entry.)
 - A timing failure in a local end-to-end run proves nothing until the
   machine is known to be quiet: check `uptime`, and look for stray
   `mpv` and `Xvfb` processes, first. On 2026-11-17, from about 06:50 to

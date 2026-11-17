@@ -5,6 +5,44 @@ live (handoff pruning rule). Newest rotation first; each block keeps its
 original wording and internal chronology.
 
 
+## Rotated 2026-11-17 (the `markers` intermittent: the harness lost its quit)
+
+Context for readers: this entry stood under Blockers. Its evidence
+settled it on 2026-11-17, in the external run of the suite at `671cba9`
+(leg 2, a quiet machine): mpv's log of the leg has "Write error (Broken
+pipe)" on the scenario's IPC connection at the instant the scenario
+closed it, no "Client disconnected", and no quit from that connection;
+mpv played on until the run's cleanup quit it 15 s later. mpv 0.42's IPC
+client thread writes the events it has pending before it reads, and when
+a write fails it drops the client without reading what the client sent
+(`input/ipc-unix.c`, `client_thread`); the scenario's `endSession` sent
+`quit` and destroyed its connection at once, as the seek of the skip was
+putting its events out, so the quit went unread. Not a defect of Vela:
+its own commands to mpv wait for mpv's reply (`player/control.rs`). The
+harness repaired: `MpvIpc.close` half-closes, so mpv can still write and
+then reads the rest (`tests/e2e/mpv.mjs`), held by
+`tests/e2e-mpv-ipc.test.mjs`, which serves the connection the way that
+thread does. The entry, verbatim:
+
+- E2E `markers` fails now and then in the embedded player, only in full
+  runs: at `f2dcbc3` (second leg) and `019c08b` (first leg), "timed out
+  waiting for the Stopped check-in" 15 s after the scenario's IPC `quit`;
+  it passed in the full run at `c3ea91d` between them, 10 of 10 alone and
+  in repeated runs of it after `markerpayload`. The clip is 30 s, so the
+  quit is an ordinary stop: the clean-end report change of `2ab8ac5` is
+  not on its path. The tracker posts `/Stopped` once its position reader
+  sees the player end (`playback.rs`, `start_tracking_jellyfin`); a
+  libmpv-initiated shutdown that is slow to close the IPC connection
+  would delay it. Also seen on Windows: the embedded `markers` of run
+  44018219446 at `019c08b`. A diagnostic full embedded run at `019c08b`
+  passed everything, every leg's `/Stopped` 250 ms after the quit (mpv
+  closes its IPC clients within a millisecond of `quit`). Since then the
+  scenario keeps evidence in every run: mpv's verbose log per player and
+  leg in the suite's artifacts (`markers-mpv-<player>-leg<N>.log`), and a
+  failure says how long it waited and which check-ins came. Read those
+  the next time it fails. (The machine's load during those runs was not
+  recorded; see the next entry.)
+
 ## Rotated 2026-11-17 (the `completionhub` race, repaired)
 
 Context for readers: this entry stood under Blockers. The race was
