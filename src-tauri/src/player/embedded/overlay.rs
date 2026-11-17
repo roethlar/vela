@@ -343,6 +343,19 @@ pub(crate) fn prepare(app: &tauri::AppHandle) {
     }
 }
 
+/// Vela exits: on GTK's thread, before the exit handler drops the plays and
+/// waits for them. Each play's teardown would ask this thread to free its
+/// renderer while this thread waits for that play, a stall of the whole wait
+/// (review finding ov-2). So what the plays have already asked of this thread
+/// is done, and what still draws is freed here; their teardowns then find
+/// nothing to ask.
+pub(crate) fn end_drawing_before_exit() {
+    run_jobs();
+    if let Some(area) = area() {
+        end_drawing(&area, true);
+    }
+}
+
 /// The area's render signal: draw mpv's frame into the framebuffer GTK has
 /// bound, or black when no play is drawing.
 fn render(area: &gtk::GLArea, _context: &gtk::gdk::GLContext) -> gtk::glib::Propagation {

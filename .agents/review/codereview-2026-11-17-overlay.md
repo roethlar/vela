@@ -21,11 +21,11 @@ MEDIUM). One more, ov-6, found by the working agent while verifying ov-1.
 | ID   | Severity | Finding (one line)                                                      | Status | Commit |
 |------|----------|--------------------------------------------------------------------------|--------|--------|
 | ov-1 | HIGH     | An overlay start waits for GTK's thread while holding the player slot, which GTK's thread can be waiting for | `[x]` | `4b91540` |
-| ov-2 | MEDIUM   | Exit waits on GTK's thread for an overlay play whose teardown needs GTK's thread | `[ ]` | |
+| ov-2 | MEDIUM   | Exit waits on GTK's thread for an overlay play whose teardown needs GTK's thread | `[x]` | the commit after `9303cee` |
 | ov-3 | MEDIUM   | A profile can change `video-timing-offset` after the overlay play starts, and frames are then shown early | `[ ]` | |
 | ov-4 | MEDIUM   | `embeddedlatestart` leaves a log request unhandled when its player goes away | `[x]` | `5c4e188` |
 | ov-5 | MEDIUM   | The overlay guard passes with the renderer never freed, or freed without its context current | `[ ]` | |
-| ov-6 | MEDIUM   | A play replacing an overlay play can be refused because the old one is still drawing | `[x]` | the commit after `4b91540` |
+| ov-6 | MEDIUM   | A play replacing an overlay play can be refused because the old one is still drawing | `[x]` | `9303cee` |
 
 ### ov-1
 
@@ -68,7 +68,16 @@ two-second leftover wait at lib.rs:552. The queued teardown cannot execute
 during these waits." Predicted failure: "A healthy active overlay play is
 treated as stuck during exit. Shutdown stalls for at least seven seconds,
 with another two-second wait when RunEvent::Exit follows, placing exitplay
-close to its ten-second deadline." Verified (`lib.rs:514-552`). Admitted.
+close to its ten-second deadline." Verified (`lib.rs:514-552`), and seen:
+the first run of the embedded suite under X11 had `exitplay` say "Vela's
+process ended 9025 ms after the exit was asked". Admitted.
+
+Repaired: the exit handler, on GTK's thread, once it holds the slot and
+before it drops any play, does what the plays have already asked of that
+thread and frees what still draws (`end_drawing_before_exit`); each play's
+teardown then finds its phase `Done` and asks nothing. `exitplay` under X11
+afterwards: "Vela's process ended 41 ms after the exit was asked". The
+guard holds the order in the exit handler.
 
 ### ov-3
 

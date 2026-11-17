@@ -1152,8 +1152,8 @@ test("overlay mode's renderer is made, drawn and freed on GTK's thread, which ne
   );
   assert.equal(
     count(code(overlay), 'end_drawing('),
-    4,
-    "its definition, the play's end, the window going, and a play that replaces it (below)",
+    5,
+    "its definition, the play's end, the window going, and a play that replaces it and exit (below)",
   );
   // The player goes only after that: the play's drop ends the drawing
   // first, and a renderer that may still exist keeps the play's thread, and
@@ -1199,6 +1199,18 @@ test("overlay mode's renderer is made, drawn and freed on GTK's thread, which ne
   const beginDrawing = code(functionBody(overlay, 'unsafe fn begin_drawing(', 'begin_drawing'));
   assert.match(beginDrawing, /let area = area\(\)\.ok_or\("Vela's window has no video area"\)\?;\s+end_drawing\(&area, false\);\s+area\.show\(\);/);
   assert.doesNotMatch(beginDrawing, /still drawing|overlay\.renderer\.is_some\(\)/);
+
+  // Exit, on GTK's thread, frees what still draws there before it drops the
+  // plays and waits for them: a play's teardown would otherwise ask this
+  // thread for it during the wait (review finding ov-2).
+  assert.match(
+    code(lib),
+    /state\.shutting_down\.store\(true, Ordering::SeqCst\);\s+#\[cfg\(target_os = "linux"\)\]\s+player::embedded::end_overlay_drawing_before_exit\(\);\s+if let Some\(mut child\) = slot\.take\(\) \{/,
+  );
+  assert.match(
+    code(functionBody(overlay, 'pub(crate) fn end_drawing_before_exit() {', 'end_drawing_before_exit')),
+    /\{\s+run_jobs\(\);\s+if let Some\(area\) = area\(\) \{\s+end_drawing\(&area, true\);\s+\}$/,
+  );
 });
 
 test('the shipped library is tested itself, in every full embedded E2E run', () => {

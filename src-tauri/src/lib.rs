@@ -530,6 +530,12 @@ pub fn run() {
                         .lock()
                         .unwrap_or_else(|e| e.into_inner());
                     state.shutting_down.store(true, Ordering::SeqCst);
+                    // Before any play is dropped below and waited for: an
+                    // overlay play's renderer is freed on this thread now,
+                    // not asked of it by that play during the wait (review
+                    // finding ov-2).
+                    #[cfg(target_os = "linux")]
+                    player::embedded::end_overlay_drawing_before_exit();
                     if let Some(mut child) = slot.take() {
                         let _ = child.remove_consumed_header_include();
                         let _ = child.kill();
