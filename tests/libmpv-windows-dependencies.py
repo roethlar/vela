@@ -145,6 +145,15 @@ class PEDependencyTests(unittest.TestCase):
         self.assertEqual(pe.pe_dependencies(split_export_fixture()),
                          {"imports": [], "delay_imports": [], "forwarders": ["libwinpthread-1.dll"]})
 
+    def test_overlapping_sections_are_refused(self):
+        # pl-20: the scanner reads the first section mapping an RVA, the
+        # loader a later one; two sections over the same RVAs are ambiguous.
+        for second_rva in (0x1000, 0x1100):
+            data = bytearray(split_export_fixture())
+            struct.pack_into("<I", data, 0x1b0 + 12, second_rva)  # .fwd VirtualAddress
+            with self.assertRaisesRegex(ValueError, "overlapping PE sections"):
+                pe.pe_dependencies(bytes(data))
+
     def test_directory_outside_image_is_refused(self):
         for index, kind, name in ((0, "forwarders", "helper.symbol"),
                                   (1, "imports", "helper.dll"), (13, "delay", "helper.dll")):
