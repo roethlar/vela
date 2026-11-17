@@ -195,8 +195,11 @@ joined with `lipo`, licences and a MANIFEST. FFmpeg uses system
 SecureTransport, VideoToolbox, AudioToolbox, zlib and iconv; libass uses
 CoreText. mpv uses the OpenGL render API (`plain-gl`) and the CoreAudio
 and AVFoundation audio outputs, with Swift and its own macOS windows
-disabled. This mpv pin cannot enable VideoToolbox GL interop without
-Swift, so hardware decoding uses the copy path. Every install
+disabled. Its VideoToolbox-to-OpenGL interop is built on that path by the
+build patch (`packaging/libmpv/macos/mpv-sdk-only.patch`, which this pin
+otherwise allows only with Swift), so hardware decoding draws straight from
+VideoToolbox's frames, and falls back to copying them when the interop
+cannot load; the build fails without it. Every install
 name/reference uses `@rpath`, with `@loader_path` on
 each dylib; in the app they resolve siblings in `Contents/Frameworks` without
 adding a run path to Vela's executable.

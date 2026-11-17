@@ -229,17 +229,20 @@ build_mpv() {
   patch -d "$src" -p1 < "$recipe/macos/mpv-sdk-only.patch"
   # plain-gl is the backend for an application-supplied GL context.
   # gl-cocoa needs cocoa, which unconditionally compiles the Swift clipboard
-  # and calls Swift bridge functions in player/main.c in this pin. Therefore
-  # its videotoolbox-gl path cannot be selected without Swift/source changes.
-  # FFmpeg VideoToolbox still provides hwdec=videotoolbox-copy.
+  # and calls Swift bridge functions in player/main.c in this pin, so it
+  # stays off. The VideoToolbox-to-OpenGL interop needs none of that (only
+  # IOSurface, CoreVideo and CGL, with the application's CGL context
+  # current while mpv renders); the patch's third and fourth hunks build it
+  # on plain-gl and link those frameworks, so hwdec=auto decodes straight
+  # to the picture instead of copying each frame back (videotoolbox-copy).
   meson_build "$src" \
     -Dgpl=false -Dlibmpv=true -Dcplayer=false -Dbuild-date=false \
     -Dlua=lua5.2 -Diconv=enabled -Dzlib=enabled -Duchardet=enabled -Dvector=enabled \
     -Dlibavdevice=enabled -Dcoreaudio=enabled -Dgl=enabled -Dplain-gl=enabled \
-    -Dcocoa=disabled -Dgl-cocoa=disabled -Dvideotoolbox-gl=disabled -Dvideotoolbox-pl=disabled \
+    -Dcocoa=disabled -Dgl-cocoa=disabled -Dvideotoolbox-gl=enabled -Dvideotoolbox-pl=disabled \
     -Dswift-build=disabled -Dmacos-cocoa-cb=disabled -Dmacos-media-player=disabled \
     -Dmacos-touchbar=disabled -Davfoundation=enabled -Dvulkan=disabled
-  for feature in GL COREAUDIO AVFOUNDATION LUA LIBAVDEVICE; do
+  for feature in GL COREAUDIO AVFOUNDATION LUA LIBAVDEVICE VIDEOTOOLBOX_GL; do
     grep -qx "#define HAVE_$feature 1" "$src/_build/config.h" || die "mpv lacks $feature"
   done
   grep -qx '#define HAVE_SWIFT 0' "$src/_build/config.h" || die 'mpv unexpectedly uses Swift'

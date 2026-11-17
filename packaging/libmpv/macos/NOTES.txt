@@ -24,24 +24,31 @@ libplacebo has no GPU backend; mpv implements the render API's OpenGL
 renderer. Lua 5.2 enables POSIX/dlopen through upstream LUA_USE_MACOSX.
 
 mpv uses gl + plain-gl, coreaudio, avfoundation (the audio output Vela's
-macOS players ask for first), libavdevice, Lua, iconv, zlib, uchardet and
-vector. Its cocoa, gl-cocoa, swift-build, macos-cocoa-cb,
-macos-media-player, macos-touchbar and vulkan options are disabled. The
-Apple audio outputs call cfstr_from_cstr from osdep/utils-mac.c, which
-mpv's meson.build compiles only with cocoa; the build patch (second hunk)
-compiles it for them when cocoa is off. In this pin cocoa unconditionally includes clipboard-mac.m
-(which imports the generated Swift header), and player/main.c calls
-Swift bridge functions guarded only by HAVE_COCOA. Thus selecting
-gl-cocoa + cocoa + videotoolbox-gl with swift-build disabled would not
-build. The recipe leaves videotoolbox-gl/pl off instead of changing mpv's
-player sources. FFmpeg's VideoToolbox decoding, including mpv's
-videotoolbox-copy path, remains available. Zero-copy GL interop is absent.
-The application's CAOpenGLLayer/context and presentation are separate work.
+macOS players ask for first), libavdevice, Lua, iconv, zlib, uchardet,
+vector and videotoolbox-gl. Its cocoa, gl-cocoa, swift-build,
+macos-cocoa-cb, macos-media-player, macos-touchbar, videotoolbox-pl and
+vulkan options are disabled. The Apple audio outputs call cfstr_from_cstr
+from osdep/utils-mac.c, which mpv's meson.build compiles only with cocoa;
+the build patch (second hunk) compiles it for them when cocoa is off. In
+this pin cocoa unconditionally includes clipboard-mac.m (which imports the
+generated Swift header), and player/main.c calls Swift bridge functions
+guarded only by HAVE_COCOA, so cocoa and gl-cocoa stay off. mpv's
+VideoToolbox-to-OpenGL interop (video/out/hwdec/hwdec_mac_gl.c) needs none
+of it: IOSurface, CoreVideo and CGL, and a CGL context current while mpv
+renders, which the application supplies through the render API. mpv's
+meson.build allows it only with gl-cocoa, whose frameworks also linked
+those three; the patch's third hunk allows it on plain-gl and its fourth
+links OpenGL, CoreVideo and IOSurface for it. With it hwdec=auto decodes
+with VideoToolbox straight to the picture; when the interop cannot load
+(no current CGL context, a renderer that refuses IOSurface textures) mpv
+takes the copy path (videotoolbox-copy) as before. The build fails unless
+mpv's config.h reports HAVE_VIDEOTOOLBOX_GL.
 
 The one build-description patch, mpv-sdk-only.patch, removes mpv's
-unconditional /usr/local/lib linker search path; the selected SDK supplies
-system libraries. No other upstream source is patched. The patch is carried
-with the licences and hashed in both the MANIFEST and CI cache key.
+unconditional /usr/local/lib linker search path (the selected SDK supplies
+system libraries) and makes the build changes above. No other upstream
+source is patched. The patch is carried with the licences and hashed in
+both the MANIFEST and CI cache key.
 
 The recipe targets macOS 11.0 for both architectures. At implementation
 time src-tauri/tauri.conf.json had no bundle.macOS.minimumSystemVersion;

@@ -1196,11 +1196,12 @@ const macConfiguration = {
   mpv: ['-Dgpl=false -Dlibmpv=true -Dcplayer=false -Dbuild-date=false',
     '-Dlua=lua5.2 -Diconv=enabled -Dzlib=enabled -Duchardet=enabled -Dvector=enabled',
     '-Dlibavdevice=enabled -Dcoreaudio=enabled -Dgl=enabled -Dplain-gl=enabled',
-    '-Dcocoa=disabled -Dgl-cocoa=disabled -Dvideotoolbox-gl=disabled -Dvideotoolbox-pl=disabled',
+    '-Dcocoa=disabled -Dgl-cocoa=disabled -Dvideotoolbox-gl=enabled -Dvideotoolbox-pl=disabled',
     '-Dswift-build=disabled -Dmacos-cocoa-cb=disabled -Dmacos-media-player=disabled',
     '-Dmacos-touchbar=disabled -Davfoundation=enabled -Dvulkan=disabled',
     'patch -d "$src" -p1 < "$recipe/macos/mpv-sdk-only.patch"',
-    "grep -qx '#define HAVE_SWIFT 0'", 'grep -qx "#define HAVE_$feature 1"'],
+    "grep -qx '#define HAVE_SWIFT 0'", 'grep -qx "#define HAVE_$feature 1"',
+    'for feature in GL COREAUDIO AVFOUNDATION LUA LIBAVDEVICE VIDEOTOOLBOX_GL; do'],
 };
 for (const [name, tokens] of Object.entries(macConfiguration)) macRequired(name, body(macScript, `build_${name}`), tokens);
 macRequired('isolation and universal build', macScript, [
@@ -1282,8 +1283,23 @@ test('macOS LGPL switches and SDK-only build patch reject regressions (green and
       /^ +'audio\/out\/ao_coreaudio_utils\.c'\)\n\+    if not features\['cocoa'\]\n\+        sources \+= files\('osdep\/utils-mac\.c'\)\n\+    endif\n endif$/m,
       'utils-mac.c for the audio outputs without cocoa',
     );
+    // VideoToolbox decodes straight to the picture only with mpv's
+    // IOSurface/CGL interop, which meson.build allows only with gl-cocoa
+    // (Swift in this pin): built on plain-gl, with what it calls linked.
+    assert.match(
+      candidate,
+      /^-    features\['gl-cocoa'\] or features\['ios-gl'\],\n\+    features\['gl-cocoa'\] or features\['ios-gl'\] or \(darwin and plain_gl\.allowed\(\)\),$/m,
+      'videotoolbox-gl on plain-gl',
+    );
+    assert.match(
+      candidate,
+      /^ +sources \+= files\('video\/out\/hwdec\/hwdec_mac_gl\.c'\)\n\+    dependencies \+= dependency\('appleframeworks', modules: \['OpenGL', 'CoreVideo', 'IOSurface'\]\)\n endif$/m,
+      'the interop linked to OpenGL, CoreVideo and IOSurface',
+    );
   };
   guard(patch);
+  assert.throws(() => guard(patch.replace(' or (darwin and plain_gl.allowed())', '')), /videotoolbox-gl on plain-gl/);
+  assert.throws(() => guard(patch.replace("['OpenGL', 'CoreVideo', 'IOSurface']", "['OpenGL', 'CoreVideo']")), /the interop linked/);
   assert.throws(() => guard(patch.replace('+++ b/meson.build', '+++ b/player/main.c')), /build description/);
   assert.throws(() => guard(patch.replace("+    objc_link_flags = ['-isysroot', macos_sdk_path]", "+    objc_link_flags = ['-L/usr/local/lib']")), /SDK only/);
   assert.throws(() => guard(patch + '\n+    link_flags += ["-L/opt/homebrew/lib"]\n'), /host search path/);

@@ -7,8 +7,16 @@ Vela: build mpv's library on macOS without Cocoa or Swift, from the SDK only.
    ao_coreaudio_utils.c and ao_avfoundation.m call its cfstr_from_cstr, but
    meson.build compiles it only with cocoa (which needs Swift), so a library
    without cocoa failed to load (undefined _cfstr_from_cstr).
+3. Build the VideoToolbox-to-OpenGL interop (videotoolbox-gl) on the
+   plain-gl path, and link what it calls. video/out/hwdec/hwdec_mac_gl.c
+   needs IOSurface, CoreVideo and CGL, and a CGL context current while mpv
+   renders, which the application supplies through the render API;
+   meson.build allows it only with gl-cocoa, which needs cocoa (and so
+   Swift), whose frameworks were also what linked those three. Without it
+   every frame VideoToolbox decodes is copied back to memory
+   (videotoolbox-copy).
 
-Only meson.build changes. Re-check both hunks when bumping mpv.
+Only meson.build changes. Re-check all four hunks when bumping mpv.
 --- a/meson.build
 +++ b/meson.build
 @@ -882,2 +882,5 @@
@@ -17,7 +25,16 @@ Only meson.build changes. Re-check both hunks when bumping mpv.
 +        sources += files('osdep/utils-mac.c')
 +    endif
  endif
-@@ -1599,3 +1602,3 @@
+@@ -1554,3 +1557,3 @@
+ videotoolbox_gl = get_option('videotoolbox-gl').require(
+-    features['gl-cocoa'] or features['ios-gl'],
++    features['gl-cocoa'] or features['ios-gl'] or (darwin and plain_gl.allowed()),
+     error_message: 'gl-cocoa nor ios-gl could be found!',
+@@ -1570,2 +1573,3 @@
+     sources += files('video/out/hwdec/hwdec_mac_gl.c')
++    dependencies += dependency('appleframeworks', modules: ['OpenGL', 'CoreVideo', 'IOSurface'])
+ endif
+@@ -1599,3 +1603,3 @@
      add_languages('objc', native: false)
 -    objc_link_flags = ['-isysroot', macos_sdk_path, '-L/usr/lib', '-L/usr/local/lib']
 +    objc_link_flags = ['-isysroot', macos_sdk_path]
