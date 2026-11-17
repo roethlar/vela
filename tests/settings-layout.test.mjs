@@ -70,3 +70,13 @@ test('an InfoTip adds no text to its heading and is labelled for assistive techn
   assert.equal(inner.replace(/<Icon [^>]*\/>/, '').trim(), '', 'only an icon inside the button');
   assert.match(infoTip, /\{#if open\}/, 'the explanation is shown only when asked for');
 });
+
+test("an InfoTip's explanation stays inside its heading's width", () => {
+  // st-2: a fixed-width popup beside a long heading ran past the panel's edge.
+  const pop = infoTip.match(/\.infopop \{([\s\S]*?)\}/)[1];
+  assert.match(pop, /left: 0;/);
+  assert.match(pop, /right: 0;/);
+  assert.doesNotMatch(pop, /max-content|width: \d/);
+  assert.match(infoTip.match(/\.infotip \{([\s\S]*?)\}/)[1], /position: static;/);
+  assert.match(settings.match(/\n  h3 \{([\s\S]*?)\}/)[1], /position: relative;/, 'Settings positions its headings');
+});

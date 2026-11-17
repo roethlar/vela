@@ -41,8 +41,11 @@
 </span>
 
 <style>
+  /* Positioned against the heading it sits in (Settings positions its
+     headings), so the explanation spans the heading's width below it and
+     never runs past the panel's edge, however long the heading. */
   .infotip {
-    position: relative;
+    position: static;
     display: inline-flex;
     vertical-align: middle;
     margin-left: 6px;
@@ -71,10 +74,9 @@
     position: absolute;
     top: calc(100% + 6px);
     left: 0;
+    right: 0;
     z-index: 20;
     display: block;
-    width: max-content;
-    max-width: min(360px, 70vw);
     padding: 10px 12px;
     border: 1px solid var(--border-strong);
     border-radius: var(--radius-sm);

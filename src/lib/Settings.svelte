@@ -1493,6 +1493,8 @@
     font-size: 1.3rem;
   }
   h3 {
+    /* An InfoTip's explanation is placed against its heading (InfoTip.svelte). */
+    position: relative;
     font-size: 0.95rem;
     color: var(--text-2);
     margin: 1.2rem 0 0.5rem;
