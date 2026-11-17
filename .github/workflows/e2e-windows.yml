@@ -73,6 +73,12 @@ jobs:
       VELA_LIBMPV_DIR: ${{ github.workspace }}/.libmpv/out/libmpv-windows-x86_64
       E2E_SCENARIO: ${{ inputs.scenario }}
     steps:
+      # Check out the repository's own LF line endings. Git for Windows'
+      # system configuration (core.autocrlf true) checks files out with CRLF,
+      # and the Tauri CLI rewrites src-tauri/Cargo.toml with LF on every build,
+      # so every run's worktree changed and the parity verdict refused it.
+      - name: Keep the repository's line endings
+        run: git config --global core.autocrlf false
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
@@ -166,8 +172,6 @@ jobs:
         run: |
           git status --porcelain
           git diff --stat
-          git diff -- src-tauri/Cargo.toml | Select-Object -First 80
-          git config --show-origin --get-all core.autocrlf
           exit 0
       - uses: actions/upload-artifact@v7
         if: always()
