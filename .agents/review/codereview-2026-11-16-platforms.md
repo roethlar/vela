@@ -54,6 +54,10 @@ purpose, stated in its section.
 | pl-13 | LOW     | docs: the embedded player described as Linux-only, Windows and macOS packages as without the library | `[x]` | `34fd3a3` |
 | pl-14 | MEDIUM  | Windows set: the runtime audit trusts any module under %SystemRoot%, a third-party runtime included | `[ ]` | in repair (codex) |
 | pl-15 | MEDIUM  | Windows set: the PE scanner refuses a valid DLL whose export directory spans sections | `[ ]` | in repair (codex) |
+| pl-16 | MEDIUM  | macOS: DYLD_IMAGE_SUFFIX can load a renamed outside dependency past pl-4's check | `[ ]` | in repair (codex) |
+| pl-17 | MEDIUM  | macOS: an image unloaded during pl-4's scan makes a cached, spurious refusal | `[ ]` | in repair (codex) |
+| pl-18 | MEDIUM  | screens: Vela's own fallback screen overrides the user's numbered screen like a remembered one | `[ ]` | in repair (codex) |
+| pl-19 | MEDIUM  | macOS: a conditional profile can undo video-timing-offset=0, so video runs ahead of audio | `[ ]` | in repair (codex) |
 
 ### pl-1 (whost)
 
@@ -385,3 +389,75 @@ dependency closure, blocking packaging."
 
 Admitted. In repair: a directory's extent is checked in virtual-address
 space and each structure it references is mapped on its own.
+
+## An eighth hunt: the runtime fixes
+
+Dispatched by the working agent over `ca07bfa..3061b52`, limited to the
+runtime repairs: pl-4 (`41d47c4`), pl-5 (`9833fc1`), pl-6 (`e93402e`),
+pl-7 (`e1cf5f2`), pl-11 (`4d511a2`), the Windows privacy check
+(`96c0f4d`) and the macOS draw driving (`cf23d90`, `e3b4005`, `a45999c`).
+Same harness and reviewer as above. **findings**: four candidates, all
+admitted (MEDIUM), as pl-16 to pl-19; repaired by two codex tasks (the
+macOS three, the screens one).
+
+### pl-16 (fixrt)
+
+Reviewer, verbatim, evidence: "src-tauri/src/player/embedded/libmpv.rs:425-428
+checks an image only when its loaded basename exactly matches a set
+filename. In a non-hardened launch, DYLD_IMAGE_SUFFIX=_debug with
+DYLD_LIBRARY_PATH can select an outside libavcodec.63_debug.dylib while
+libmpv itself remains bundled. A headless probe confirmed that the
+production policy accepts this outside image." Predicted failure: "Embedded
+playback accepts an FFmpeg dependency outside Vela's shipped set. This
+leaves pl-4 reachable in development launches that honor DYLD variables."
+
+Admitted. In repair: a launch whose environment holds a dyld redirection
+variable is refused before the load (a released app's hardened runtime
+ignores them anyway).
+
+### pl-17 (fixrt)
+
+Reviewer, verbatim, evidence: "src-tauri/src/player/embedded/libmpv.rs:467-475
+samples dyld's image count once, then enumerates its changing image list.
+If another thread unloads an unrelated image during the scan, a later index
+can return NULL, triggering refusal. src-tauri/src/player/embedded/host.rs:393
+caches that failure." Predicted failure: "A valid bundled set is reported
+unavailable, and subsequent embedded plays fall back to the external player
+until Vela restarts."
+
+Admitted (the working agent had noted the race when reviewing pl-4 and
+judged it rare; the cached result makes it last for the run). In repair:
+the scan repeats until the image list is stable, and a transient failure is
+not cached.
+
+### pl-18 (fixrt)
+
+Reviewer, verbatim, evidence: "src-tauri/src/player/launch.rs:623-628 treats
+every screen_name as remembered, but commands.rs:5157-5159 supplies Vela's
+current screen even without a saved or previous play. A production-path
+probe with no remembered screen, Vela on DP-2, and Advanced --screen=1
+produced [--screen=1, --screen-name=DP-2, --screen=default]." Predicted
+failure: "On the first play of a fresh run, Linux and macOS ignore the
+user's numeric monitor selection and open playback on Vela's monitor. The
+numeric choice survived before this fix."
+
+Admitted; on Windows Vela's fallback index already overrode the user's
+`--screen`. In repair, the same on every platform: a remembered screen
+stays protected after the user's options; Vela's own fallback becomes a
+default before them, which the user's options override.
+
+### pl-19 (fixrt)
+
+Reviewer, verbatim, evidence: "src-tauri/src/player/embedded/macos_options.rs:14
+sets video-timing-offset=0 only during configuration, while
+libmpv.rs:1202-1218 disables target-time waiting for every render. An
+own-config profile containing profile-cond=true and video-timing-offset=0.5
+reapplies the offset after initialization. With shipped mpv 0.42 and a
+headless software renderer, nonblocking renders of a 5-fps audio/video clip
+finished a median 209 ms before target time; the blocking baseline
+finished on time." Predicted failure: "macOS presents video ahead of audio
+when a conditional profile changes this supposedly protected option. The
+existing runtime protection observes only the five colour properties."
+
+Admitted. In repair: the option is observed for the whole play and set
+back to 0 whenever it changes.
