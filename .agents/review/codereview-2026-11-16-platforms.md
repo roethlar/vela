@@ -52,6 +52,8 @@ purpose, stated in its section.
 | pl-11 | HIGH    | Windows: a later bare-name DLL load (libplacebo's d3d11.dll) can resolve beside Vela.exe | `[x]` | `4d511a2` |
 | pl-12 | MEDIUM  | Windows set: the dependency checks miss delay imports and forwarders; the audit passes a foreign DLL | `[x]` | `2e3913d` |
 | pl-13 | LOW     | docs: the embedded player described as Linux-only, Windows and macOS packages as without the library | `[x]` | `34fd3a3` |
+| pl-14 | MEDIUM  | Windows set: the runtime audit trusts any module under %SystemRoot%, a third-party runtime included | `[ ]` | in repair (codex) |
+| pl-15 | MEDIUM  | Windows set: the PE scanner refuses a valid DLL whose export directory spans sections | `[ ]` | in repair (codex) |
 
 ### pl-1 (whost)
 
@@ -345,3 +347,41 @@ Admitted. Repair (`34fd3a3`, written by the working agent): the release
 notes, README, `docs/usage.md` and the development guide describe the
 embedded player on all three platforms, per platform where they differ,
 and every package carrying the library.
+
+## A seventh hunt: the packaging and release fixes
+
+Dispatched by the working agent over `ca07bfa..3061b52`, limited to the
+fixes of pl-8 (`9dc0b0e`), pl-10 (`e740bf4`), pl-12 (`2e3913d`), pl-13
+(`34fd3a3`) and the CI job's hold removed (`bffc3a4`). Same harness and
+reviewer as above. **findings**: two candidates, both admitted (MEDIUM),
+as pl-14 and pl-15, both against the repair of pl-12; repaired together
+by one codex task, in two commits.
+
+### pl-14 (fixpkg)
+
+Reviewer, verbatim, evidence: "packaging/libmpv/check-libmpv-windows.py:147
+exempts every new module beneath the directories listed at :135. A local
+Wine harness loaded a freshly compiled third-party libwinpthread-1.dll from
+System32 using the checker's exact SetDefaultDllDirectories flags.
+check_loaded returned no problems although that module was absent from both
+the manifest and baseline." Predicted failure: "The runtime gate can certify
+an incomplete set when a dynamically loaded dependency happens to be
+installed in the checking machine's System32. That package can then fail on
+a clean Windows installation."
+
+Admitted. In repair: the runtimes the set must never use are reported
+wherever they load from, %SystemRoot% included.
+
+### pl-15 (fixpkg)
+
+Reviewer, verbatim, evidence: "packaging/libmpv/windows-pe.py:85 passes the
+entire directory extent to location(), whose :62 requires one contiguous
+raw section. A PE32+ fixture with its export header/EAT at RVA 0x1000 and
+its forwarder at RVA 0x2000 in another section loads and resolves under
+Wine, including after stripping. The production check_closure instead exits
+1 with 'unmapped PE RVA: 0x1000'." Predicted failure: "A valid DLL with this
+layout causes the Windows set build to reject an otherwise complete
+dependency closure, blocking packaging."
+
+Admitted. In repair: a directory's extent is checked in virtual-address
+space and each structure it references is mapped on its own.
