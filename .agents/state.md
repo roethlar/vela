@@ -495,7 +495,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - No known product blocker.
 - A timing failure in a local end-to-end run proves nothing until the
   machine is known to be quiet: check `uptime`, and look for stray
-  `mpv` and `Xvfb` processes, first. On 2026-11-17, from about 06:50 to
+  `mpv` and `weston` processes (`Xvfb` before 2026-11-17's Slice W1),
+  first. On 2026-11-17, from about 06:50 to
   08:09 UTC, twelve `mpv` processes and their `Xvfb` servers, left by the
   agent's own reproduction of the marker defect (its script stopped
   `xvfb-run`, not what ran under it), kept this machine at a load of

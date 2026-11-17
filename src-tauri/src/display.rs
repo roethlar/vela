@@ -574,10 +574,9 @@ fn output_of(named: &NamedMonitor) -> Output {
 /// ("DP-3"); the compositor gives both. A list that could not be read is
 /// incomplete, so nothing is then known to be connected. A session that
 /// says it is Wayland while its WAYLAND_DISPLAY is empty names no Wayland
-/// display: Vela's window and mpv are then on X11, which name a screen
-/// alike, and there is nothing to add (the end-to-end venue runs so, under
-/// Xvfb inside a Wayland desktop). `wayland_session` itself, which the HDR
-/// query also uses, is left as it was.
+/// display, so there is no compositor to ask and nothing to add.
+/// `wayland_session` itself, which the HDR query also uses, is left as it
+/// was.
 #[cfg(target_os = "linux")]
 async fn platform_outputs() -> PlatformOutputs {
     tauri::async_runtime::spawn_blocking(|| {
@@ -1634,7 +1633,7 @@ mod tests {
     }
 
     // An empty WAYLAND_DISPLAY names no display, so the compositor's list is
-    // not asked for (the end-to-end venue: Xvfb inside a Wayland desktop).
+    // not asked for.
     #[cfg(target_os = "linux")]
     #[test]
     fn an_empty_wayland_display_names_none() {
