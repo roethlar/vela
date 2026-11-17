@@ -51,10 +51,10 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
       Windows runner with the test pattern on screen (run 43987838828).
     - The six hunts' thirteen findings are closed but pl-9, about tests
       alone (`.agents/review/codereview-2026-11-16-platforms.md`).
-  - THE OWNER'S CHECKS: \.agents/plans/embedded-player.md\, "For the
+  - THE OWNER'S CHECKS: `.agents/plans/embedded-player.md`, "For the
     owner: each platform, what it has, what to check (2026-11-17)": what
     each platform has and lacks, what machines proved, what to look at, in
-    order. Builds: release run by hand 43991901348 at \cd4f4ee\.
+    order. Builds: release run by hand 43991901348 at `cd4f4ee`.
   - Linux unchanged through all of it: both end-to-end suites in full at
     `6b206ec`, `623ec17`, `c49be2a` and `49f2c3c` (48 of 48, 51 of 51,
     parity PASS).
