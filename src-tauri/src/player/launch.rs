@@ -613,15 +613,6 @@ fn screen_name_arg(name: Option<&str>, screens: &PlaybackScreens) -> Option<Laun
     }
 }
 
-/// The remembered screen's protected tail, after the user's options.
-/// mpv 0.42 consults a numeric selector before a name (Wayland's
-/// `find_output`, X11's `vo_x11_select_screen`, macOS's `getTargetScreen`),
-/// and on Windows, which takes numbers only, a fullscreen window goes to
-/// `fs-screen`'s monitor before its own (`w32_common.c`
-/// `get_default_monitor`). options/options.c names the neutral values
-/// `default` and `current`. Only Linux's backends also need the fullscreen
-/// screen's name; macOS and Windows go fullscreen on the restored window's
-/// screen once no number overrides it.
 /// Vela's own screen, when nothing remembered is usable: a default placed
 /// before the user's options, which override it (pl-18). Only mpv's own
 /// window has a screen to place. Linux's backends pick a fullscreen output
@@ -640,6 +631,15 @@ fn fallback_screen_args(spec: &PlaySpec, player: PlayerKind, linux: bool) -> Vec
     args
 }
 
+/// The remembered screen's protected tail, after the user's options.
+/// mpv 0.42 consults a numeric selector before a name (Wayland's
+/// `find_output`, X11's `vo_x11_select_screen`, macOS's `getTargetScreen`),
+/// and on Windows, which takes numbers only, a fullscreen window goes to
+/// `fs-screen`'s monitor before its own (`w32_common.c`
+/// `get_default_monitor`). options/options.c names the neutral values
+/// `default` and `current`. Only Linux's backends also need the fullscreen
+/// screen's name; macOS and Windows go fullscreen on the restored window's
+/// screen once no number overrides it.
 fn restored_screen_args(spec: &PlaySpec, player: PlayerKind, linux: bool) -> Vec<LaunchArg> {
     if player != PlayerKind::External || spec.screen_source != ScreenSource::Remembered {
         return Vec::new();
