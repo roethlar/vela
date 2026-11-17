@@ -37,17 +37,19 @@ class PE:
         self.directories = [self.unpack("II", optional + 112 + 8 * i)
                             for i in range(count_dirs)]
         self.sections = []
-        spans = []
         for i in range(count):
             section = optional + optional_size + 40 * i
             self.read(section, 40)
             virtual_size, rva, raw_size, raw = self.unpack("IIII", section + 8)
             self.read(raw, raw_size)
             self.sections.append((rva, max(virtual_size, raw_size), raw, raw_size))
-            spans.append((rva, virtual_size or raw_size))
-        # location() takes the first section that maps an RVA, while Windows'
-        # loader lets a later section's bytes win where two overlap: refuse
-        # an ambiguous image rather than read bytes the loader does not use.
+        # location() reads the headers below SizeOfHeaders, and otherwise the
+        # first section whose extent (the larger of VirtualSize and
+        # SizeOfRawData) holds an RVA, while Windows' loader lets a later
+        # mapping's bytes win where two overlap: refuse an ambiguous image
+        # rather than read bytes the loader does not use (pl-20, pl-23).
+        spans = [(0, self.header_size)]
+        spans += [(start, extent) for start, extent, _, _ in self.sections]
         previous_end = 0
         for start, extent in sorted(spans):
             if start < previous_end:

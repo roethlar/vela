@@ -154,6 +154,23 @@ class PEDependencyTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "overlapping PE sections"):
                 pe.pe_dependencies(bytes(data))
 
+    def test_sections_over_the_headers_are_refused(self):
+        # pl-23: below SizeOfHeaders the scanner reads the headers, the
+        # loader a section mapped there.
+        data = bytearray(split_export_fixture())
+        struct.pack_into("<I", data, 0x98 + 60, 0x1800)  # SizeOfHeaders
+        with self.assertRaisesRegex(ValueError, "overlapping PE sections"):
+            pe.pe_dependencies(bytes(data))
+
+    def test_a_raw_tail_over_the_next_section_is_refused(self):
+        # pl-23: the scanner maps a section's SizeOfRawData even past its
+        # VirtualSize; a next section starting inside that tail is ambiguous.
+        data = bytearray(split_export_fixture())
+        struct.pack_into("<I", data, 0x188 + 8, 0x100)  # .rdata VirtualSize
+        struct.pack_into("<I", data, 0x1b0 + 12, 0x1100)  # .fwd VirtualAddress
+        with self.assertRaisesRegex(ValueError, "overlapping PE sections"):
+            pe.pe_dependencies(bytes(data))
+
     def test_directory_outside_image_is_refused(self):
         for index, kind, name in ((0, "forwarders", "helper.symbol"),
                                   (1, "imports", "helper.dll"), (13, "delay", "helper.dll")):
