@@ -3,7 +3,7 @@
 This release opens each video's mpv window the way you left the last one,
 checks the certificate of HTTPS media servers when playing, saves Settings as
 you change them, and adds an experimental player that shows video inside
-Vela's own window on Linux with Wayland.
+Vela's own window on Linux (with Wayland), Windows and macOS.
 
 ## Highlights
 
@@ -70,18 +70,25 @@ Vela's own window on Linux with Wayland.
   The header says "Saved", or "Not saved" with the reason in the section
   concerned.
 - Add an experimental second player that shows the video inside Vela's own
-  window: Settings → Player → Video player (shown on Linux). It has its own
-  control bar, keys and mouse actions (click to pause, double-click for full
-  screen, the wheel for volume). It runs in a Wayland session and is off by
-  default. Switching to mpv's own window applies to the next video. To use
-  Vela's window, restart Vela if this run started without embedded playback.
-  Whenever it cannot be used, the video plays in mpv's own window and a line
-  on screen says why. It uses its own copy of mpv's library, which the Linux
-  packages now carry; Settings says so when it is missing. Details are in
-  `docs/usage.md`.
+  window, on Linux, Windows and macOS: Settings → Player → Video player. It
+  has its own control bar, keys and mouse actions (click to pause,
+  double-click for full screen, the wheel for volume), and is off by default.
+  On Linux it runs in a Wayland session (not under X11, and not yet with
+  NVIDIA's proprietary driver); on Windows it shows mpv's own Direct3D 11
+  output inside Vela's window; on macOS it draws through mpv's render API,
+  with HDR on a screen with extended dynamic range. Switching to mpv's own
+  window applies to the next video. To use Vela's window, restart Vela if
+  this run started without embedded playback. Whenever it cannot be used,
+  the video plays in mpv's own window and a line on screen says why. It uses
+  its own copy of mpv's library, which every package now carries (the Linux
+  packages, both Windows installers and the macOS app); Settings says so when
+  it is missing. Details are in `docs/usage.md`.
 
 ## Fixes
 
+- When a video plays to its end, Home no longer shows it in Continue
+  Watching for a moment while the server records it as played. Vela now
+  records the finished play before Home looks again.
 - On macOS, Vela now says why it connects to servers on your local network,
   as macOS 15 and later expect before they let an app reach them. Without it,
   a server on your own network could be unreachable from Vela on a Mac.
