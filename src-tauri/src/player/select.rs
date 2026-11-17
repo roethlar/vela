@@ -148,7 +148,10 @@ pub(crate) fn settings_note(
 ) -> Option<&'static str> {
     use super::embedded::startup::WindowMode;
     let reason = if saved == PlayerKind::External {
-        known.err()?
+        // Every start is ready for Vela's window whichever player is chosen,
+        // so switching needs no restart; one that could not be says why here
+        // too, before the user switches (st-4).
+        started.refused.or(known.err())?
     } else if started.mode == WindowMode::Embedded {
         match available {
             Ok(()) => return Some("Videos play in Vela's window."),
@@ -278,7 +281,9 @@ mod tests {
         let failed_start = "Videos play in mpv's own window because Vela did not finish starting with video in its window last time; this run started without it, and the next start tries again.";
         let mut cases = vec![
             (External, today.clone(), Err(NeedsRestart), Ok(()), None),
-            (External, recovered.clone(), Err(FailedLastStart), Ok(()), None),
+            // A start that could not be ready for Vela's window says so even
+            // while mpv's own window is chosen: switching would not help (st-4).
+            (External, recovered.clone(), Err(FailedLastStart), Ok(()), Some(failed_start)),
             (External, active.clone(), Err(StartFailed), Ok(()), None),
             (External, today.clone(), Err(NeedsRestart), Err(LibraryMissing), Some(missing)),
             (Embedded, active.clone(), Ok(()), Ok(()), Some("Videos play in Vela's window.")),
