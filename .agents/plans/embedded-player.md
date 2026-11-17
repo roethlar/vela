@@ -2843,7 +2843,11 @@ what is not known is found by probes first, logged below.
   each mpv for its own log messages over its own IPC connection, first
   thing on connecting, at trace level, where mpv logs a command a client
   sends (`tests/e2e/mpv.mjs`, `requestLog`); 3 of 3 under X11 and 1 of 1
-  under Wayland.
+  under Wayland. Later the same day a run died on it: a player gone before
+  its pid was read never answered that request, and the unanswered request,
+  which nothing handled, ended the run when its wait ran out (Node ends a
+  process on an unhandled rejection); the request is now handled from the
+  start.
 - **Probe M2 at `1e9905e`: VideoToolbox decodes straight to the picture.**
   Run 44061797549, a hosted Mac (Apple's software OpenGL renderer, which
   mpv names as such): mpv's own log shows the interop loaded in the render

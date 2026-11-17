@@ -67,6 +67,10 @@ async function playerAt(socketPath) {
   try {
     mpv = await MpvIpc.connect(socketPath, { timeoutMs: 300 });
     const asked = mpv.requestLog('trace');
+    // Settled below either way. A player gone before its pid is read (the
+    // late one, as it goes) never answers, and an unanswered request that
+    // nothing handles ends the whole run when its wait runs out.
+    asked.catch(() => {});
     const pid = await mpv.getProp('pid');
     await asked;
     return { mpv, program: processName(pid) };
