@@ -2709,3 +2709,56 @@ installer and the macOS app).
      Vela's white. A playlist going SDR, HDR, SDR: a brief black between,
      no flash of wrong colour. Drag the window to an SDR screen while it
      plays: it changes to standard range.
+
+## Amendment, 2026-11-17: the platform gaps that remained (owner ruling)
+
+The ruling of 2026-11-16 (`.agents/decisions.md`, "Vela works the same on
+every platform") names "Linux under Wayland only" among the differences
+that are defects, and has any difference in what a user can do on one
+platform treated as one. After the macOS and Windows work, three remained,
+each written as a "Lacks" in the owner checklist above: Vela's window
+under X11; Vela's window with NVIDIA's proprietary driver; and on macOS,
+VideoToolbox decoding straight to the picture (the set's mpv copies every
+decoded frame back to memory). The go is the ruling itself ("each is now a
+defect to fix") and the owner's standing instruction of 2026-11-17 to keep
+working until the app is feature complete on every platform. As before,
+what is not known is found by probes first, logged below.
+
+- **macOS, zero-copy decoding.** mpv 0.42 compiles its
+  VideoToolbox-to-OpenGL interop (`video/out/hwdec/hwdec_mac_gl.c`) only
+  with `gl-cocoa`, which needs `cocoa`, which in this pin compiles Swift;
+  the set is built without them (`packaging/libmpv/macos/NOTES.txt`). The
+  interop needs none of it: IOSurface, CoreVideo and CGL, and a CGL
+  context current while mpv renders, which Vela's macOS host gives it
+  (`macos_gl.rs`, OpenGL 3.2 core). So mpv's build is patched to allow
+  `videotoolbox-gl` on the `plain-gl` path (a third hunk in
+  `packaging/libmpv/macos/mpv-sdk-only.patch`), the set enables it, and
+  its build fails without it. Vela already asks for `hwdec=auto`, which
+  takes the interop when it loads and copies back when it does not.
+  Proof: probe M2's mpv log on a hosted Mac, whose virtual machine decodes
+  in hardware (run 44018857651: "Using hardware decoding
+  (videotoolbox-copy)", after "Looking at hwdec h264-videotoolbox"). That
+  Mac draws OpenGL in software; if its renderer refuses IOSurface
+  textures, the copy path remains there and the owner's Mac is the proof.
+- **Linux, X11.** The shipped mpv is an LGPL build, which has no X11
+  window code (`gpl=false`), so mpv's `wid` route is closed; and an X11
+  child window cannot sit under the page, because X11 does not blend
+  sibling windows. The route left is GTK's own compositing: mpv's render
+  API into a GL widget (`GtkGLArea`), under the WebKit view made
+  transparent, in a `GtkOverlay` of Vela's window. Probe X1 (throwaway
+  code, Xvfb and the real WebKitGTK): whether the page shows over the GL
+  widget, whether pointer and keys still reach the page, and what drawing
+  costs at 1080p and 4K.
+- **Linux, NVIDIA's proprietary driver.** The exclusion is an assumption
+  (above, "The NVIDIA exclusion (ASSUMED)"): WebKitGTK's DMABUF renderer
+  once crashed there, and the Wayland host needs that renderer. No NVIDIA
+  hardware is at hand (the machines are AMD and Apple). What is decided
+  after probe X1 and a reading of WebKitGTK's and NVIDIA's present state:
+  whether the overlay of the X11 item serves NVIDIA without that
+  renderer, and what keeps a failing start safe (the startup marker
+  above).
+- **Order.** macOS (smallest, and its proof runs on a hosted Mac) → probe
+  X1 → X11 → NVIDIA → the owner checklist and release notes, saying what
+  each platform has and lacks.
+
+### Probe log (2026-11-17)
