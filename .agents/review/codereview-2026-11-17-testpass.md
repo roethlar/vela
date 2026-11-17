@@ -3,8 +3,9 @@
 Outcome: codereview codex hunts over the work of the release's test pass
 (opened by the decision of 2026-11-16, "Get 1.0.64 release-ready", "Also
 superseded"). The first, over `35d6757..f2dcbc3`: **findings**, three
-candidates, all admitted (one MEDIUM, two LOW). tp-3 is repaired; tp-1 and
-tp-2 are being repaired (codex coding task `cxhub2`).
+candidates, all admitted (one MEDIUM, two LOW), all repaired. The second,
+over `f2dcbc3..019c08b`: **findings**, four candidates, all admitted (two
+MEDIUM, two LOW), being repaired (codex coding task `cxfix8`).
 
 ## Dispatch record
 
@@ -22,9 +23,13 @@ tp-2 are being repaired (codex coding task `cxhub2`).
 
 | ID   | Severity | Finding (one line)                                                      | Status | Commit |
 |------|----------|--------------------------------------------------------------------------|--------|--------|
-| tp-1 | MEDIUM   | A clean end whose EOF is seen after the tracker's end gets three reports | in repair (`cxhub2`) | |
-| tp-2 | LOW      | A deferred first report is lost if 64 later ends overflow the join queue | in repair (`cxhub2`) | |
+| tp-1 | MEDIUM   | A clean end whose EOF is seen after the tracker's end gets three reports | `[x]` | `c3ea91d` |
+| tp-2 | LOW      | A deferred first report is lost if 64 later ends overflow the join queue | `[x]` | `c3ea91d` |
 | tp-3 | LOW      | The runner's report of a changed worktree can crash it before it saves results | `[x]` | `834a82a` |
+| tp-4 | MEDIUM   | build.rs misses a Cargo build directory set apart from the target directory | in repair (`cxfix8`) | |
+| tp-5 | MEDIUM   | An interrupted Windows run can leave its scenario's test CA trusted | in repair (`cxfix8`) | |
+| tp-6 | LOW      | build.rs's guard passes with the copy taken out | in repair (`cxfix8`) | |
+| tp-7 | LOW      | settingValue accepts an expected default before the setting has loaded | in repair (`cxfix8`) | |
 
 ### tp-1
 
@@ -39,10 +44,11 @@ completionhub's exact-refresh assertion under this ordering. The earliest
 refresh still reads local state before admission, so the ordering repair
 also misses this path."
 
-Admitted. Repair in progress (codex, `cxhub2`): the completion carries
-whether its tracker already reported, and the dispatcher sends its first
-report only when it did not; in the late-EOF path the tracker's report
-precedes the admission, as before `2ab8ac5`.
+Admitted. Repair (`c3ea91d`, codex's, closed by the working agent's
+review): the completion carries whether its tracker already reported, and
+the dispatcher sends its first report only when it did not; in the
+late-EOF path the tracker's report precedes the admission, as before
+`2ab8ac5`.
 
 ### tp-2
 
@@ -56,10 +62,10 @@ never receives playback-ended for the evicted session: its tracker report
 was suppressed and neither dispatcher report is reachable."
 
 Admitted (it needs 64 play ends while the dispatcher is still busy with an
-earlier completion, but the report must not depend on that). Repair in
-progress (codex, `cxhub2`): the bounded queues evict what can never be
-joined first, and a completion that leaves them with its report still owed
-gets that report then.
+earlier completion, but the report must not depend on that). Repair
+(`c3ea91d`, with tp-1): the bounded queues evict what can never be joined
+first, and a completion that leaves them with its report still owed gets
+that report then.
 
 ### tp-3
 
@@ -74,3 +80,47 @@ results instead of recording them as dirty."
 
 Admitted. Repair (`834a82a`, the working agent's): one final sample serves
 both.
+
+## The second hunt: `f2dcbc3..019c08b`
+
+Over `build.rs`'s copy (`e87ffe2`), the tp-1/tp-2 repair (`c3ea91d`) and
+the Windows end-to-end venue fixes. **findings**: four, all admitted;
+codex coding task `cxfix8` repairs them.
+
+### tp-4 (MEDIUM)
+
+Reviewer, verbatim, evidence: "src-tauri/build.rs:23-28 derives the
+destination exclusively from OUT_DIR. Running the exact helper in a minimal
+Cargo 1.100 crate with separate build.build-dir and target-dir produced
+intermediates/debug/mpv-scripts while the executable was under
+target/debug; no scripts existed beside it." Predicted failure: "Debug and
+unbundled builds using a separate intermediate directory still lack the
+resources needed for markers and autocrop."
+
+### tp-5 (MEDIUM)
+
+Reviewer, verbatim, evidence: "tests/e2e/run.mjs:217-219 removes the CA only
+in runScenario's finally block. The signal handler at lines 49-57 invokes
+activeCleanups, which contains scenario.cleanup but not CA removal, then
+calls process.exit. Executing these source blocks with mocked Windows
+operations reproduced trust-ca, scenario-cleanup and exit:130 without
+untrust-ca." Predicted failure: "Ctrl+C or SIGTERM during a CA-backed
+scenario can leave its test CA in LocalMachine\Root after the run, affecting
+trust for every account on that machine."
+
+### tp-6 (LOW)
+
+Reviewer, verbatim, evidence: "tests/dependency-policy.test.mjs:1504-1508
+checks the call site, destination calculation and directory traversal, but
+never verifies copying. Replacing src-tauri/build.rs:33-34 with a
+side-effect-free expression left all 365 dependency-policy tests passing,
+including this guard."
+
+### tp-7 (LOW)
+
+Reviewer, verbatim, evidence: "tests/e2e/helpers.mjs:112-115 accepts value
+equality without observing load completion. continuetv.mjs:242 expects
+'only-tv' and windowsetting.mjs:263 expects 'remember', exactly their
+initial values in src/lib/Settings.svelte:173-175. A probe returning the
+initial default followed by an incorrect loaded value made settingValue
+return after its first read."

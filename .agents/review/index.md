@@ -1161,8 +1161,9 @@ under `tests/` gates nothing until it is added there.
 Record: `codereview-2026-11-17-testpass.md`. One hunt so far, over
 `35d6757..f2dcbc3` (Home's first refresh after a clean end, `2ab8ac5`;
 the Windows suite's DevTools port, `94662e3`; pl-9's test): three
-candidates, three admitted (1 MEDIUM, 2 LOW). tp-3 repaired (`834a82a`);
-tp-1 and tp-2 in repair (codex, `cxhub2`).
+candidates, three admitted (1 MEDIUM, 2 LOW), repaired (`c3ea91d`,
+`834a82a`). A second, over `f2dcbc3..019c08b`: four admitted (tp-4 to
+tp-7: 2 MEDIUM, 2 LOW), in repair (codex, `cxfix8`).
 
 ## 2026-11-16 — the embedded player on Windows and macOS (codereview codex)
 
