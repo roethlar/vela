@@ -51,7 +51,7 @@ test('no grey help text sits under the controls: explanations are behind an Info
     /^\{mpv\.installDescription\}/,
     /^\{p\.help\}$/,
     /Converting is <b>unverified on Emby<\/b>/,
-    /^Turning this off sends your sign-in token without checking who receives it\.$/,
+    /^Turning this on sends your sign-in token without checking who receives it\.$/,
   ];
   const paragraphs = [...settings.matchAll(/<p(?: id="[^"]+")? class="muted small">([\s\S]*?)<\/p>/g)]
     .map((m) => m[1].replace(/\s+/g, ' ').trim());

@@ -1133,7 +1133,7 @@
           Skip server certificate checks
         </label>
         <p id="player-certificate-help" class="muted small">
-          Turning this off sends your sign-in token without checking who receives it.
+          Turning this on sends your sign-in token without checking who receives it.
         </p>
         {@render saveError(tlsDraft.feedback.error ?? tlsLoadError)}
       </div>
