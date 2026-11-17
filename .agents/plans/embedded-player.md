@@ -2683,17 +2683,17 @@ installer and the macOS app).
 - Has: all of the above; on first start the app asks to find devices on
   your local network (Allow); Vela's window draws through mpv's render API
   under the page; HDR there through extended dynamic range on a screen
-  that has it (the MacBook Pro's).
-- Lacks: VideoToolbox hardware decoding straight to the picture (this mpv
-  cannot without Swift; decoding copies back, which can cost smoothness at
-  4K HDR: watch for it).
+  that has it (the MacBook Pro's); VideoToolbox hardware decoding straight
+  to the picture (since `1e9905e`).
+- Lacks: nothing the other platforms have.
 - Proven by machine: the release run signs and notarizes the app with the
   library inside and plays the library from the finished DMG on Apple
   Silicon and under Rosetta; probe M2 played twice in Vela's window on a
   hosted Mac, the test pattern on screen and the clock advancing (Apple's
   software renderer, with mpv's fast profile; runs 43990824184 to
-  44018857651). There is no end-to-end suite on macOS: tauri-driver has no
-  macOS WebDriver.
+  44018857651), and at `1e9905e` decoded with VideoToolbox straight to the
+  picture (run 44061797549, the Probe log of the amendment below). There is
+  no end-to-end suite on macOS: tauri-driver has no macOS WebDriver.
 - Not proven by machine: a real Mac's GPU at mpv's default settings, HDR,
   your keys and mouse on a Mac. This is the platform where your eyes matter
   most.
@@ -2844,3 +2844,12 @@ what is not known is found by probes first, logged below.
   thing on connecting, at trace level, where mpv logs a command a client
   sends (`tests/e2e/mpv.mjs`, `requestLog`); 3 of 3 under X11 and 1 of 1
   under Wayland.
+- **Probe M2 at `1e9905e`: VideoToolbox decodes straight to the picture.**
+  Run 44061797549, a hosted Mac (Apple's software OpenGL renderer, which
+  mpv names as such): mpv's own log shows the interop loaded in the render
+  context ("Loading hwdec driver 'videotoolbox'") and "Using hardware
+  decoding (videotoolbox)", no longer `videotoolbox-copy`; the video output
+  configured with `videotoolbox[nv12]` frames; no error in mapping them;
+  the test pattern in Vela's window under its controls at 0:05 of the
+  second play. So the macOS gap of this amendment is closed, as far as a
+  machine can show; a real Mac's GPU is the owner's check.

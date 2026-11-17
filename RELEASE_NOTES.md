@@ -77,7 +77,8 @@ Vela's own window on Linux (with Wayland), Windows and macOS.
   X11, where Vela puts the picture under its page itself, in standard range
   (not yet with NVIDIA's proprietary driver); on Windows it shows mpv's own
   Direct3D 11 output inside Vela's window; on macOS it draws through mpv's
-  render API, with HDR on a screen with extended dynamic range. Switching to
+  render API, decoding with VideoToolbox straight to the picture, with HDR
+  on a screen with extended dynamic range. Switching to
   mpv's own window applies to the next video. To use Vela's window, restart Vela if
   this run started without embedded playback. Whenever it cannot be used,
   the video plays in mpv's own window and a line on screen says why. It uses

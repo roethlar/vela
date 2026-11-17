@@ -23,6 +23,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
       renderer on (`overlay.rs`; the commit that adds it). The embedded
       suite has a venue under X11, weston's X server (`npm run e2e --
       --embedded --x11`).
+    - macOS, VideoToolbox straight to the picture: done (`1e9905e`; probe
+      M2's run 44061797549 decoded that way on a hosted Mac, the plan's
+      Probe log).
     - NVIDIA's proprietary driver: OWNER DECISION ASKED. Context: on
       Linux, Vela's window needs a transparent page over the video, and
       WebKitGTK draws a transparent page right only with its GPU renderer
