@@ -1164,7 +1164,7 @@ the Windows suite's DevTools port, `94662e3`; pl-9's test): three
 candidates, three admitted (1 MEDIUM, 2 LOW), repaired (`c3ea91d`,
 `834a82a`). A second, over `f2dcbc3..019c08b`: four admitted (tp-4 to
 tp-7: 2 MEDIUM, 2 LOW), repaired (`1342e6a`, `f29d77c`, `d1cc1b3`,
-`d48bc08`).
+`d48bc08`). A third, over `019c08b..dc3c9e8`: one LOW (tp-8), repaired.
 
 ## 2026-11-16 — the embedded player on Windows and macOS (codereview codex)
 

@@ -834,6 +834,20 @@ test('a click a fixed overlay intercepts is retried once with the element centre
     assert.match(retried.calls[3].body.script, /document\.elementsFromPoint\(x - window\.scrollX, y - window\.scrollY\)/);
     assert.match(retried.calls[3].body.script, /scrollIntoView\(\{ block: 'center'/);
     assert.deepEqual(retried.calls[3].body.args, [750, 645, 'button']);
+    // The script itself, run as WebDriver would (its body a function whose
+    // arguments are the args), against an overlay over the covered button:
+    // the button scrolls, not the overlay (tp-8).
+    const scrolled = [];
+    const element = (tag) => ({ tagName: tag.toUpperCase(), scrollIntoView: () => scrolled.push(tag) });
+    const fakeDocument = {
+      elementsFromPoint: (x, y) => {
+        assert.deepEqual([x, y], [740, 615], 'viewport coordinates: the centre less the window scroll');
+        return [element('footer'), element('div'), element('button'), element('section')];
+      },
+    };
+    const script = new Function('document', 'window', 'args', `return (function () {${retried.calls[3].body.script}}).apply(null, args);`);
+    assert.equal(script(fakeDocument, { scrollX: 10, scrollY: 30 }, retried.calls[3].body.args), true);
+    assert.deepEqual(scrolled, ['button'], 'only the element with the tag scrolls');
     const stillCovered = await run([intercepted, rect, [200, 'BUTTON'], [200, true], intercepted]);
     assert.equal(stillCovered.error?.code, 'element click intercepted', 'a second interception fails the click');
     const notFound = await run([intercepted, rect, [200, 'BUTTON'], [200, false]]);

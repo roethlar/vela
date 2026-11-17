@@ -6,7 +6,8 @@ superseded"). The first, over `35d6757..f2dcbc3`: **findings**, three
 candidates, all admitted (one MEDIUM, two LOW), all repaired. The second,
 over `f2dcbc3..019c08b`: **findings**, four candidates, all admitted (two
 MEDIUM, two LOW), all repaired (codex coding task `cxfix8`, closed by the
-working agent's review).
+working agent's review). The third, over `019c08b..dc3c9e8`: one LOW
+finding (tp-8), repaired.
 
 ## Dispatch record
 
@@ -31,6 +32,7 @@ working agent's review).
 | tp-5 | MEDIUM   | An interrupted Windows run can leave its scenario's test CA trusted | `[x]` | `f29d77c` |
 | tp-6 | LOW      | build.rs's guard passes with the copy taken out | `[x]` | `d1cc1b3` |
 | tp-7 | LOW      | settingValue accepts an expected default before the setting has loaded | `[x]` | `d48bc08` |
+| tp-8 | LOW      | The click retry's guard never runs the script that picks the element | `[x]` | this commit |
 
 ### tp-1
 
@@ -136,3 +138,24 @@ teardown and the signal handler share), tp-6 `d1cc1b3` (a Rust unit test
 copies into temporary trees in both layouts and checks every file), tp-7
 `d48bc08` (each loaded Settings control carries `aria-busy` until its value
 is known, and `settingValue` waits for that).
+
+## The third hunt: `019c08b..dc3c9e8`
+
+Over the Windows set's Schannel patch (`3c4a510`), the tp-4 to tp-7
+repairs and the Windows harness since. **findings**: one, admitted.
+
+### tp-8 (LOW)
+
+Reviewer, verbatim, evidence: "tests/e2e-harness.test.mjs:827 supplies a
+successful script response without executing it; assertions at :834 only
+inspect fragments. Replacing Driver.click's tag-filtering .find(...) with
+.at(0) left all 64 harness tests passing. Executing that mutation against
+a fixed DIV overlay covering a BUTTON scrolls the overlay instead of the
+button." Predicted failure: "The guard falsely accepts a broken retry that
+leaves the button covered."
+
+Admitted. Repair (the working agent's): the test runs the emitted script,
+as WebDriver would, against a fake `elementsFromPoint` with an overlay over
+the button and a scrolled window, and checks that only the button scrolls;
+seen failing with the first element at the point taken and with the
+window's scroll ignored.
