@@ -442,6 +442,15 @@ jobs:
             }
           done
 
+      # Tauri's AppImage forces X11 and bundles the build machine's
+      # libwayland-*, with which WebKit cannot open the host's EGL display;
+      # the fix packs it again so that Vela starts on Wayland with the host's
+      # own (.agents/plans/appimage-wayland.md). The check below holds it.
+      - name: Make the AppImage start on Wayland
+        if: runner.os == 'Linux'
+        shell: bash
+        run: packaging/appimage/fix-appimage.sh '${{ matrix.bundle_dir }}'/appimage/*.AppImage
+
       # The embedded player has no other library to fall back on: a package
       # that lacks one file of the set installs cleanly and then never plays
       # embedded. Each bundle is unpacked (nothing is installed) and must hold

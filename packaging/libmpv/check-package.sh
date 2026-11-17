@@ -501,6 +501,34 @@ check_without() {
   }
 }
 
+# check_appimage_wayland PACKAGE ROOT: an AppImage must start Vela on Wayland
+# with the host's own Wayland client libraries (.agents/plans/appimage-wayland.md).
+# Tauri's linuxdeploy GTK hook exports GDK_BACKEND=x11, and the bundled
+# libwayland-* (from the build machine) cannot open the host's EGL display, so
+# WebKit's web process aborts ("Could not create default EGL display").
+# packaging/appimage/fix-appimage.sh removes both; this holds the result.
+# Nothing to do for other packages.
+check_appimage_wayland() {
+  local package="$1" root="$2" hooks forced wayland
+  case "$package" in *.AppImage) ;; *) return 0 ;; esac
+  hooks="$root/apprun-hooks"
+  forced=""
+  if [ -d "$hooks" ]; then
+    forced="$(grep -lE '^[[:space:]]*(export[[:space:]]+)?GDK_BACKEND=' "$hooks"/* 2>/dev/null || true)"
+  fi
+  if [ -n "$forced" ]; then
+    fail "wayland: an AppRun hook sets GDK_BACKEND, which keeps Vela off Wayland: ${forced//$root\//}"
+  else
+    pass "wayland: no AppRun hook sets GDK_BACKEND"
+  fi
+  wayland="$(find "$root/usr/lib" -maxdepth 1 -name 'libwayland-*' -printf '%f ' 2>/dev/null || true)"
+  if [ -n "$wayland" ]; then
+    fail "wayland: the AppImage bundles ${wayland% }; the host's own must be used"
+  else
+    pass "wayland: no bundled libwayland-*; the host's own are used"
+  fi
+}
+
 any_failed=0
 unchecked=0
 n=0
@@ -525,8 +553,10 @@ for package in "${packages[@]}"; do
       fail "unpack: this is not a package of Vela: it has no $APP_PATH"
     elif [ "$without" -eq 1 ]; then
       check_without "$package" "$tmp/$n/root"
+      check_appimage_wayland "$package" "$tmp/$n/root"
     else
       check_with "$package" "$tmp/$n/root"
+      check_appimage_wayland "$package" "$tmp/$n/root"
     fi
   fi
   if [ "$failed" -eq 0 ]; then

@@ -76,6 +76,12 @@ test("release artifacts fail closed through a final inventory", () => {
   );
   assert.match(workflow, /  arch:\n    name: Arch package\n    needs: \[npm-audit, cargo-audit, libmpv\]\n/);
   // A known vulnerability fails the release as it fails CI, in either ecosystem.
+  // The AppImage is packed again to start on Wayland with the host's own
+  // libwayland, before the package check that holds it (appimage-wayland plan).
+  const fix = workflow.indexOf("- name: Make the AppImage start on Wayland");
+  const check = workflow.indexOf("- name: Require the libmpv set in every Linux bundle");
+  assert.ok(fix > 0 && check > fix, 'the AppImage fix runs before the Linux package check');
+  assert.match(workflow.slice(fix, check), /run: packaging\/appimage\/fix-appimage\.sh '\$\{\{ matrix\.bundle_dir \}\}'\/appimage\/\*\.AppImage/);
   // What ships is the gate; the build tools' advisories are only reported (2026-11-17).
   assert.match(workflow, /  npm-audit:\n[\s\S]*?- run: npm audit --omit=dev --audit-level=moderate\n/);
   assert.match(workflow, /  cargo-audit:\n[\s\S]*?- run: cargo audit --file src-tauri\/Cargo\.lock\n/);

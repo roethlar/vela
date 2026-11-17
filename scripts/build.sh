@@ -380,6 +380,13 @@ else
   done
 fi
 
+# Every AppImage is packed again so that Vela starts on Wayland with the
+# host's own Wayland client libraries (packaging/appimage/fix-appimage.sh;
+# .agents/plans/appimage-wayland.md), before any check or copy.
+for f in "${artifacts[@]}"; do
+  case "$f" in *.AppImage) packaging/appimage/fix-appimage.sh "$f" ;; esac
+done
+
 # A build that was asked to package the libmpv set has not succeeded until
 # every package it produced is known to carry it: the embedded player has no
 # other library to fall back on, so from a package without the whole set that
