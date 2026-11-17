@@ -29,6 +29,7 @@ class PE:
         if machine != 0x8664 or optional_size < 112 or self.unpack("H", optional)[0] != 0x20b:
             raise ValueError("expected an x86_64 PE32+ image")
         self.image_base, = self.unpack("Q", optional + 24)
+        self.image_size, = self.unpack("I", optional + 56)
         self.header_size, = self.unpack("I", optional + 60)
         count_dirs, = self.unpack("I", optional + 108)
         if count_dirs > (optional_size - 112) // 8:
@@ -51,17 +52,22 @@ class PE:
     def unpack(self, fmt, offset):
         return struct.unpack("<" + fmt, self.read(offset, struct.calcsize("<" + fmt)))
 
-    def location(self, rva, size):
+    def image_range(self, rva, size):
         if rva <= 0:
             raise ValueError("null PE RVA")
+        if size < 0 or rva >= self.image_size or size > self.image_size - rva:
+            raise ValueError(f"range outside PE image: {rva:#x} + {size:#x}")
+
+    def location(self, rva, size):
+        self.image_range(rva, size)
         if rva < self.header_size and rva + size <= self.header_size:
             self.read(rva, size)
-            return rva, min(self.header_size, len(self.data))
+            return rva, min(self.header_size, self.image_size, len(self.data))
         for start, virtual_size, raw, raw_size in self.sections:
             delta = rva - start
             if 0 <= delta < virtual_size and delta + size <= raw_size:
                 self.read(raw + delta, size)
-                return raw + delta, raw + raw_size
+                return raw + delta, raw + min(raw_size, self.image_size - start)
         raise ValueError(f"unmapped PE RVA: {rva:#x}")
 
     def at(self, fmt, rva):
@@ -82,7 +88,9 @@ class PE:
         if bool(rva) != bool(size):
             raise ValueError(f"incomplete PE directory {index}")
         if rva:
-            self.location(rva, size)
+            # A directory's RVA extent can span sections and alignment gaps.
+            # Only the structures/strings we actually read need file backing.
+            self.image_range(rva, size)
         return rva, size
 
 
@@ -122,9 +130,11 @@ def pe_dependencies(data):
     if rva:
         if size < 40:
             raise ValueError("truncated export directory")
-        count, _, addresses = pe.at("III", rva + 20)
+        # Map the complete header, not only the fields used below.
+        header = pe.at("IIHHIIIIIII", rva)
+        count, addresses = header[6], header[8]
         if count:
-            pe.location(addresses, 4 * count)
+            pe.image_range(addresses, 4 * count)
         for i in range(count):
             target, = pe.at("I", addresses + 4 * i)
             # EAT entries inside the export directory are forwarder strings;

@@ -105,6 +105,25 @@ def fixture(imports=(), delay=(), forwarders=(), legacy_delay=False):
     return bytes(data)
 
 
+def split_export_fixture(forwarder="libwinpthread-1.pthread_create"):
+    """Export header/EAT at 0x1000, forwarder at 0x2000 in another section.
+
+    The RVA gap has no file backing; the two raw sections are adjacent. The
+    directory extent includes the gap because it identifies forwarder RVAs.
+    """
+    data = bytearray(fixture(forwarders=[forwarder])[:0x600])
+    struct.pack_into("<H", data, 0x86, 2)  # NumberOfSections
+    struct.pack_into("<I", data, 0x98 + 56, 0x3000)  # SizeOfImage
+    struct.pack_into("<III", data, 0x188 + 8, 0x200, 0x1000, 0x200)
+    struct.pack_into("<8sIIIIIIHHI", data, 0x1b0, b".fwd", 0x200, 0x2000,
+                     0x200, 0x400, 0, 0, 0, 0, 0x40000040)
+    value = forwarder.encode("ascii") + b"\0"
+    data[0x400:0x400 + len(value)] = value
+    struct.pack_into("<I", data, 0x228, 0x2000)  # EAT entry
+    struct.pack_into("<II", data, 0x98 + 112, 0x1000, 0x1000 + len(value))
+    return bytes(data)
+
+
 class PEDependencyTests(unittest.TestCase):
     def test_ordinary_import(self):
         self.assertEqual(pe.pe_dependencies(fixture(imports=["LIBWINPTHREAD-1.DLL"])),
@@ -121,6 +140,39 @@ class PEDependencyTests(unittest.TestCase):
     def test_forwarded_export(self):
         self.assertEqual(pe.pe_dependencies(fixture(forwarders=["libwinpthread-1.pthread_create"])),
                          {"imports": [], "delay_imports": [], "forwarders": ["libwinpthread-1.dll"]})
+
+    def test_forwarder_in_another_section(self):
+        self.assertEqual(pe.pe_dependencies(split_export_fixture()),
+                         {"imports": [], "delay_imports": [], "forwarders": ["libwinpthread-1.dll"]})
+
+    def test_directory_outside_image_is_refused(self):
+        for index, kind, name in ((0, "forwarders", "helper.symbol"),
+                                  (1, "imports", "helper.dll"), (13, "delay", "helper.dll")):
+            for image_size in (0x2000, 0x1800):
+                with self.subTest(kind=kind, image_size=image_size):
+                    data = bytearray(fixture(**{kind: [name]}))
+                    struct.pack_into("<I", data, 0x98 + 56, image_size)
+                    struct.pack_into("<I", data, 0x98 + 112 + 8 * index + 4,
+                                     image_size - 0x1000 + 1)
+                    with self.assertRaisesRegex(ValueError, "outside PE image"):
+                        pe.pe_dependencies(data)
+
+    def test_cross_section_export_references_must_be_mapped(self):
+        for offset in (0x228, 0x200 + 28, 0x98 + 112):
+            with self.subTest(offset=offset):
+                data = bytearray(split_export_fixture())
+                # The forwarder, EAT or header is in the gap. The last case
+                # leaves the header's fields at +20 mapped, but not its start.
+                struct.pack_into("<I", data, offset, 0xff0 if offset == 0x98 + 112 else 0x1800)
+                with self.assertRaisesRegex(ValueError, "unmapped PE RVA"):
+                    pe.pe_dependencies(data)
+
+    def test_cross_section_forwarder_needs_terminator_within_directory(self):
+        data = bytearray(split_export_fixture())
+        size, = struct.unpack_from("<I", data, 0x98 + 116)
+        struct.pack_into("<I", data, 0x98 + 116, size - 1)
+        with self.assertRaisesRegex(ValueError, "unterminated PE string"):
+            pe.pe_dependencies(data)
 
     def test_forwarders_by_ordinal_and_explicit_extension(self):
         self.assertEqual(pe.pe_dependencies(fixture(forwarders=["KERNEL32.#12", "Other.DLL.symbol"]))[
@@ -191,6 +243,26 @@ class BuildClosureTests(unittest.TestCase):
         (self.out / "helper.dll").write_bytes(fixture())
         run = self.shell("check_closure")
         self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+
+    @unittest.skipUnless(shutil.which("strip"), "binutils")
+    def test_closure_accepts_cross_section_export_before_and_after_stripping(self):
+        library = self.out / "libmpv-2.dll"
+        library.write_bytes(split_export_fixture("helper.symbol"))
+        (self.out / "helper.dll").write_bytes(fixture())
+        for stripped in (False, True):
+            with self.subTest(stripped=stripped):
+                if stripped:
+                    run = subprocess.run(["strip", "--strip-unneeded", str(library)],
+                                         capture_output=True, text=True, timeout=15)
+                    self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+                run = self.shell("check_closure")
+                self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+
+    def test_closure_rejects_unshipped_cross_section_forwarder(self):
+        (self.out / "libmpv-2.dll").write_bytes(split_export_fixture())
+        run = self.shell("check_closure")
+        self.assertEqual(run.returncode, 1, run.stdout + run.stderr)
+        self.assertIn("unshipped dependency: libwinpthread-1.dll", run.stderr)
 
     def test_closure_checks_transitive_dependencies(self):
         (self.out / "libmpv-2.dll").write_bytes(fixture(delay=["helper.dll"]))
