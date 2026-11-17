@@ -35,6 +35,22 @@ how far it has landed.
   checks: no AppRun hook sets `GDK_BACKEND`, no bundled `libwayland-*`. It
   fails the AppImage of release run 44098988278 on both.
 
+## Log
+
+- `de91332`: the fix, the check, the workflow step and its guard
+  (red-proved: the step removed, or moved after the check, fails the
+  release-workflow test). Release run 44185090187: the fix ran on the
+  runner (1 hook, 4 libwayland-* removed) and both Wayland checks passed,
+  but the repacked image was unreadable to other users (the runner's
+  umask), and the package check failed it.
+- `25b4e8d`: permissions set before packing. Release run 44195133042: the
+  Linux bundle job passed, its AppImage passing the package check (access,
+  both Wayland checks, the libmpv set). That AppImage, run as a whole file
+  under a headless weston on this AMD machine, played in Vela's window, its
+  clock advancing 0:02 to 0:19 (sha256 `4870ef8f…6cb9`). The owner's
+  NVIDIA machine was not reachable (booted into another system); its test
+  is next.
+
 ## Proof
 
 - The check fails the old AppImage and passes the fixed one (the release
