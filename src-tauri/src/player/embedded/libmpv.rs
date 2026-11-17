@@ -466,6 +466,27 @@ fn refuse_images_outside_set(
     Ok(())
 }
 
+/// A NULL entry or a changed count means an image may have been unloaded or
+/// added during enumeration. Discard that whole sample and try again; never
+/// pass an incomplete sample to the image-origin policy.
+#[cfg(any(target_os = "macos", test))]
+fn stable_macos_images<T>(
+    mut count: impl FnMut() -> u32,
+    mut image: impl FnMut(u32) -> Option<T>,
+) -> Result<Vec<T>, String> {
+    for _ in 0..3 {
+        let before = count();
+        let images: Option<Vec<T>> = (0..before).map(&mut image).collect();
+        let after = count();
+        if before == after {
+            if let Some(images) = images {
+                return Ok(images);
+            }
+        }
+    }
+    Err("the system's loader image list did not settle after 3 scans".into())
+}
+
 #[cfg(target_os = "macos")]
 fn refuse_redirected_macos_images(library: &Path) -> Result<(), String> {
     use std::os::unix::ffi::OsStrExt;
@@ -491,20 +512,28 @@ fn refuse_redirected_macos_images(library: &Path) -> Result<(), String> {
         }
     }
 
-    let mut images = Vec::new();
     // SAFETY: dyld's image accessors take no pointers from us. Copy each
     // non-NULL, NUL-terminated name while the library is still loaded.
-    for index in 0..unsafe { _dyld_image_count() } {
-        let name = unsafe { _dyld_get_image_name(index) };
-        if name.is_null() {
-            return Err(unknown());
-        }
-        let path = PathBuf::from(std::ffi::OsStr::from_bytes(
-            unsafe { CStr::from_ptr(name) }.to_bytes(),
-        ));
-        let canonical = path.canonicalize().ok();
-        images.push((path, canonical));
-    }
+    let images = stable_macos_images(
+        || unsafe { _dyld_image_count() },
+        |index| {
+            let name = unsafe { _dyld_get_image_name(index) };
+            if name.is_null() {
+                return None;
+            }
+            Some(PathBuf::from(std::ffi::OsStr::from_bytes(
+                unsafe { CStr::from_ptr(name) }.to_bytes(),
+            )))
+        },
+    )?;
+    // Filesystem work need not lengthen the interval between count samples.
+    let images: Vec<_> = images
+        .into_iter()
+        .map(|path| {
+            let canonical = path.canonicalize().ok();
+            (path, canonical)
+        })
+        .collect();
     refuse_images_outside_set(&directory, &dylib_names, &images)
 }
 
@@ -1591,6 +1620,66 @@ mod windows_tests {
     }
 }
 
+
+#[cfg(test)]
+mod macos_scan_tests {
+    use super::stable_macos_images;
+
+    #[test]
+    fn a_stable_image_list_is_used_without_retrying() {
+        let mut counts = [2, 2].into_iter();
+        assert_eq!(
+            stable_macos_images(|| counts.next().unwrap(), Some),
+            Ok(vec![0, 1])
+        );
+        assert_eq!(stable_macos_images(|| 0, Some::<u32>), Ok(vec![]));
+    }
+
+    #[test]
+    fn changing_counts_discard_the_sample_until_the_list_settles() {
+        for first_after in [1, 3] {
+            let mut counts = [2, first_after, 2, 2].into_iter();
+            let mut calls = 0;
+            let images = stable_macos_images(
+                || counts.next().unwrap(),
+                |_| {
+                    calls += 1;
+                    Some(calls)
+                },
+            )
+            .unwrap();
+            assert_eq!(images, [3, 4], "discard both growth and shrinkage");
+        }
+    }
+
+    #[test]
+    fn a_null_entry_retries_even_when_the_count_has_not_changed() {
+        let mut values = [Some("old"), None, Some("new"), Some("newer")].into_iter();
+        let images = stable_macos_images(|| 2, |_| values.next().unwrap()).unwrap();
+        assert_eq!(images, ["new", "newer"]);
+    }
+
+    #[test]
+    fn continuous_churn_is_a_bounded_and_explained_refusal() {
+        for missing in [false, true] {
+            let mut count_calls = 0;
+            let error = stable_macos_images(
+                || {
+                    count_calls += 1;
+                    if missing {
+                        1
+                    } else {
+                        count_calls
+                    }
+                },
+                |index| (!missing).then_some(index),
+            )
+            .unwrap_err();
+            assert_eq!(count_calls, 6, "three attempts, with two counts apiece");
+            assert!(error.contains("did not settle after 3 scans"));
+        }
+    }
+}
 
 #[cfg(test)]
 mod macos_image_tests {

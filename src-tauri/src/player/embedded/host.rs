@@ -10,9 +10,7 @@
 
 #[cfg(target_os = "linux")]
 use std::ffi::{c_void, CStr};
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-use std::sync::Mutex;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::Duration;
 
 #[cfg(target_os = "linux")]
@@ -280,11 +278,67 @@ fn whole(page: Rect) -> Rect {
     Rect { x: 0, y: 0, ..page }
 }
 
+/// Keep successful initialization, but let a later play retry a failed check.
+/// Only one worker checks at a time; no mutex is held while it asks the window
+/// or the loader. The guard also wakes waiting workers if a check unwinds.
+struct ReadyCache<T> {
+    ready: OnceLock<T>,
+    checking: Mutex<bool>,
+    changed: Condvar,
+}
+
+impl<T: Clone> ReadyCache<T> {
+    fn new() -> Self {
+        Self {
+            ready: OnceLock::new(),
+            checking: Mutex::new(false),
+            changed: Condvar::new(),
+        }
+    }
+
+    fn get_or_try_init<E>(&self, check: impl FnOnce() -> Result<T, E>) -> Result<T, E> {
+        let mut checking = self.checking.lock().unwrap_or_else(|e| e.into_inner());
+        loop {
+            if let Some(ready) = self.ready.get() {
+                return Ok(ready.clone());
+            }
+            if !*checking {
+                *checking = true;
+                break;
+            }
+            checking = self.changed.wait(checking).unwrap_or_else(|e| e.into_inner());
+        }
+        drop(checking);
+        let _checking = CheckInProgress {
+            checking: &self.checking,
+            changed: &self.changed,
+        };
+        let ready = check()?;
+        Ok(self.ready.get_or_init(|| ready).clone())
+    }
+}
+
+struct CheckInProgress<'a> {
+    checking: &'a Mutex<bool>,
+    changed: &'a Condvar,
+}
+
+impl Drop for CheckInProgress<'_> {
+    fn drop(&mut self) {
+        *self.checking.lock().unwrap_or_else(|e| e.into_inner()) = false;
+        self.changed.notify_all();
+    }
+}
+
 /// The embedded player's side of the app, for the life of the process.
 pub(crate) struct Host {
-    /// Whether this machine can run an embedded play, found out once, and
-    /// with it what its plays share.
-    checked: OnceLock<Result<Ready, EmbeddedUnavailable>>,
+    /// Only a successful check lasts for the run. A transient loader or
+    /// window failure refuses this attempt, then the next play can retry.
+    checked: ReadyCache<Ready>,
+    /// A Wayland registry cannot be returned to the compositor. Retain this
+    /// join (including a protocol refusal) even if a later loader check fails.
+    #[cfg(target_os = "linux")]
+    guest: OnceLock<Result<Arc<Guest>, EmbeddedUnavailable>>,
     /// Set when an embedded play failed to start, so the next play goes to
     /// the external player instead of failing the same way.
     start_failed: std::sync::atomic::AtomicBool,
@@ -296,7 +350,9 @@ pub(crate) struct Host {
 impl Host {
     pub(crate) fn new() -> Self {
         Host {
-            checked: OnceLock::new(),
+            checked: ReadyCache::new(),
+            #[cfg(target_os = "linux")]
+            guest: OnceLock::new(),
             start_failed: std::sync::atomic::AtomicBool::new(false),
             #[cfg(any(target_os = "linux", target_os = "macos"))]
             reported: Mutex::new(None),
@@ -325,7 +381,7 @@ impl Host {
 
     /// Everything that has to be true of this machine, checked in order of
     /// cost and stopping at the first that is not.
-    fn check(app: &tauri::AppHandle) -> Result<Ready, EmbeddedUnavailable> {
+    fn check(&self, app: &tauri::AppHandle) -> Result<Ready, EmbeddedUnavailable> {
         #[cfg(target_os = "linux")]
         let guest = {
             let display = on_window_thread(app, {
@@ -333,12 +389,14 @@ impl Host {
                 move || window_facts(&app).map(|facts| facts.display)
             })
             .map_err(|_| EmbeddedUnavailable::WindowNotReady)??;
-            // SAFETY: the window's live Wayland connection, which GTK keeps for
-            // the life of the process.
-            let guest = unsafe { Guest::join(display) }.map_err(|detail| {
-                eprintln!("vela: the embedded player is unavailable: {detail}");
-                EmbeddedUnavailable::CompositorLacks
-            })?;
+            let guest = self.guest.get_or_init(|| {
+                // SAFETY: the window's live Wayland connection, which GTK keeps
+                // for the life of the process. Join once, even across retries.
+                unsafe { Guest::join(display) }.map(Arc::new).map_err(|detail| {
+                    eprintln!("vela: the embedded player is unavailable: {detail}");
+                    EmbeddedUnavailable::CompositorLacks
+                })
+            }).clone()?;
             egl::probe(display.0).map_err(|detail| {
                 eprintln!("vela: the embedded player is unavailable: {detail}");
                 EmbeddedUnavailable::NoGpuFormat
@@ -373,7 +431,7 @@ impl Host {
         Ok(Ready {
             lib,
             #[cfg(target_os = "linux")]
-            guest: Arc::new(guest),
+            guest,
         })
     }
 
@@ -390,7 +448,7 @@ impl Host {
         if session::unfinished_plays() > 0 {
             return Err(EmbeddedUnavailable::StartFailed);
         }
-        self.checked.get_or_init(|| Self::check(app)).clone()
+        self.checked.get_or_try_init(|| self.check(app))
     }
 
     /// Whether an embedded play can be started now. Asks the window, so it
@@ -657,6 +715,70 @@ impl crate::player::EmbeddedLauncher for Launcher {
                 .start(plan, own_config, ipc_path)
                 .map(crate::player::PlayerHandle::Embedded)
         }))
+    }
+}
+
+#[cfg(test)]
+mod ready_cache_tests {
+    use super::ReadyCache;
+
+    #[test]
+    fn failed_checks_refuse_this_attempt_but_success_is_cached() {
+        let cache = ReadyCache::new();
+        assert_eq!(
+            cache.get_or_try_init(|| Err::<u32, _>("loader churn")),
+            Err("loader churn")
+        );
+        assert!(
+            !*cache.checking.lock().unwrap(),
+            "failure releases the next check"
+        );
+        assert_eq!(cache.get_or_try_init(|| Ok::<_, &str>(42)), Ok(42));
+        assert_eq!(cache.get_or_try_init(|| Err("must not run again")), Ok(42));
+    }
+
+    #[test]
+    fn a_check_runs_without_the_cache_lock_and_unwinding_releases_waiters() {
+        let cache = ReadyCache::new();
+        let result = std::panic::catch_unwind(|| {
+            cache.get_or_try_init(|| -> Result<u32, ()> {
+                assert!(*cache
+                    .checking
+                    .try_lock()
+                    .expect("no lock across loader work"));
+                panic!("failed initialization");
+            })
+        });
+        assert!(result.is_err());
+        assert!(!*cache.checking.lock().unwrap());
+        assert_eq!(cache.get_or_try_init(|| Ok::<_, ()>(7)), Ok(7));
+    }
+
+    #[test]
+    fn concurrent_checks_share_one_success() {
+        use std::sync::{
+            atomic::{AtomicU32, Ordering},
+            Barrier,
+        };
+        let cache = ReadyCache::new();
+        let calls = AtomicU32::new(0);
+        let barrier = Barrier::new(8);
+        std::thread::scope(|scope| {
+            for _ in 0..8 {
+                scope.spawn(|| {
+                    barrier.wait();
+                    assert_eq!(
+                        cache.get_or_try_init(|| {
+                            calls.fetch_add(1, Ordering::SeqCst);
+                            std::thread::yield_now();
+                            Ok::<_, ()>(13)
+                        }),
+                        Ok(13)
+                    );
+                });
+            }
+        });
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 }
 

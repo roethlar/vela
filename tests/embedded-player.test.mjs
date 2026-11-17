@@ -216,7 +216,7 @@ test('an embedded play is offered only in a run that started in embedded window 
   );
   // Nothing about the machine is examined, and no library is loaded, before
   // that.
-  for (const later of ['self.start_failed', 'self.checked.get_or_init']) {
+  for (const later of ['self.start_failed', 'self.checked.get_or_try_init']) {
     assert.ok(gate < library.indexOf(later), `${later} comes after the start-up check`);
   }
   // Both ways in go through it.
@@ -267,6 +267,14 @@ test('Windows library loading requires the process DLL search policy', () => {
   assert.equal(count(windows, 'LoadLibraryExW('), 1);
 });
 
+test('macOS checks image origins only after a complete stable loader scan', () => {
+  const scan = functionBody(code(libmpv), 'fn refuse_redirected_macos_images(', 'macOS images');
+  assert.match(scan, /let images = stable_macos_images\(\s*\|\| unsafe \{ _dyld_image_count\(\) \},\s*\|index\| \{/);
+  assert.match(scan, /let name = unsafe \{ _dyld_get_image_name\(index\) \};\s*if name\.is_null\(\) \{\s*return None;/);
+  assert.match(scan, /\},\s*\)\?;/);
+  assert.match(scan, /refuse_images_outside_set\(&directory, &dylib_names, &images\)/);
+});
+
 test('a running embedded play is asked to stop, and waited for, before its window can go', () => {
   // The play draws into a child of Vela's window. Dropping its handle (the
   // exit sweep, a replaced play that is reaped) must not return while the
@@ -298,14 +306,16 @@ test("the window's Wayland connection is joined once for the whole run, never pe
   );
   const join = methodBody(surface, '    pub(crate) unsafe fn join(display: WlDisplay) -> Result<Self, String> {', 'Guest::join');
   assert.ok(join.includes('Backend::from_foreign_display(') && join.includes('.get_registry('));
-  // That place is reached once per process: from the availability check,
-  // whose answer is kept.
+  // The registry join is kept even when a later library check fails and is
+  // retried. A protocol refusal also cannot allocate another registry.
   assert.equal(count(code(host), 'Guest::join('), 1);
-  const check = methodBody(host, '    fn check(app: &tauri::AppHandle) -> Result<Ready, EmbeddedUnavailable> {', 'Host::check');
+  const check = methodBody(host, '    fn check(&self, app: &tauri::AppHandle) -> Result<Ready, EmbeddedUnavailable> {', 'Host::check');
   assert.ok(check.includes('Guest::join(display)'));
-  assert.equal(count(code(host), 'Self::check('), 1);
-  assert.match(host, /self\.checked\.get_or_init\(\|\| Self::check\(app\)\)\.clone\(\)/);
-  assert.match(host, /checked: OnceLock<Result<Ready, EmbeddedUnavailable>>,/);
+  assert.equal(count(code(host), 'self.check('), 1);
+  assert.match(host, /self\.checked\.get_or_try_init\(\|\| self\.check\(app\)\)/);
+  assert.match(host, /checked: ReadyCache<Ready>,/);
+  assert.match(check, /self\.guest\.get_or_init\(\|\| \{[\s\S]*?Guest::join\(display\)[\s\S]*?\}\)\.clone\(\)\?/);
+  assert.match(host, /guest: OnceLock<Result<Arc<Guest>, EmbeddedUnavailable>>,/);
   for (const file of [session, libmpv, read('src-tauri/src/player/embedded/egl.rs')]) {
     assert.equal(count(code(file), 'Guest::join('), 0);
     assert.equal(count(code(file), 'get_registry('), 0);
@@ -444,7 +454,7 @@ test('a play that outlasts the wait for it neither starts unannounced nor goes u
   const library = methodBody(host, '    fn library(', 'Host::library');
   const refusal = library.indexOf('if session::unfinished_plays() > 0 {\n            return Err(EmbeddedUnavailable::StartFailed);\n        }');
   assert.notEqual(refusal, -1);
-  assert.ok(refusal < library.indexOf('self.checked.get_or_init'));
+  assert.ok(refusal < library.indexOf('self.checked.get_or_try_init'));
   assert.match(
     lib,
     /queue\.clear\(\);\s+\}\s+(?:\/\/[^\n]*\n\s+)*#\[cfg\(any\(target_os = "linux", target_os = "windows", target_os = "macos"\)\)\]\s+player::embedded::wait_for_unfinished_plays\(std::time::Duration::from_secs\(2\)\);/,
