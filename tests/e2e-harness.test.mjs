@@ -793,6 +793,14 @@ test("Windows: every session of a scenario's driver shares one WebView2 data fol
     /new Driver\(driverUrl, isWindows \? \{ webviewUserDataFolder: path\.join\(configRoot, 'webview2'\) \} : \{\}\)/);
 });
 
+test("a scenario's temporary folder is removed with retries, and a leftover never ends the run", () => {
+  const run = harnessText('run.mjs');
+  // The WebView2 browser can hold its data folder (configRoot/webview2) for a
+  // moment after the app has gone; fs.rmSync retries EPERM and EBUSY.
+  assert.match(run, /try \{\s*fs\.rmSync\(configRoot, \{ recursive: true, force: true, maxRetries: 20, retryDelay: 250 \}\);\s*\} catch \(removeError\) \{\s*console\.error\(/);
+  assert.equal(run.split('fs.rmSync(configRoot').length - 1, 1, 'no other removal of it can throw');
+});
+
 test('a click a fixed overlay intercepts is retried once with the element centred', async () => {
   const { Driver } = await import('./e2e/driver.mjs');
   const original = globalThis.fetch;

@@ -221,7 +221,15 @@ async function runScenario(scenario, tauriDriverBin) {
     process.removeListener('exit', killTree);
     fs.closeSync(logFd);
     await waitUntil(async () => !(await driverListening()), 'driver port to free').catch(() => {});
-    fs.rmSync(configRoot, { recursive: true, force: true });
+    // Windows: the WebView2 browser of the scenario's last session can hold
+    // files in its data folder (configRoot/webview2) for a moment after the
+    // app has gone (EPERM, the fourth Windows run). Retry, and never let a
+    // leftover temporary folder end the run.
+    try {
+      fs.rmSync(configRoot, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
+    } catch (removeError) {
+      console.error(`e2e: could not remove ${configRoot}: ${removeError.message}`);
+    }
   }
 }
 
