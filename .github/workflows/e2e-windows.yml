@@ -173,6 +173,12 @@ jobs:
           git status --porcelain
           git diff --stat
           exit 0
+      - name: Where the build put Vela's mpv scripts
+        if: always()
+        run: |
+          Get-ChildItem -Recurse -File src-tauri/target/debug -Filter *.lua -ErrorAction SilentlyContinue | ForEach-Object FullName
+          Get-ChildItem -Recurse -File src-tauri/resources/mpv-scripts | ForEach-Object FullName
+          exit 0
       - uses: actions/upload-artifact@v7
         if: always()
         with:
