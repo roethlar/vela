@@ -410,6 +410,36 @@ fn refuse_unless_named(path: &Path, name: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Apple's dyld(1) search-path, versioned-override, suffix, insertion and
+/// root-path controls can replace or add images in an unhardened launch.
+/// Refuse their presence (even an empty value) before running initialisers.
+/// Inspect names only: values can contain private paths and are never logged.
+#[cfg(any(target_os = "macos", test))]
+fn refuse_macos_loader_environment(
+    names: impl IntoIterator<Item = impl AsRef<std::ffi::OsStr>>,
+) -> Result<(), String> {
+    const REDIRECTS: &[&str] = &[
+        "DYLD_LIBRARY_PATH",
+        "DYLD_FALLBACK_LIBRARY_PATH",
+        "DYLD_FRAMEWORK_PATH",
+        "DYLD_FALLBACK_FRAMEWORK_PATH",
+        "DYLD_IMAGE_SUFFIX",
+        "DYLD_INSERT_LIBRARIES",
+        "DYLD_VERSIONED_LIBRARY_PATH",
+        "DYLD_VERSIONED_FRAMEWORK_PATH",
+        "DYLD_ROOT_PATH",
+    ];
+    for name in names {
+        if let Some(redirect) = REDIRECTS
+            .iter()
+            .find(|redirect| name.as_ref() == std::ffi::OsStr::new(redirect))
+        {
+            return Err(format!("{redirect} can redirect the set's libraries"));
+        }
+    }
+    Ok(())
+}
+
 /// Every loaded image named by the set must resolve inside that directory.
 /// The caller supplies canonical paths; retain the loader's original name
 /// too, since a dylib symlink can resolve to a differently named file. An
@@ -507,6 +537,8 @@ impl LibMpv {
     /// Open the library at exactly `path` and resolve every function used.
     pub(crate) fn load(path: &Path) -> Result<Self, String> {
         refuse_unless_exact(path)?;
+        #[cfg(target_os = "macos")]
+        refuse_macos_loader_environment(std::env::vars_os().map(|(name, _)| name))?;
         #[cfg(any(target_os = "linux", target_os = "macos"))]
         let handle = {
             use std::os::unix::ffi::OsStrExt;
@@ -1244,6 +1276,44 @@ fn with_macos_skip_params<R>(render: impl FnOnce(&mut [RenderParam]) -> R) -> R 
         },
     ];
     render(&mut params)
+}
+
+#[cfg(test)]
+mod macos_environment_tests {
+    use super::refuse_macos_loader_environment;
+
+    #[test]
+    fn every_dyld_library_redirect_is_refused_by_name() {
+        for name in [
+            "DYLD_LIBRARY_PATH",
+            "DYLD_FALLBACK_LIBRARY_PATH",
+            "DYLD_FRAMEWORK_PATH",
+            "DYLD_FALLBACK_FRAMEWORK_PATH",
+            "DYLD_IMAGE_SUFFIX",
+            "DYLD_INSERT_LIBRARIES",
+            "DYLD_VERSIONED_LIBRARY_PATH",
+            "DYLD_VERSIONED_FRAMEWORK_PATH",
+            "DYLD_ROOT_PATH",
+        ] {
+            let error = refuse_macos_loader_environment(["PATH", name, "HOME"]).expect_err(name);
+            assert!(error.contains(name));
+        }
+    }
+
+    #[test]
+    fn ordinary_names_and_dyld_diagnostics_do_not_redirect_libraries() {
+        assert!(refuse_macos_loader_environment(Vec::<std::ffi::OsString>::new()).is_ok());
+        assert!(refuse_macos_loader_environment([
+            "PATH",
+            "HOME",
+            "VELA_LIBMPV_DIR",
+            "DYLD_PRINT_LIBRARIES",
+            "DYLD_PRINT_SEARCHING",
+            "DYLD_LIBRARY_PATH_EXTRA",
+            "dyld_library_path",
+        ])
+        .is_ok());
+    }
 }
 
 #[cfg(test)]

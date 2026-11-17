@@ -249,6 +249,14 @@ test("only Vela's own copy of the mpv library is ever loaded", () => {
   }
 });
 
+test('macOS refuses dyld redirects before loading any library initialisers', () => {
+  const load = methodBody(code(libmpv), '    pub(crate) fn load(', 'LibMpv::load');
+  const refusal = 'refuse_macos_loader_environment(std::env::vars_os().map(|(name, _)| name))?;';
+  assert.match(load, /#\[cfg\(target_os = "macos"\)\]\s+refuse_macos_loader_environment\(std::env::vars_os\(\)\.map\(\|\(name, _\)\| name\)\)\?;/);
+  assert.ok(load.indexOf(refusal) < load.indexOf('libc::dlopen('));
+  assert.match(load, /if let Err\(error\) = refuse_redirected_macos_images\(path\)/);
+});
+
 test('Windows library loading requires the process DLL search policy', () => {
   // The portable Rust tests exercise ordering and refusal. This holds their
   // connection to the Windows APIs and the exact directories allowed there;
