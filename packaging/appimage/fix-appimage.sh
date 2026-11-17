@@ -67,6 +67,13 @@ for appimage in "$@"; do
   done
   removed="$(find "$root/usr/lib" -maxdepth 1 -name 'libwayland-*' -print -delete | wc -l)"
 
+  # Unpacking applies the build machine's umask, and an image packed from
+  # that tree would carry it: on the release runner every directory came back
+  # unreadable to other users, which no package may be. Everything readable,
+  # directories and programs enterable and runnable, by everyone; writable
+  # by the owner only, as in the image Tauri built.
+  chmod -R u+rwX,go+rX,go-w "$root"
+
   ARCH=x86_64 "$tools/appimagetool-1.9.1-x86_64.AppImage" --no-appstream \
     --runtime-file "$tools/runtime-20251108-x86_64" "$root" "$appimage.fixed" >/dev/null
   chmod --reference="$appimage" "$appimage.fixed"
