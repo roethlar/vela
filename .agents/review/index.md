@@ -1169,7 +1169,9 @@ tp-7: 2 MEDIUM, 2 LOW), repaired (`1342e6a`, `f29d77c`, `d1cc1b3`,
 (`17893e6`); a fifth, over that, was clean. A sixth, over the marker
 script's repair (`27f6cdf..0357eec`), was clean; a seventh, over two test
 commits (`0357eec..5d83c72`): three admitted (tp-10 to tp-12: 2 MEDIUM,
-1 LOW), all against guards that read workflow text, repaired together.
+1 LOW), all against guards that read workflow text, repaired together
+(`311347e`); an eighth, over the boot repair and `playlistedit`'s wait
+(`311347e..aa8c0b0`), was clean.
 
 ## 2026-11-16 — the embedded player on Windows and macOS (codereview codex)
 

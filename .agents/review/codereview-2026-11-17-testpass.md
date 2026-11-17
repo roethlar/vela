@@ -13,7 +13,10 @@ tp-9's repair (`6f92baa..17893e6`), was clean: every finding of the pass so
 far, tp-1 to tp-9, is closed. A sixth, over the marker script's repair
 (`27f6cdf..0357eec`, a defect the Windows suite found), was clean. A
 seventh, over two test commits (`0357eec..5d83c72`): **findings**, three
-candidates, all admitted (two MEDIUM, one LOW), all repaired by one change.
+candidates, all admitted (two MEDIUM, one LOW), all repaired by one change
+(`311347e`). An eighth, over the boot repair (Playlists chosen while Vela
+starts, found by the Windows suite) and `playlistedit`'s wait
+(`311347e..aa8c0b0`), was clean.
 
 ## Dispatch record
 
@@ -40,9 +43,9 @@ candidates, all admitted (two MEDIUM, one LOW), all repaired by one change.
 | tp-7 | LOW      | settingValue accepts an expected default before the setting has loaded | `[x]` | `d48bc08` |
 | tp-8 | LOW      | The click retry's guard never runs the script that picks the element | `[x]` | `6f92baa` |
 | tp-9 | LOW      | The click retry's guard never runs the script's not-found path | `[x]` | `17893e6` |
-| tp-10 | MEDIUM  | A disabled or commented-out install satisfies the CI tools guard | `[x]` | this commit |
-| tp-11 | MEDIUM  | The CI tools guard can read the wrong job | `[x]` | this commit |
-| tp-12 | LOW     | Equivalent valid workflow syntax fails the CI tools guard | `[x]` | this commit |
+| tp-10 | MEDIUM  | A disabled or commented-out install satisfies the CI tools guard | `[x]` | `311347e` |
+| tp-11 | MEDIUM  | The CI tools guard can read the wrong job | `[x]` | `311347e` |
+| tp-12 | LOW     | Equivalent valid workflow syntax fails the CI tools guard | `[x]` | `311347e` |
 
 ### tp-1
 
@@ -254,3 +257,10 @@ a CI run both checks are skipped and the tools' own tests skip as before,
 with their reasons. Seen failing with CI=true on real PATHs without
 bsdtar, without mksquashfs and without lua5.2; passing with all of them;
 `npm run check` with CI=true and both Luas: 1184 passed, none skipped.
+
+## The eighth hunt: the boot repair and playlistedit's wait
+
+Over `311347e..aa8c0b0`: `2f6f37d` (Playlists chosen while Vela starts was
+put back to Home by the boot's first Home load; found by the Windows
+suite's `playlistplay`, run 44034984612) and `aa8c0b0` (`playlistedit`
+waits for its playlist to be listed). **clean**: no finding.
