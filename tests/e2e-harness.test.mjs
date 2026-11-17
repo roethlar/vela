@@ -681,6 +681,25 @@ function driverCase(source) {
   }
 }
 
+test("Windows: every session of a scenario's driver shares one WebView2 data folder", () => {
+  driverCase(`
+    const located = await locate();
+    setRunApp(located);
+    const shared = new Driver(url, { webviewUserDataFolder: 'C:\\\\cfg\\\\webview2' });
+    await shared.newSession();
+    await shared.newSession();
+    await new Driver(url).newSession();
+    const options = sent.map((body) => body.capabilities.alwaysMatch['tauri:options']);
+    assert.deepEqual(options.map((o) => o.webviewOptions), [
+      { userDataFolder: 'C:\\\\cfg\\\\webview2' }, { userDataFolder: 'C:\\\\cfg\\\\webview2' }, undefined,
+    ], 'a restart must reuse the folder; a driver without one asks for none');
+    assert.deepEqual(applications(), [app, app, app], 'the folder never chooses the app');
+  `);
+  // The runner gives one per scenario, on Windows only.
+  assert.match(harnessText('run.mjs'),
+    /new Driver\(driverUrl, isWindows \? \{ webviewUserDataFolder: path\.join\(configRoot, 'webview2'\) \} : \{\}\)/);
+});
+
 test('an aliased second driver in another module cannot start another app (pa-6)', () => {
   driverCase(`
     const located = await locate();

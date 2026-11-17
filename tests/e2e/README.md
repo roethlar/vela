@@ -112,6 +112,15 @@ connections on a local port while it runs; rebuild before using that binary
 for anything else. The app Vela ships is built without it. `--skip-build`
 needs a binary the suite built.
 
+Two more differences from a Windows desktop, both handled: Edge WebDriver
+gives every session a new temporary WebView2 data folder, so the runner
+gives each scenario one folder for all its sessions (`driver.mjs`,
+`webviewOptions.userDataFolder`), and page storage survives a restart as it
+does in the app Vela ships; and the hosted runner has "Show animations in
+Windows" off, which WebView2 reports as reduced motion, so the workflow
+turns it on. On a desktop of your own with animations off, the motion
+scenarios fail for the same reason.
+
 **Use a disposable Windows account.** Before every scenario the harness
 deletes the real roaming AppData `vela` directory (normally `%APPDATA%\vela`).
 Vela uses `directories::ProjectDirs::from("com", "vela", "vela")`, which reads

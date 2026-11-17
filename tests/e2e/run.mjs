@@ -153,7 +153,9 @@ async function runScenario(scenario, tauriDriverBin) {
   process.on('exit', killTree);
   activeKills.add(killTree);
 
-  const driver = new Driver(driverUrl);
+  // Windows: one WebView2 data folder for every session of the scenario, as
+  // the app Vela ships has one (driver.mjs); Linux's WebKit keeps its own.
+  const driver = new Driver(driverUrl, isWindows ? { webviewUserDataFolder: path.join(configRoot, 'webview2') } : {});
   try {
     await waitUntil(driverListening, `tauri-driver on :${driverPort}`);
     await driver.newSession();

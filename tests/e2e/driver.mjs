@@ -20,9 +20,16 @@ export class Driver {
     ArrowDown: '',
   };
 
-  constructor(baseUrl) {
+  // Windows: the WebView2 data folder every session of this driver uses.
+  #webviewUserDataFolder;
+
+  constructor(baseUrl, { webviewUserDataFolder } = {}) {
     this.baseUrl = baseUrl;
     this.sessionId = null;
+    // Edge WebDriver gives each session a new temporary WebView2 data folder
+    // unless told one; the app Vela ships keeps one, so a restart within a
+    // scenario keeps its page storage only when all its sessions share it.
+    this.#webviewUserDataFolder = webviewUserDataFolder;
     // A constructor argument cannot choose an app. Nor can a subclass or
     // caller replace the session entry point: this own property is neither
     // writable nor configurable and closes over the private implementation.
@@ -80,7 +87,14 @@ export class Driver {
       '/session',
       {
         capabilities: {
-          alwaysMatch: { 'tauri:options': { application: appBinary } },
+          alwaysMatch: {
+            'tauri:options': {
+              application: appBinary,
+              ...(this.#webviewUserDataFolder
+                ? { webviewOptions: { userDataFolder: this.#webviewUserDataFolder } }
+                : {}),
+            },
+          },
         },
       },
       { timeoutMs: 60000 }, // covers the app launch
