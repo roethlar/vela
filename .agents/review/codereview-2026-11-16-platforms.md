@@ -7,9 +7,10 @@ over the fixes `c49be2a` and `ca07bfa`, a fourth over the macOS HDR slice
 the Windows packaging (below). **findings**: thirteen candidates,
 thirteen admitted (one HIGH, nine MEDIUM, three LOW), none declined.
 All but pl-9 are repaired and closed: codex wrote pl-1 to pl-6's, pl-8's,
-pl-11's and pl-12's repairs as coding tasks and the working agent's review
-closed them (adding the Windows half of pl-5); the working agent wrote
-pl-7's, pl-10's and pl-13's, which codex's next hunt over the fixes reads.
+pl-11's, pl-12's and pl-14 to pl-19's repairs as coding tasks and the
+working agent's review closed them (adding the Windows half of pl-5); the
+working agent wrote pl-7's, pl-10's and pl-13's. A ninth and tenth hunt,
+over pl-14 to pl-19's repairs, are running.
 pl-9 is about tests alone and waits for the release's test pass
 (`.agents/decisions.md`, 2026-11-14). pl-11 leaves one path open on
 purpose, stated in its section.
@@ -52,12 +53,12 @@ purpose, stated in its section.
 | pl-11 | HIGH    | Windows: a later bare-name DLL load (libplacebo's d3d11.dll) can resolve beside Vela.exe | `[x]` | `4d511a2` |
 | pl-12 | MEDIUM  | Windows set: the dependency checks miss delay imports and forwarders; the audit passes a foreign DLL | `[x]` | `2e3913d` |
 | pl-13 | LOW     | docs: the embedded player described as Linux-only, Windows and macOS packages as without the library | `[x]` | `34fd3a3` |
-| pl-14 | MEDIUM  | Windows set: the runtime audit trusts any module under %SystemRoot%, a third-party runtime included | `[ ]` | in repair (codex) |
-| pl-15 | MEDIUM  | Windows set: the PE scanner refuses a valid DLL whose export directory spans sections | `[ ]` | in repair (codex) |
-| pl-16 | MEDIUM  | macOS: DYLD_IMAGE_SUFFIX can load a renamed outside dependency past pl-4's check | `[ ]` | in repair (codex) |
-| pl-17 | MEDIUM  | macOS: an image unloaded during pl-4's scan makes a cached, spurious refusal | `[ ]` | in repair (codex) |
-| pl-18 | MEDIUM  | screens: Vela's own fallback screen overrides the user's numbered screen like a remembered one | `[ ]` | in repair (codex) |
-| pl-19 | MEDIUM  | macOS: a conditional profile can undo video-timing-offset=0, so video runs ahead of audio | `[ ]` | in repair (codex) |
+| pl-14 | MEDIUM  | Windows set: the runtime audit trusts any module under %SystemRoot%, a third-party runtime included | `[x]` | `41b4c79` |
+| pl-15 | MEDIUM  | Windows set: the PE scanner refuses a valid DLL whose export directory spans sections | `[x]` | `9a92d54` |
+| pl-16 | MEDIUM  | macOS: DYLD_IMAGE_SUFFIX can load a renamed outside dependency past pl-4's check | `[x]` | `8e036cb` |
+| pl-17 | MEDIUM  | macOS: an image unloaded during pl-4's scan makes a cached, spurious refusal | `[x]` | `cf09211` |
+| pl-18 | MEDIUM  | screens: Vela's own fallback screen overrides the user's numbered screen like a remembered one | `[x]` | `0b2099a` |
+| pl-19 | MEDIUM  | macOS: a conditional profile can undo video-timing-offset=0, so video runs ahead of audio | `[x]` | `91c72f6` |
 
 ### pl-1 (whost)
 
@@ -373,8 +374,12 @@ an incomplete set when a dynamically loaded dependency happens to be
 installed in the checking machine's System32. That package can then fail on
 a clean Windows installation."
 
-Admitted. In repair: the runtimes the set must never use are reported
-wherever they load from, %SystemRoot% included.
+Admitted. Repair (`41b4c79`, codex): the eight MinGW runtimes the build
+links statically are refused wherever they load from, System32, the
+baseline and the MANIFEST included; Windows' own DLLs and the DriverStore
+stay accepted. Left open, stated: another third-party DLL placed under a
+Windows directory would still pass; a publisher or catalog check would
+close it.
 
 ### pl-15 (fixpkg)
 
@@ -387,8 +392,10 @@ Wine, including after stripping. The production check_closure instead exits
 layout causes the Windows set build to reject an otherwise complete
 dependency closure, blocking packaging."
 
-Admitted. In repair: a directory's extent is checked in virtual-address
-space and each structure it references is mapped on its own.
+Admitted. Repair (`9a92d54`, codex): a directory's extent is checked in
+virtual-address space against SizeOfImage and each structure and string it
+references is mapped on its own; the real set's closure is byte-identical
+before and after.
 
 ## An eighth hunt: the runtime fixes
 
@@ -411,9 +418,10 @@ production policy accepts this outside image." Predicted failure: "Embedded
 playback accepts an FFmpeg dependency outside Vela's shipped set. This
 leaves pl-4 reachable in development launches that honor DYLD variables."
 
-Admitted. In repair: a launch whose environment holds a dyld redirection
-variable is refused before the load (a released app's hardened runtime
-ignores them anyway).
+Admitted. Repair (`8e036cb`, codex): before dlopen, a launch whose
+environment holds any of nine dyld redirection variables is refused (a
+released app's hardened runtime ignores them anyway); pl-4's check
+unchanged behind it.
 
 ### pl-17 (fixrt)
 
@@ -426,9 +434,10 @@ unavailable, and subsequent embedded plays fall back to the external player
 until Vela restarts."
 
 Admitted (the working agent had noted the race when reviewing pl-4 and
-judged it rare; the cached result makes it last for the run). In repair:
-the scan repeats until the image list is stable, and a transient failure is
-not cached.
+judged it rare; the cached result makes it last for the run). Repair
+(`cf09211`, codex): the scan repeats, up to three times, until the list is
+stable; the host keeps only a successful library check (`ReadyCache`), a
+failed one is tried again at the next play.
 
 ### pl-18 (fixrt)
 
@@ -442,9 +451,13 @@ user's numeric monitor selection and open playback on Vela's monitor. The
 numeric choice survived before this fix."
 
 Admitted; on Windows Vela's fallback index already overrode the user's
-`--screen`. In repair, the same on every platform: a remembered screen
-stays protected after the user's options; Vela's own fallback becomes a
-default before them, which the user's options override.
+`--screen`. Repair (`0b2099a`, codex), the same on every platform: a
+play's screen carries where it came from; a remembered screen stays
+protected after the user's options; Vela's own fallback is a default
+before them, which the user's options override. Left as it always was: in
+own-config mode mpv reads mpv.conf before any command-line argument, so a
+same-option screen choice there yields to the fallback (a numbered screen
+there survives on Linux and macOS).
 
 ### pl-19 (fixrt)
 
@@ -459,5 +472,6 @@ finished on time." Predicted failure: "macOS presents video ahead of audio
 when a conditional profile changes this supposedly protected option. The
 existing runtime protection observes only the five colour properties."
 
-Admitted. In repair: the option is observed for the whole play and set
-back to 0 whenever it changes.
+Admitted. Repair (`91c72f6`, codex): an observer of its own keeps
+`video-timing-offset` at 0 for the whole play, setting it back
+asynchronously whenever it changes.
