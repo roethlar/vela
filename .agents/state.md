@@ -92,11 +92,22 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     repairs landed after it (`73666ac` the Plex test CA, `f177a85`,
     `1b83109`, `7687583`, `2546470` timing on the slower runner,
     `019c08b` sourcepolicy skipped on Windows; the plan's Probe log). The
-    third full run, at `019c08b`, is 44018219446. A second codex hunt
-    found tp-4 to tp-7 (build.rs under a separate Cargo build directory,
-    the test CA after an interrupted run, two weak guards), in repair by
-    codex (`cxfix8`). RELEASE_NOTES.md now describes the embedded player
-    on all three platforms and the Continue Watching fix (`66a6355`).
+    third (44018219446 at `019c08b`: external 43 passed, 3 failed;
+    embedded 48 passed, 2 failed) and fourth (44023883002 at `8d1a8b5`:
+    embedded 49 passed, 1 failed) found a second real defect: the
+    Windows set's FFmpeg verifies TLS through Schannel with a hard
+    revocation check, so Vela's window on Windows refused HTTPS from a
+    server whose certificate a Windows-trusted authority issued but
+    without reachable revocation information; repaired in the set's
+    build (`3c4a510`: revocation soft-fails, as browsers do; chain and
+    host name still checked), and CI rebuilds the set. The other
+    failures were the suite's own (`658a924`, `8d1a8b5`, `931542b`). A
+    second codex hunt found tp-4 to tp-7, repaired (`1342e6a`,
+    `f29d77c`, `d1cc1b3`, `d48bc08`: Settings controls now carry
+    aria-busy until loaded); a third hunt reads `019c08b..dc3c9e8`.
+    RELEASE_NOTES.md describes the embedded player on all three
+    platforms and both fixes. The release run 44018388540 predates
+    `3c4a510` and `d48bc08`; a release run after them replaces it.
   - Type-checking Windows and macOS Rust from Linux:
     `scripts/check-other-platforms.sh` (repo-guidance, Verification).
 - VELA 1.0.66 IS READY TO BE RELEASED, AS FAR AS THE AGENT CAN TAKE IT
