@@ -2633,9 +2633,11 @@ installer and the macOS app).
 - Lacks: Vela's window on X11, and with NVIDIA's proprietary driver (the
   video plays in mpv's own window and Settings says why).
 - Proven by machine: both end-to-end suites in full at every product
-  commit (48 of 48, 51 of 51, parity PASS), apart from one intermittent
-  failure of `markers` in the embedded suite, under investigation
-  (`.agents/state.md`, Blockers).
+  commit (48 of 48, 51 of 51, parity PASS), last at `23d4745`, the
+  builds' commit. Intermittent failures in the embedded suite, all in
+  `.agents/state.md`, Blockers: `markers` twice (cause not found; not
+  seen since `019c08b`), and `watchposition` and `pagefail` on
+  2026-11-17 only while stray processes had loaded the machine.
 - Check by eye: nothing new beyond a play remembered fullscreen on your
   second screen reopening there.
 

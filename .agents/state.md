@@ -70,9 +70,11 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     full (below) plays in Vela's window at `aa8c0b0`.
   - Linux unchanged through all of it: both end-to-end suites in full at
     `6b206ec`, `623ec17`, `c49be2a`, `49f2c3c`, `cf23d90`, `959f437`,
-    `3061b52`, `0b2099a`, `2bc6e3c`, `c3ea91d` and `dc3c9e8` (48 of 48,
-    51 of 51, parity PASS); at `7f1db1f` the embedded suite lost `completionhub`
-    once, and at `f2dcbc3` and `019c08b` `markers` once each (both in
+    `3061b52`, `0b2099a`, `2bc6e3c`, `c3ea91d`, `dc3c9e8` and `23d4745`
+    (48 of 48, 51 of 51, parity PASS; `23d4745` is the final builds'
+    commit, run on a quiet machine); at `7f1db1f` the embedded suite lost
+    `completionhub` once, at `f2dcbc3` and `019c08b` `markers` once each,
+    and at `0357eec` `watchposition` while the machine was loaded (all in
     Blockers).
   - THE RELEASE'S TEST PASS (2026-11-17; the decision of 2026-11-16
     reached the 2026-11-14 rule's condition). Done so far:
