@@ -2470,6 +2470,11 @@ artifact keeps the probe's logs and screenshots.
   Run 44013741142 at `e87ffe2`, not dirty: external 39 passed, 8 failed;
   embedded 42 passed, 9 failed, every failure one whose repair landed
   after that commit. A third run at `019c08b` (44018219446) follows.
+- **2026-11-17, M2 and W2 at `dcb0d2d`** (the product code of `019c08b`:
+  pl-23 to pl-26, the clean-end report repair, `build.rs`). M2 run
+  44018857651 and W2 run 44018869179: each played twice in Vela's window
+  and closed from the page, the test pattern on screen (macOS under Vela's
+  control bar).
 
 ### Design that follows (2026-11-16)
 
