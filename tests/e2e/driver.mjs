@@ -9,6 +9,9 @@ export { setRunApp } from './app-binary.mjs';
 
 export class WebDriverError extends Error {}
 
+// The W3C web element reference key, for passing an element to a script.
+const ELEMENT_KEY = 'element-6066-11e4-a52f-4f735466cecf';
+
 export class Driver {
   // WebDriver's codes for the keys that are not characters.
   static KEY = {
@@ -138,7 +141,22 @@ export class Driver {
   }
 
   async click(elementId) {
-    await this.#cmd('POST', this.#s(`/element/${elementId}/click`), {});
+    try {
+      await this.#cmd('POST', this.#s(`/element/${elementId}/click`), {});
+    } catch (error) {
+      if (error.code !== 'element click intercepted') throw error;
+      // WebDriver scrolls an element only until it reaches the viewport's
+      // edge, where a fixed overlay (the build-info tag, bottom right) can
+      // take the click a person would make after scrolling the element clear:
+      // the first Windows run, whose window is smaller, showed it. Centre the
+      // element in its scroll area and click once more; whatever still covers
+      // it then fails the click.
+      await this.exec(
+        "arguments[0].scrollIntoView({ block: 'center', inline: 'nearest' });",
+        [{ [ELEMENT_KEY]: elementId }],
+      );
+      await this.#cmd('POST', this.#s(`/element/${elementId}/click`), {});
+    }
   }
 
   // Synthesizes real key events ("" = Enter), so framework bindings

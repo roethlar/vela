@@ -700,6 +700,43 @@ test("Windows: every session of a scenario's driver shares one WebView2 data fol
     /new Driver\(driverUrl, isWindows \? \{ webviewUserDataFolder: path\.join\(configRoot, 'webview2'\) \} : \{\}\)/);
 });
 
+test('a click a fixed overlay intercepts is retried once with the element centred', async () => {
+  const { Driver } = await import('./e2e/driver.mjs');
+  const original = globalThis.fetch;
+  const run = async (answers) => {
+    const calls = [];
+    globalThis.fetch = async (url, init) => {
+      const body = init.body === undefined ? undefined : JSON.parse(init.body);
+      calls.push({ path: new URL(url).pathname, body });
+      const [status, value] = answers.shift();
+      return new Response(JSON.stringify({ value }), { status });
+    };
+    const driver = new Driver('http://driver.invalid');
+    driver.sessionId = 's';
+    try {
+      await driver.click('el-1');
+      return { calls, error: null };
+    } catch (error) {
+      return { calls, error };
+    }
+  };
+  const intercepted = [400, { error: 'element click intercepted', message: 'Other element would receive the click' }];
+  try {
+    const retried = await run([intercepted, [200, null], [200, null]]);
+    assert.equal(retried.error, null);
+    assert.deepEqual(retried.calls.map((c) => c.path), ['/session/s/element/el-1/click', '/session/s/execute/sync', '/session/s/element/el-1/click']);
+    assert.match(retried.calls[1].body.script, /scrollIntoView\(\{ block: 'center'/);
+    assert.deepEqual(retried.calls[1].body.args, [{ 'element-6066-11e4-a52f-4f735466cecf': 'el-1' }]);
+    const stillCovered = await run([intercepted, [200, null], intercepted]);
+    assert.equal(stillCovered.error?.code, 'element click intercepted', 'a second interception fails the click');
+    const other = await run([[404, { error: 'no such element', message: 'gone' }]]);
+    assert.equal(other.error?.code, 'no such element');
+    assert.equal(other.calls.length, 1, 'any other error is not retried');
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
 test("Windows: a scenario's mock CA is trusted for that scenario only, on a disposable runner", () => {
   const run = harnessText('run.mjs');
   const trust = run.indexOf("trustedCa = windowsTool('trust-ca', [scenarioEnv.SSL_CERT_FILE]).thumbprint;");
