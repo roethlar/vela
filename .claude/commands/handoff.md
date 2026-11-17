@@ -3,8 +3,5 @@ description: Fast save-my-place snapshot of .agents/state.md so the next session
 # toolkit-owned; edits are drift — see AGENTS.md
 ---
 
-Run the `handoff` operator defined in this repo's `AGENTS.md` (Operator
-Requests): read `.agents/playbooks/handoff.md` and follow it — a fast
-save-my-place snapshot, seconds not minutes, ending with a bookkeeping
-commit of what it wrote. The playbook is the authoritative definition;
-this file is only a pointer.
+Read .agents/playbooks/handoff.md and follow it with the requested
+arguments. If it is missing, report that and stop.

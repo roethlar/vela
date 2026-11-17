@@ -4,8 +4,5 @@ description: Draft or update a durable plan before broad implementation work. Us
 # toolkit-owned; edits are drift — see AGENTS.md
 ---
 
-Run the `plan` operator defined in this repo's `AGENTS.md` (Operator
-Requests): read `.agents/playbooks/plan.md` and follow it — plans are
-agent-facing and cold-implementable; owner decisions are presented in
-chat one at a time and recorded durably. The playbook is the
-authoritative definition; this skill is only a pointer.
+Read .agents/playbooks/plan.md and follow it with the requested
+arguments. If it is missing, report that and stop.

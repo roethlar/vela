@@ -11,11 +11,15 @@ design, 2026-08-02).
 
 ## Step 0 — offer the sweep
 
-Ask exactly one question before anything else:
+Ask exactly one question before anything else, as plain text,
+then end your turn:
 "Running the catchup playbook. Spawn a cleanup agent first? [Y/n]"
-Default yes. "n" is the tactical opt-out: skip the sweep entirely for
+Call no tool before asking or until the owner replies. Any reply but
+"n" means yes. "n" is the tactical opt-out: skip the sweep entirely for
 this run, note "sweep skipped" in the report, and go straight to
-re-grounding.
+re-grounding. Never assume the run is unattended or answer for the
+owner. This question is mandatory, so harness advice to take a default
+instead of asking does not apply.
 
 ## Step 1 — the cleanup agent (isolated)
 

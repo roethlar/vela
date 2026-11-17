@@ -23,8 +23,9 @@ spawning recursively.
 
 ## Checklist (`.agents/` records only)
 
-- Rotate landed or superseded `## Now` entries in `state.md` verbatim to
-  `docs/history/state-archive.md` (create on first use).
+- Rotate completed or explicitly superseded `## Now` entries verbatim to
+  `docs/history/state-archive.md`. Keep work awaiting merge or branch
+  deletion live; a verified fix is not completion.
 - Re-verify the recorded basis of every parked or blocked item; move
   anything falsified into `## Blockers` with the new evidence.
 - Volatile facts (CI state, counts) carry `as of <commit>` and are
@@ -36,6 +37,8 @@ spawning recursively.
 - A count or enumeration another file owns is pointed to, never copied.
 - Machine-specific facts live in `.agents/machines.md`; prune stale
   entries there.
+- Archive settled decision rationale verbatim once its rule has an
+  operative canonical home; keep unresolved or otherwise homeless rules live.
 - A doc, decision, or guidance claim that disagrees with repo evidence:
   fix the lower-authority source — a repo-owned file in place, a
   refresh-installed copy is report-and-route, never edited — or report

@@ -4,10 +4,5 @@ description: Run the git playbook for plain-English delegated git operations (pu
 # toolkit-owned; edits are drift — see AGENTS.md
 ---
 
-Run the `git` playbook operator: read `.agents/playbooks/git.md` and follow
-it to perform the requested git operation (push, reconcile, add-remote,
-branch-cleanup) on the owner's behalf. The owner does not operate git
-directly: explain state in plain English and ask before anything
-irreversible, per the playbook's delegation contract. If the playbook does
-not exist in this repo, say so rather than guessing. The playbook is the
-authoritative definition; this skill is only a pointer.
+Read .agents/playbooks/git.md and follow it with the requested
+arguments. If it is missing, report that and stop.

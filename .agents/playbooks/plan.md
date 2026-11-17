@@ -2,21 +2,22 @@
 
 # Playbook: `plan` — the plan contract
 
-Draft or update a durable plan before broad implementation work.
+An approved plan can be a short, explicit proposal. Write a durable plan
+document when the owner invokes `plan`; do not turn every small change
+into a document-approval ceremony.
 
-**Plan documents are written for agents, never the owner.** A plan must be
-self-contained and implementable by a completely cold, less-capable agent
-than the one that wrote it: technical, free of human-facing summary prose,
-free of chat or session references that need the originating conversation
-to make sense. The owner does not read plan documents.
+Write for a cold implementing agent: scope, constraints, steps, evidence
+and verification, pending decisions, and status. No conversation-dependent
+references. Present unresolved owner decisions one at a time in plain
+words; record each ruling durably and work only within approved scope.
 
-**Owner decisions come in chat, one at a time, never a batch** — each
-stating the problem, the change, and the cost or risk. Silence
-authorizes nothing: each decision waits for its own go.
+Keep the current approved task scope, task-specific non-goals, assumptions
+and pending choices at the top, before rationale and amendment history.
+Apply an adopted amendment to that current contract; do not make readers
+reconstruct it from a chronological log. Keep permanent product boundaries
+in the already-read repo guidance rather than copying them into each plan.
 
-**Record the owner's approved wording durably** (the decisions log, the
-plan's status line) so the approval survives the chat. There is no
-separate executive-summary document type.
-
-A plan that needs a decision the owner has not ruled on yet says so in
-its status line; work proceeds only behind the rulings it has.
+A plan's status distinguishes verification, pending merge, pending branch
+deletion, and completion. Use the git playbook's closeout before closing
+implementation work. The owner's approval covers the named steps; do not
+ask again for those steps or infer authority for unnamed ones.

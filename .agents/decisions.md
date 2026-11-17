@@ -1832,9 +1832,9 @@ single-page app built by Vite with `@sveltejs/vite-plugin-svelte`:
 `tests/frontend-shell.test.mjs` and `scripts/check-frontend-build.mjs` (run
 by `npm run build`) guard that shell. Node remains a build and test tool. The
 owner chose that over a Node-free rewrite, and chose removal over the Kit 3
-upgrade. Under G1 the root component was renamed from `src/routes/+page.svelte`
-to `src/App.svelte`. Historical records that cite `src/routes/+page.svelte`
-refer to what is now `src/App.svelte`, and records that cite `src/app.html`
+upgrade. Under G1 the root component was renamed from `src/App.svelte`
+to `src/App.svelte`. Historical records that cite `src/App.svelte`
+refer to what is now `src/App.svelte`, and records that cite `index.html`
 refer to what is now `index.html`.
 
 Reason:

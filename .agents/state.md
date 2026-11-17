@@ -281,7 +281,7 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   landing; decisions of 2026-10-23 and 2026-11-16). SvelteKit and
   adapter-static are gone; `index.html` loads `src/main.ts`, which mounts
   `src/App.svelte` (what records before that date call
-  `src/routes/+page.svelte`). Left for the owner: the plan's visual checks
+  `src/App.svelte`). Left for the owner: the plan's visual checks
   on the Mac.
 - THE EMBEDDED PLAYER IS OFFERED IN SETTINGS (2026-11-15). The owner
   ruled that day that what is built is to be usable from the app, and
