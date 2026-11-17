@@ -74,7 +74,7 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     (48 of 48, 51 of 51, parity PASS; `23d4745` is the final builds'
     commit, run on a quiet machine); at `7f1db1f` the embedded suite lost
     `completionhub` once, at `f2dcbc3` and `019c08b` `markers` once each,
-    and at `0357eec` `watchposition` while the machine was loaded (all in
+    and at `0357eec` `watchposition` twice on a loaded machine (all in
     Blockers).
   - THE RELEASE'S TEST PASS (2026-11-17; the decision of 2026-11-16
     reached the 2026-11-14 rule's condition). Done so far:
@@ -481,13 +481,32 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   08:09 UTC, twelve `mpv` processes and their `Xvfb` servers, left by the
   agent's own reproduction of the marker defect (its script stopped
   `xvfb-run`, not what ran under it), kept this machine at a load of
-  about 20. In that window `watchposition` failed twice in the embedded
-  suite (the grid's `scrollTop` moved 1 to 4 px during a hold) and
-  `pagefail` once (page 2 arrived on the grid it truncates); outside it
-  neither has failed. WebKitGTK does anchor scrolling (seen: content
-  inserted above the view moves `scrollTop` by its height; a transform
-  does not), so a layout shift above the view under load is the likely
-  path; what shifted was not found.
+  about 20; `watchposition` failed twice and `pagefail` once in that
+  window (next entry).
+- E2E `watchposition` and `pagefail` fail now and then in the embedded
+  player, more often on a loaded machine. `watchposition`: the grid's
+  `scrollTop` moves 1 to 4 px during one of its holds (777 to 776, 775
+  or 773; seen in the successful, failed and stale legs). `pagefail`:
+  back on the grid it truncated, page 2 has arrived after all (120 cards,
+  not 60). At `23d4745`, each alone in the embedded player: just after
+  the stray load above, while the machine was still paging back in,
+  `watchposition` failed 2 of 10 and `pagefail` 1 of 10; quiet,
+  `watchposition` 1 of 20 and `pagefail` 0 of 20. Neither failed in the
+  26 full runs before 2026-11-17. Neither is visible to a user (a pixel
+  or a few of scroll; a page that loads by itself). Known: WebKitGTK
+  anchors scrolling (content inserted above the view moves `scrollTop`
+  by its height), but a transform, a banner of any height above the
+  shell, and a badge on a card below the view move nothing (scratch
+  probes on a real grid); with the grid's anchoring off
+  (`overflow-anchor: none`) both passed 20 of 20, too few runs to tell
+  from 1 in 20 with it on. Candidate for `pagefail`, unconfirmed: WebKit
+  sends the grid's scroll event a moment after it moves
+  (`scrollGridToEnd`'s note), and if the doomed page-2 request has
+  already failed, that event, within 600 px of the end (`onScroll`),
+  loads page 2 again. The cause was not found and the investigation
+  stopped there (stalled progress, AGENTS.md). An embedded run that
+  fails the verdict on one of these alone: run it again by itself before
+  reading it as a regression.
 - The `refresh` E2E flake remains recorded (1.0.59 full Linux run, 36/39,
   with `continueon` and `playverbs`). A candidate cause, seen 2026-11-15:
   `refresh.mjs` and `watchposition.mjs` scrolled the grid with the helper

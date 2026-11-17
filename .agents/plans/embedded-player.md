@@ -2636,8 +2636,9 @@ installer and the macOS app).
   commit (48 of 48, 51 of 51, parity PASS), last at `23d4745`, the
   builds' commit. Intermittent failures in the embedded suite, all in
   `.agents/state.md`, Blockers: `markers` twice (cause not found; not
-  seen since `019c08b`), and `watchposition` and `pagefail` on
-  2026-11-17 only while stray processes had loaded the machine.
+  seen since `019c08b`), and `watchposition` and `pagefail` now and then
+  (about 1 run in 20 alone on a quiet machine, more on a loaded one;
+  cause not found; neither visible to a user).
 - Check by eye: nothing new beyond a play remembered fullscreen on your
   second screen reopening there.
 
