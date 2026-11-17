@@ -25,21 +25,18 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     - macOS, VideoToolbox straight to the picture: done (`1e9905e`; probe
       M2's run 44061797549 decoded that way on a hosted Mac, the plan's
       Probe log).
-    - NVIDIA's proprietary driver: OWNER DECISION ASKED. On Linux, Vela's
-      window needs WebKitGTK's GPU renderer, which is known to fail on
-      NVIDIA's proprietary driver (blank windows, Wayland's "Error 71"; no
-      fixed version), and no NVIDIA machine is at hand; so on NVIDIA
-      videos play in mpv's own window, and Settings says why. Question:
-      approve that as a difference? Anything else would be a path without
-      HDR, which is out of scope.
-  - OWNER QUESTION, asked 2026-11-17: Linux's end-to-end runs still use
-    Xvfb, an X11 display. The external suite runs there
-    (`tests/e2e/run.mjs`; the venue, `.agents/machines.md`), and
-    `playerfallback` relies on it to see the X11 refusal notice; only the
-    embedded suite runs under a headless Wayland compositor (weston).
-    Under "nothing that does not support HDR should be involved in any of
-    this", should the external suite move to weston too? Nothing changes
-    until the owner answers.
+    - NVIDIA's proprietary driver: ANSWERED 2026-11-17, offer Vela's
+      window there anyway; the owner tests it on an NVIDIA machine of
+      their own (`.agents/decisions.md`, that date).
+  - Linux's end-to-end venue: ANSWERED 2026-11-17, the external suite
+    moves from Xvfb (X11) to weston, where the embedded suite already
+    runs (the same entry).
+  - THE PLAN FOR BOTH: `.agents/plans/embedded-player.md`, "Amendment,
+    2026-11-17 (2)": Slice N1 (the NVIDIA refusal goes; a release run by
+    hand gives the owner builds for the NVIDIA test), then Slice W1 (the
+    venue; `playerfallback` proves the start-up marker's recovery instead
+    of X11's refusal). DRAFT, AWAITING THE OWNER'S APPROVAL; nothing is
+    built until then.
   - Landed: the macOS app declares why it reaches the local network
     (`d6a8033`; the notarized app of a release run carries the sentence);
     the player window finds its remembered screen on a Mac, Retina

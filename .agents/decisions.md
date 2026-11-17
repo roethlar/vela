@@ -2568,3 +2568,29 @@ How to apply:
   defect unless an approval of that difference is recorded here.
 - When work has to reach the platforms one at a time, say so to the owner
   before the owner tests, and name what is missing where.
+
+## 2026-11-17 - Vela's window is offered on NVIDIA's proprietary driver; Linux's end-to-end runs use Wayland only
+
+Status: OWNER DECISION (2026-11-17), the owner's answers to two questions.
+
+Decision:
+- NVIDIA. Asked whether Vela's window should stay refused on NVIDIA's
+  proprietary driver (WebKitGTK's GPU renderer, which Vela's window needs
+  on Linux, is known to fail there, and no NVIDIA machine was at hand),
+  the owner chose to offer it anyway, verbatim: "Offer it on nvidia
+  anyway. I have a couple of nvidia GPUs and I can spin up a linux install
+  on another machine to test." The refusal goes, and the owner's own
+  NVIDIA machine is its test.
+- The end-to-end venue. Asked whether, under "nothing that does not
+  support HDR should be involved in any of this" (`.agents/repo-guidance.md`),
+  the external suite should leave Xvfb, an X11 display, for weston, where
+  the embedded suite already runs, the owner chose "Move it to weston".
+  Linux's end-to-end runs then use no X11 display.
+
+How to apply:
+- Both are code changes and land under the plan that carries them
+  (`.agents/plans/embedded-player.md`, "Amendment, 2026-11-17 (2)") once
+  the owner approves it.
+- Supersedes the second of the plan's assumptions put to the owner ("Not
+  offered on the NVIDIA proprietary driver yet", A2) and the Xvfb venue
+  of 2026-11-12 (`.agents/machines.md`).

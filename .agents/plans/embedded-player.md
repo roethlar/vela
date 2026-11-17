@@ -1278,7 +1278,9 @@ Each can be overturned; none has shipped to users.
 2. **Not offered on the NVIDIA proprietary driver yet.** (A2.) Today's
    WebKit setting exists because of a crash on that driver, and nothing
    here could be tested on NVIDIA hardware. Those users keep the external
-   player and are told why.
+   player and are told why. [Overturned by the owner, 2026-11-17: offer it
+   there; the owner's own NVIDIA machine is its test. Amendment
+   "2026-11-17 (2)", Slice N1.]
 3. **Automatic black-bar cropping is reimplemented for the embedded
    player.** (A7.) The bundled mpv script depends on a GPL-only FFmpeg
    filter that an LGPL build cannot contain. A Vela-written script does
@@ -2634,8 +2636,9 @@ installer and the macOS app).
 **Linux (Wayland, as you use it now).**
 - Has: all of the above; HDR in Vela's window through the compositor.
 - Lacks: Vela's window with NVIDIA's proprietary driver (the video plays
-  in mpv's own window and Settings says why); whether that stays the one
-  approved difference is asked of you in `.agents/state.md`.
+  in mpv's own window and Settings says why), until Slice N1 of the
+  amendment "2026-11-17 (2)" below lands: you chose to have it offered
+  there, and your NVIDIA machine is its test.
 - Proven by machine: both end-to-end suites in full at every product
   commit (48 of 48, 51 of 51, parity PASS), last at `74df55a`, the
   builds' commit. Intermittent failures in the embedded suite, all in
@@ -2773,7 +2776,8 @@ what is not known is found by probes first, logged below.
   after probe X1 and a reading of WebKitGTK's and NVIDIA's present state:
   whether the overlay of the X11 item serves NVIDIA without that
   renderer, and what keeps a failing start safe (the startup marker
-  above).
+  above). [Answered by the owner the same day: offer Vela's window there,
+  tested on the owner's NVIDIA machine; amendment "2026-11-17 (2)".]
 - **Order.** macOS (smallest, and its proof runs on a hosted Mac) → probe
   X1 → X11 → NVIDIA → the owner checklist and release notes, saying what
   each platform has and lacks.
@@ -2831,7 +2835,8 @@ what is not known is found by probes first, logged below.
   needs no transparent page changes the player's look (the video above or
   beside a strip of Vela's controls instead of under them), and no NVIDIA
   machine is at hand to try anything on: the owner's decision, asked in
-  `.agents/state.md`.
+  `.agents/state.md`. [Answered 2026-11-17: offer it anyway; the owner
+  has NVIDIA machines to test on. Amendment "2026-11-17 (2)".]
 - **Overlay mode's own end-to-end venue.** `npm run e2e -- --embedded
   --x11` (new) runs the embedded suite under X11. Its first run, on Xvfb,
   failed six of 51: four that make Vela's window fullscreen (Xvfb has no
@@ -2870,3 +2875,85 @@ what is not known is found by probes first, logged below.
   the test pattern in Vela's window under its controls at 0:05 of the
   second play. So the macOS gap of this amendment is closed, as far as a
   machine can show; a real Mac's GPU is the owner's check.
+
+## Amendment, 2026-11-17 (2): NVIDIA offered; Linux's end-to-end runs on Wayland only (owner's answers)
+
+Status: DRAFT, awaiting the owner's approval; nothing below is built.
+
+The owner's answers of 2026-11-17 (`.agents/decisions.md`, that date):
+offer Vela's window on NVIDIA's proprietary driver ("I have a couple of
+nvidia GPUs and I can spin up a linux install on another machine to
+test"), and move the external suite's end-to-end venue from Xvfb, an X11
+display, to weston. Two slices, N1 then W1, each landing with its
+records, the checks of `.agents/repo-guidance.md` (Verification) and a
+codex hunt over it.
+
+### Slice N1: Vela's window on NVIDIA's proprietary driver
+
+- The start-up decision (`startup.rs`, `decide`) stops refusing on
+  NVIDIA's driver. The fact it read (`/proc/driver/nvidia/version`), the
+  refusal (`EmbeddedUnavailable::NvidiaDriver`, its label and notice in
+  `select.rs`) and the tests that held them go. Today's window keeps
+  WebKit's GPU renderer off for everyone (`main.rs`); a start in Vela's
+  window turns it on, now on NVIDIA too. No NVIDIA-specific text remains
+  in the app.
+- What keeps a failing start safe is already there. A start in Vela's
+  window that ends before its page loads (a Wayland protocol error such
+  as "Error 71" ends the process) leaves the start-up marker, so the next
+  start is today's window and says why. After a crash at a play, the
+  next start reaches Settings before any play. A window that comes up
+  blank with its page loaded is caught by neither: starting Vela once
+  with `WEBKIT_DISABLE_DMABUF_RENDERER=1` gives today's window (the
+  existing `RendererOff` refusal). `docs/usage.md` says this.
+- Docs: `docs/usage.md`, `RELEASE_NOTES.md` (offered on NVIDIA, untested
+  there until the owner's test), the owner checklist above.
+- Proof by machine: the start-up tests, without NVIDIA; no NVIDIA
+  hardware is here. A release run by hand at N1's commit gives the owner
+  the Linux builds.
+- The owner's NVIDIA test, on those builds:
+  1. On the NVIDIA machine: a Wayland session (KDE Plasma 6 or a current
+     Hyprland), mpv installed, NVIDIA's driver loaded (`cat
+     /proc/driver/nvidia/version` prints its version).
+  2. Install Vela (AppImage, deb, rpm or the Arch package) and start it
+     from a terminal.
+  3. Settings → Player → Video player → "Vela's window (experimental)";
+     quit, and start Vela again from the terminal.
+  4. The library draws as usual (not blank or white). Play an SDR file:
+     the picture inside Vela's window under its controls. Then an HDR10
+     file: highlights brighter than Vela's white.
+  5. If the window is blank or white, or Vela closes: copy the error
+     lines from the terminal (only those; no addresses), and note the GPU
+     and the driver version. To get back, start Vela again (after a crash
+     the next start is today's window), or start it once with
+     `WEBKIT_DISABLE_DMABUF_RENDERER=1`, and choose mpv's own window.
+
+### Slice W1: Linux's end-to-end runs on weston only
+
+- `tests/e2e/run.mjs`: both suites run under the private headless weston
+  the embedded suite uses now; the Xvfb branch and `VELA_E2E_DISPLAY`
+  go. `VELA_E2E_HEADED=1` (the real desktop) stays.
+- `markerbutton`, the one external scenario whose mpv draws (the button
+  needs an OSD size): `--vo=x11` becomes `--vo=wlshm`, Wayland's software
+  output.
+- `playerfallback`: its premise was the X11 display, where Vela's window
+  cannot run. It becomes the start-up marker left by a start that did not
+  finish (what a crash in Vela's window leaves; N1's safety net), written
+  into the app's config while the app is down. It proves what it proved
+  (a config asking for Vela's window still plays, in mpv's own window,
+  with one line saying why, once per run; a config not asking gets no
+  line), and also that the marker is gone afterwards, so the next start
+  tries Vela's window again. Red-proved with the marker ignored.
+- Comments and docs naming Xvfb or an X display: the scenarios
+  (`exitplay`, `embeddedownconfig`, `markerbutton`, `playerfallback`),
+  `tests/e2e/README.md`, `docs/development.md`, `.agents/repo-guidance.md`
+  (Verification), `.agents/machines.md` (the venue; uninstalling
+  `xorg-server-xvfb` is the owner's).
+- Proof: both suites in full and the parity verdict on the new venue.
+  What the move breaks (weston's 1280x800 screen against Xvfb's
+  1920x1080, window handling) is repaired, each as its own finding.
+
+### Order, and the owner's part
+
+N1 first, so its builds reach the owner's NVIDIA machine sooner; W1 while
+the owner tests. The owner's part: approve this amendment; then the NVIDIA
+test on N1's builds.
