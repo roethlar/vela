@@ -1,11 +1,11 @@
 //! macOS OpenGL drawing, following probe M1 and mpv's gl_layer.swift.
 //! Every render API call takes CGL's recursive lock BEFORE the Rust mutex,
-//! then makes this context current. CA can call from its drawing threads.
+//! then makes this context current. Display requests draw synchronously on main.
 //! Native views are owned separately by macos_host, on the main thread.
 #![allow(deprecated)] // CAOpenGLLayer is the intentionally selected render API.
 
 use super::libmpv::{Player, Renderer};
-use super::macos_display::DrawingSignals;
+use super::macos_display::{DisplayFrame, DrawingSignals};
 use super::macos_host::PlacementTarget;
 use super::session::macos_hdr::{choose_surface, draws_black, Range, SurfaceFormat};
 use objc2::{
@@ -29,6 +29,7 @@ use objc2_open_gl::{
 };
 use objc2_quartz_core::{
     kCAContentsFormatRGBA16Float, kCAContentsFormatRGBA8Uint, CAAutoresizingMask, CAOpenGLLayer,
+    CATransaction,
 };
 use std::{
     ffi::{c_char, c_int, c_void, CStr},
@@ -315,7 +316,7 @@ unsafe impl Send for MacRenderer {}
 
 struct Drawing {
     renderer: Option<MacRenderer>,
-    pending: bool,
+    frame: DisplayFrame,
     last_fbo: i32,
 }
 
@@ -346,7 +347,7 @@ impl DrawingState {
             gl: GlContext::new()?,
             drawing: Mutex::new(Drawing {
                 renderer: None,
-                pending: false,
+                frame: DisplayFrame::default(),
                 last_fbo: 0,
             }),
             stopping: AtomicBool::new(false),
@@ -419,8 +420,8 @@ impl DrawingState {
 
     /// Main only, after the colour transaction was submitted. An obsolete
     /// queued change cannot release a newer hold or touch its completion.
-    pub(super) fn release(&self, generation: u64, layer: &VideoLayer, _mtm: MainThreadMarker) {
-        self.signals.release(generation, || layer.setNeedsDisplay());
+    pub(super) fn release(&self, generation: u64, layer: &VideoLayer, mtm: MainThreadMarker) {
+        self.signals.release(generation, || layer.display_now(mtm));
     }
 
     pub(super) fn applied(&self, generation: u64) -> bool {
@@ -447,6 +448,40 @@ impl DrawingState {
         Ok(())
     }
 
+    fn begin_display(&self) -> Result<(), String> {
+        let _current = self.gl.enter()?;
+        let mut drawing = self.drawing.lock().unwrap_or_else(|e| e.into_inner());
+        drawing.frame.begin_display();
+        Ok(())
+    }
+
+    fn skip_undrawn_frame(&self) -> Result<(), String> {
+        if self.stopping.load(Ordering::Acquire) || self.failed() {
+            return Ok(());
+        }
+        // display/flush have returned, with neither drawing lock held. Like
+        // draw, skip may enter GL: lock CGL, make it current, THEN lock Rust.
+        let _current = self.gl.enter()?;
+        let mut drawing = self.drawing.lock().unwrap_or_else(|e| e.into_inner());
+        if !drawing.frame.needs_flip() {
+            return Ok(());
+        }
+        let Some(renderer) = drawing.renderer.as_ref() else {
+            return Ok(());
+        };
+        let frame = renderer.0.has_new_frame();
+        drawing.frame.update(frame);
+        if drawing.frame.needs_skip() {
+            let renderer = drawing.renderer.as_ref().unwrap();
+            renderer.0.skip()?;
+            renderer.0.frame_shown();
+            drawing.frame.consumed();
+            // No black acknowledgement: skipping consumed mpv's frame but
+            // did not put black on the layer for a colour-space switch.
+        }
+        Ok(())
+    }
+
     fn can_draw(&self, context: CGLContextObj) -> Result<bool, String> {
         if self.stopping.load(Ordering::Acquire) || self.failed() {
             return Ok(false);
@@ -461,8 +496,8 @@ impl DrawingState {
         };
         // Latch update: CA may ask more than once before draw consumes it.
         let frame = renderer.0.has_new_frame();
-        drawing.pending |= frame;
-        Ok(drawing.pending || self.signals.redraw.load(Ordering::Acquire))
+        drawing.frame.update(frame);
+        Ok(drawing.frame.pending() || self.signals.redraw.load(Ordering::Acquire))
     }
 
     fn draw(&self, layer: &VideoLayer, context: CGLContextObj) -> Result<(), String> {
@@ -478,9 +513,9 @@ impl DrawingState {
             return Ok(());
         };
         let frame = renderer.0.has_new_frame();
-        drawing.pending |= frame;
+        drawing.frame.update(frame);
         let redraw = self.signals.redraw.swap(false, Ordering::AcqRel);
-        if !drawing.pending && !redraw {
+        if !drawing.frame.pending() && !redraw {
             return Ok(());
         }
         let mut fbo = 0;
@@ -532,7 +567,7 @@ impl DrawingState {
         if held != 0 {
             self.black.store(held, Ordering::Release);
         }
-        drawing.pending = false;
+        drawing.frame.consumed();
         Ok(())
     }
 
@@ -615,17 +650,30 @@ impl VideoLayer {
                 kCAContentsFormatRGBA8Uint
             }
         });
+        // As in mpv's Cocoa layer, display() synchronously runs canDraw/draw.
+        // Vela has no live-resize signal; keep this false during resize too.
+        layer.setAsynchronous(false);
         layer.set_range(Range::Sdr, mtm)?;
-        // As in M1, allow CA to draw asynchronously, but explicitly invalidate
-        // from mpv updates and redraw requests; CA need not poll at display rate.
-        // canDraw/draw consume the frame/redraw latches, so paused playback
-        // stays idle after a requested redraw (including resize).
-        layer.setAsynchronous(true);
         Ok(layer)
     }
 
-    pub(super) fn redraw(&self, _mtm: MainThreadMarker) {
-        self.ivars().signals.redraw(|| self.setNeedsDisplay());
+    pub(super) fn display_now(&self, _mtm: MainThreadMarker) {
+        let state = self.ivars();
+        if let Err(error) = state.begin_display() {
+            state.fail(&error);
+            return;
+        }
+        // begin_display released both locks. CA may now acquire CGL and
+        // reenter our canDraw/draw methods on this main thread.
+        self.display();
+        CATransaction::flush();
+        if let Err(error) = state.skip_undrawn_frame() {
+            state.fail(&error);
+        }
+    }
+
+    pub(super) fn redraw(&self, mtm: MainThreadMarker) {
+        self.ivars().signals.redraw(|| self.display_now(mtm));
     }
 
     pub(super) fn set_range(&self, range: Range, mtm: MainThreadMarker) -> Result<(), String> {

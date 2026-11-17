@@ -64,6 +64,8 @@ pub(crate) const RENDER_PARAM_OPENGL_FBO: c_int = 3;
 pub(crate) const RENDER_PARAM_FLIP_Y: c_int = 4;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) const RENDER_PARAM_DEPTH: c_int = 5;
+#[cfg(target_os = "macos")]
+const RENDER_PARAM_SKIP_RENDERING: c_int = 13;
 #[cfg(target_os = "linux")]
 pub(crate) const RENDER_PARAM_DRM_DISPLAY_V2: c_int = 16;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -1156,6 +1158,27 @@ impl Renderer {
         ];
         // SAFETY: a live render context whose OpenGL context is current, and
         // parameters that outlive the call.
+        self.lib
+            .check(unsafe { (self.lib.render_context_render)(self.raw, params.as_mut_ptr()) })
+    }
+
+    /// Consume a frame that CA declined to draw. render.h permits omitting
+    /// the target with SKIP_RENDERING, but still requires a current GL context.
+    #[cfg(target_os = "macos")]
+    pub(crate) fn skip(&self) -> Result<(), String> {
+        let mut skip: c_int = 1;
+        let mut params = [
+            RenderParam {
+                kind: RENDER_PARAM_SKIP_RENDERING,
+                data: (&mut skip as *mut c_int).cast(),
+            },
+            RenderParam {
+                kind: RENDER_PARAM_END,
+                data: std::ptr::null_mut(),
+            },
+        ];
+        // SAFETY: same current, locked CGL context as draw_into; parameters
+        // outlive the call. A skipped frame still needs frame_shown afterwards.
         self.lib
             .check(unsafe { (self.lib.render_context_render)(self.raw, params.as_mut_ptr()) })
     }

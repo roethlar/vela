@@ -1,4 +1,5 @@
-//! The shared session owns events and quit; Core Animation owns drawing.
+//! The shared session owns events and quit; main drives Core Animation drawing.
+//! Page position reports run independently in player::report over mpv's IPC.
 
 use super::macos_hdr::{allow_restoration, decide, Decision, Range, TargetAccess, Targets};
 use super::*;
@@ -129,6 +130,8 @@ impl Live {
         };
         match switch.phase {
             Phase::Black => {
+                // Poll once and return to the event loop. Waiting for a real
+                // black draw must not block events, quit, or the IPC reporter.
                 if self.surface.drawing.black_ready(switch.generation) {
                     if !self.targets.begin(switch.decision.range, &self.player) {
                         return Err("mpv refused to queue protected colour targets");

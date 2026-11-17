@@ -63,12 +63,12 @@ COUNTER = "static PROBE_{0}: std::sync::atomic::AtomicU64 = std::sync::atomic::A
 patch("src-tauri/src/player/embedded/macos_gl.rs", [
 ("""        // Latch update: CA may ask more than once before draw consumes it.
         let frame = renderer.0.has_new_frame();
-        drawing.pending |= frame;
-        Ok(drawing.pending || self.signals.redraw.load(Ordering::Acquire))""",
+        drawing.frame.update(frame);
+        Ok(drawing.frame.pending() || self.signals.redraw.load(Ordering::Acquire))""",
 """        // Latch update: CA may ask more than once before draw consumes it.
         let frame = renderer.0.has_new_frame();
-        drawing.pending |= frame;
-        let ready = drawing.pending || self.signals.redraw.load(Ordering::Acquire);
+        drawing.frame.update(frame);
+        let ready = drawing.frame.pending() || self.signals.redraw.load(Ordering::Acquire);
         {
             """ + COUNTER.format("CAN") + """
             let n = PROBE_CAN.fetch_add(1, Ordering::Relaxed) + 1;
@@ -78,7 +78,7 @@ patch("src-tauri/src/player/embedded/macos_gl.rs", [
         }
         Ok(ready)"""),
 ("""        let redraw = self.signals.redraw.swap(false, Ordering::AcqRel);
-        if !drawing.pending && !redraw {
+        if !drawing.frame.pending() && !redraw {
             return Ok(());
         }""",
 """        let redraw = self.signals.redraw.swap(false, Ordering::AcqRel);
@@ -86,10 +86,10 @@ patch("src-tauri/src/player/embedded/macos_gl.rs", [
             """ + COUNTER.format("DRAW") + """
             let n = PROBE_DRAW.fetch_add(1, Ordering::Relaxed) + 1;
             if n <= 6 || n % 60 == 0 {
-                eprintln!("probe-gl: draw call #{n} frame={frame} pending={} redraw={redraw}", drawing.pending);
+                eprintln!("probe-gl: draw call #{n} frame={frame} pending={} redraw={redraw}", drawing.frame.pending());
             }
         }
-        if !drawing.pending && !redraw {
+        if !drawing.frame.pending() && !redraw {
             return Ok(());
         }"""),
 ("""        if width <= 0 || height <= 0 {

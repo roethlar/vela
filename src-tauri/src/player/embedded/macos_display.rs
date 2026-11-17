@@ -14,10 +14,46 @@ impl DisplayQueue {
         !self.queued.swap(true, Ordering::AcqRel)
     }
 
-    /// Clear BEFORE invalidating the layer: an update arriving during that
+    /// Clear BEFORE displaying the layer: an update arriving during that
     /// operation must be able to queue another display request.
     pub(super) fn begin(&self) {
         self.queued.store(false, Ordering::Release);
+    }
+}
+
+/// A display pass must consume a pending mpv frame even if CA declines to
+/// draw (for example, a hidden or zero-sized layer). mpv's update flag is
+/// destructive, so canDraw's observation stays latched until render/skip.
+#[derive(Default)]
+pub(super) struct DisplayFrame {
+    pending: bool,
+    needs_flip: bool,
+}
+
+impl DisplayFrame {
+    pub(super) fn begin_display(&mut self) {
+        self.needs_flip = true;
+    }
+
+    pub(super) fn update(&mut self, frame: bool) {
+        self.pending |= frame;
+    }
+
+    pub(super) fn pending(&self) -> bool {
+        self.pending
+    }
+
+    pub(super) fn needs_flip(&self) -> bool {
+        self.needs_flip
+    }
+
+    pub(super) fn needs_skip(&self) -> bool {
+        self.needs_flip && self.pending
+    }
+
+    pub(super) fn consumed(&mut self) {
+        self.pending = false;
+        self.needs_flip = false;
     }
 }
 
@@ -68,6 +104,44 @@ mod tests {
     use std::cell::Cell;
 
     #[test]
+    fn a_frame_seen_by_can_draw_is_skipped_if_ca_does_not_draw() {
+        let mut frame = DisplayFrame::default();
+        frame.begin_display();
+        assert!(!frame.needs_skip(), "an idle display must not render");
+        frame.update(true);
+        frame.update(false); // canDraw may read the destructive flag twice
+        assert!(frame.pending());
+        assert!(frame.needs_skip());
+        frame.consumed(); // successful skip
+        assert!(!frame.pending());
+        assert!(!frame.needs_skip());
+    }
+
+    #[test]
+    fn a_frame_is_skipped_even_when_ca_never_calls_can_draw() {
+        let mut frame = DisplayFrame::default();
+        frame.begin_display();
+        assert!(frame.needs_flip());
+        // The fallback itself reads mpv's update flag after display/flush.
+        frame.update(true);
+        assert!(frame.needs_skip());
+    }
+
+    #[test]
+    fn a_draw_consumes_the_pass_and_the_next_update_gets_its_own_display() {
+        let mut frame = DisplayFrame::default();
+        frame.begin_display();
+        frame.update(true);
+        frame.consumed(); // successful draw
+        assert!(!frame.pending());
+        assert!(!frame.needs_flip());
+        frame.update(true); // arrived after the draw: don't discard it here
+        assert!(!frame.needs_skip());
+        frame.begin_display();
+        assert!(frame.needs_skip());
+    }
+
+    #[test]
     fn update_signals_coalesce_until_main_begins_the_task() {
         let queue = DisplayQueue::default();
         assert!(queue.request());
@@ -75,7 +149,7 @@ mod tests {
             assert!(!queue.request());
         }
         queue.begin();
-        // This update arrives while the preceding task invalidates the layer.
+        // This update arrives while the preceding task displays the layer.
         assert!(queue.request());
         assert!(!queue.request());
         queue.begin();

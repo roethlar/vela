@@ -1094,7 +1094,7 @@ test('mpv display signals only enqueue coalesced main-thread work addressed to t
   const callback = functionBody(gl, 'unsafe extern "C" fn render_update(', 'render update callback');
   assert.match(callback, /\{\s+let target = unsafe \{ &\*context\.cast::<PlacementTarget>\(\) \};\s+target\.request_display\(\);$/);
   const request = methodBody(macHost, '    pub(super) fn request_display(', 'display request');
-  assert.match(request, /if !self\.display_queue\.request\(\) \{\s+return;\s+\}\s+let id = self\.id;\s+let queue = self\.display_queue\.clone\(\);\s+DispatchQueue::main\(\)\.exec_async\(move \|\| \{\s+queue\.begin\(\);\s+VIEWS\.with_borrow\(\|views\| \{\s+if let Some\(view\) = views\.get\(&id\) \{\s+view\.layer\.setNeedsDisplay\(\);/);
+  assert.match(request, /if !self\.display_queue\.request\(\) \{\s+return;\s+\}\s+let id = self\.id;\s+let queue = self\.display_queue\.clone\(\);\s+DispatchQueue::main\(\)\.exec_async\(move \|\| \{\s+queue\.begin\(\);\s+VIEWS\.with_borrow\(\|views\| \{\s+if let Some\(view\) = views\.get\(&id\) \{\s+view\.layer\.display_now\(view\.video\.mtm\(\)\);/);
   const create = methodBody(macHost.slice(macHost.indexOf('impl Surface {')), '    pub(super) fn create(', 'surface creation');
   assert.match(create, /let id = NEXT_VIEW\.fetch_add\(1, Ordering::Relaxed\);/);
   assert.match(create, /views\.insert\(id, native\);/);
@@ -1107,10 +1107,47 @@ test('macOS redraw, hold, release, resize and range changes request a display th
   assert.match(embeddedMod, /#\[cfg\(any\(target_os = "macos", test\)\)\]\s+mod macos_display;/);
   assert.match(methodBody(gl, '    pub(super) fn redraw(', 'drawing redraw'), /self\.signals\.redraw\(\|\| self\.request_display\(\)\);/);
   assert.match(methodBody(gl, '    pub(super) fn hold(', 'drawing hold'), /self\.signals\.hold\(generation, \|\| self\.request_display\(\)\);/);
-  assert.match(methodBody(gl, '    pub(super) fn release(', 'drawing release'), /self\.signals\.release\(generation, \|\| layer\.setNeedsDisplay\(\)\);/);
+  assert.match(methodBody(gl, '    pub(super) fn release(', 'drawing release'), /self\.signals\.release\(generation, \|\| layer\.display_now\(mtm\)\);/);
   assert.match(methodBody(macHost, '    fn resize(', 'video resize'), /self\.layer\.redraw\(self\.video\.mtm\(\)\);/);
   const layer = gl.slice(gl.indexOf('impl VideoLayer {', gl.indexOf('define_class!')));
-  assert.match(methodBody(layer, '    pub(super) fn redraw(', 'layer redraw'), /self\.ivars\(\)\.signals\.redraw\(\|\| self\.setNeedsDisplay\(\)\);/);
+  assert.match(methodBody(layer, '    pub(super) fn redraw(', 'layer redraw'), /self\.ivars\(\)\.signals\.redraw\(\|\| self\.display_now\(mtm\)\);/);
   assert.match(methodBody(layer, '    pub(super) fn set_range(', 'layer range'), /self\.redraw\(mtm\);/);
   assert.match(macHost, /view\.drawing\.release\(generation, &view\.layer, mtm\);/);
+});
+
+test('macOS displays synchronously and flushes on main before consuming an undrawn frame', () => {
+  const gl = code(read('src-tauri/src/player/embedded/macos_gl.rs'));
+  const layer = gl.slice(gl.indexOf('impl VideoLayer {', gl.indexOf('define_class!')));
+  assert.match(methodBody(layer, '    pub(super) fn new(', 'layer creation'), /layer\.setAsynchronous\(false\);/);
+  assert.doesNotMatch(gl, /setAsynchronous\(true\)|setNeedsDisplay\(/);
+  const display = methodBody(layer, '    pub(super) fn display_now(', 'main display');
+  assert.match(display, /_mtm: MainThreadMarker/);
+  assert.match(display, /state\.begin_display\(\)/);
+  assert.match(display, /self\.display\(\);\s+CATransaction::flush\(\);\s+if let Err\(error\) = state\.skip_undrawn_frame\(\)/);
+  assert.doesNotMatch(display, /\.lock\(|\.enter\(|run_on_main_thread|exec_sync/);
+  const begin = methodBody(gl, '    fn begin_display(', 'begin display');
+  assert.match(begin, /let _current = self\.gl\.enter\(\)\?;\s+let mut drawing = self\.drawing\.lock\(\)[^;]*;\s+drawing\.frame\.begin_display\(\);/);
+});
+
+test('macOS skips only unconsumed frames under CGL then Rust locks, without acknowledging black', () => {
+  const gl = code(read('src-tauri/src/player/embedded/macos_gl.rs'));
+  const skip = methodBody(gl, '    fn skip_undrawn_frame(', 'skip fallback');
+  assert.match(skip, /if self\.stopping\.load\(Ordering::Acquire\) \|\| self\.failed\(\)/);
+  assert.match(skip, /let _current = self\.gl\.enter\(\)\?;\s+let mut drawing = self\.drawing\.lock\(\)[^;]*;\s+if !drawing\.frame\.needs_flip\(\) \{\s+return Ok\(\(\)\);/);
+  assert.match(skip, /let frame = renderer\.0\.has_new_frame\(\);\s+drawing\.frame\.update\(frame\);\s+if drawing\.frame\.needs_skip\(\) \{/);
+  assert.match(skip, /renderer\.0\.skip\(\)\?;\s+renderer\.0\.frame_shown\(\);\s+drawing\.frame\.consumed\(\);/);
+  assert.doesNotMatch(skip, /self\.black\.store|run_on_main_thread|exec_sync/);
+  const canDraw = methodBody(gl, '    fn can_draw(', 'can draw');
+  assert.match(canDraw, /let frame = renderer\.0\.has_new_frame\(\);\s+drawing\.frame\.update\(frame\);/);
+  const draw = methodBody(gl, '    fn draw(', 'draw');
+  assert.match(draw, /if width <= 0 \|\| height <= 0 \{\s+return Ok\(\(\)\);/);
+  assert.ok(draw.indexOf('.draw_into(') < draw.indexOf('drawing.frame.consumed();'));
+  assert.match(draw, /renderer\.0\.frame_shown\(\);\s+if held != 0 \{\s+self\.black\.store\(held, Ordering::Release\);\s+\}\s+drawing\.frame\.consumed\(\);/);
+  assert.match(code(libmpv), /const RENDER_PARAM_SKIP_RENDERING: c_int = 13;/);
+  const renderSkip = methodBody(code(libmpv), '    pub(crate) fn skip(', 'mpv skip');
+  assert.match(renderSkip, /let mut skip: c_int = 1;/);
+  assert.match(renderSkip, /kind: RENDER_PARAM_SKIP_RENDERING,\s+data: \(&mut skip as \*mut c_int\)\.cast\(\),/);
+  assert.match(renderSkip, /kind: RENDER_PARAM_END,\s+data: std::ptr::null_mut\(\),/);
+  assert.match(renderSkip, /self\.lib\s*\.check\(unsafe \{ \(self\.lib\.render_context_render\)\(self\.raw, params\.as_mut_ptr\(\)\) \}\)/);
+  assert.doesNotMatch(renderSkip, /RENDER_PARAM_OPENGL_FBO/);
 });

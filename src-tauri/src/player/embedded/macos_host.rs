@@ -208,7 +208,7 @@ impl PlacementTarget {
             queue.begin();
             VIEWS.with_borrow(|views| {
                 if let Some(view) = views.get(&id) {
-                    view.layer.setNeedsDisplay();
+                    view.layer.display_now(view.video.mtm());
                 }
             });
         });
