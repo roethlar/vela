@@ -171,6 +171,15 @@ class PEDependencyTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "overlapping PE sections"):
             pe.pe_dependencies(bytes(data))
 
+    def test_an_empty_section_overlaps_nothing(self):
+        # pl-24: a third section, empty, inside .rdata's range maps no byte.
+        data = bytearray(split_export_fixture())
+        struct.pack_into("<H", data, 0x86, 3)  # NumberOfSections
+        struct.pack_into("<8sIIIIIIHHI", data, 0x1d8, b".empty", 0, 0x1100,
+                         0, 0, 0, 0, 0, 0, 0x40000040)
+        self.assertEqual(pe.pe_dependencies(bytes(data)),
+                         {"imports": [], "delay_imports": [], "forwarders": ["libwinpthread-1.dll"]})
+
     def test_directory_outside_image_is_refused(self):
         for index, kind, name in ((0, "forwarders", "helper.symbol"),
                                   (1, "imports", "helper.dll"), (13, "delay", "helper.dll")):

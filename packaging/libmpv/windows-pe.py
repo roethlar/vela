@@ -47,11 +47,14 @@ class PE:
         # first section whose extent (the larger of VirtualSize and
         # SizeOfRawData) holds an RVA, while Windows' loader lets a later
         # mapping's bytes win where two overlap: refuse an ambiguous image
-        # rather than read bytes the loader does not use (pl-20, pl-23).
+        # rather than read bytes the loader does not use (pl-20, pl-23). An
+        # empty mapping holds no RVA, so it overlaps nothing (pl-24).
         spans = [(0, self.header_size)]
         spans += [(start, extent) for start, extent, _, _ in self.sections]
         previous_end = 0
         for start, extent in sorted(spans):
+            if extent == 0:
+                continue
             if start < previous_end:
                 raise ValueError(f"overlapping PE sections at RVA {start:#x}")
             previous_end = max(previous_end, start + extent)
