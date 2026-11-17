@@ -1164,11 +1164,11 @@ fixes `c49be2a` and `ca07bfa`, the macOS HDR slice (`ad65c4d..49f2c3c`),
 the macOS packaging (six commits in `9ec9991..bffc3a4`), the Windows
 packaging (three commits in `e54b302..4fe60b8`). 13 candidates, 13
 admitted (1 HIGH, 9 MEDIUM, 3 LOW), 0 declined; then two hunts over the
-fixes (`ca07bfa..3061b52`) found six more (pl-14 to pl-19, MEDIUM). All but
-pl-9 closed (`ca07bfa`, `49f2c3c`, `41d47c4`, `9833fc1`, `e93402e`,
+fixes (`ca07bfa..3061b52`) found six more (pl-14 to pl-19, MEDIUM). All
+closed (`ca07bfa`, `49f2c3c`, `41d47c4`, `9833fc1`, `e93402e`,
 `e1cf5f2`, `9dc0b0e`, `e740bf4`, `4d511a2`, `2e3913d`, `34fd3a3`,
-`41b4c79`, `9a92d54`, `8e036cb`, `cf09211`, `0b2099a`, `91c72f6`); pl-9
-(tests only) waits for the release's test pass; pl-11 leaves FFmpeg's own
+`41b4c79`, `9a92d54`, `8e036cb`, `cf09211`, `0b2099a`, `91c72f6`; pl-9,
+tests only, in the release's test pass: `50b8893`); pl-11 leaves FFmpeg's own
 loader's path open on purpose (its section says why). Two hunts over
 pl-14 to pl-19's repairs found pl-20 to pl-22 (2 MEDIUM, 1 LOW), repaired
 by the working agent (`09c42c0`, `0352976`, `2bc6e3c`); an eleventh hunt

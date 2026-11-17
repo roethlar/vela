@@ -6,16 +6,16 @@ over the fixes `c49be2a` and `ca07bfa`, a fourth over the macOS HDR slice
 (`ad65c4d..49f2c3c`), a fifth over the macOS packaging and a sixth over
 the Windows packaging (below). **findings**: thirteen candidates,
 thirteen admitted (one HIGH, nine MEDIUM, three LOW), none declined.
-All but pl-9 are repaired and closed: codex wrote pl-1 to pl-6's, pl-8's,
+All are repaired and closed: codex wrote pl-1 to pl-6's, pl-8's,
 pl-11's, pl-12's and pl-14 to pl-19's repairs as coding tasks and the
 working agent's review closed them (adding the Windows half of pl-5); the
-working agent wrote pl-7's, pl-10's, pl-13's and pl-20 to pl-26's. A
+working agent wrote pl-7's, pl-9's, pl-10's, pl-13's and pl-20 to pl-26's. A
 ninth and tenth hunt, over pl-14 to pl-19's repairs, found pl-20 to pl-22;
 an eleventh, over those, found pl-23 to pl-26; a twelfth, over those, is
 running.
-pl-9 is about tests alone and waits for the release's test pass
-(`.agents/decisions.md`, 2026-11-14). pl-11 leaves one path open on
-purpose, stated in its section.
+pl-9, about tests alone, was set aside for the release's test pass
+(`.agents/decisions.md`, 2026-11-14) and repaired in it (`50b8893`).
+pl-11 leaves one path open on purpose, stated in its section.
 
 ## Dispatch record
 
@@ -50,7 +50,7 @@ purpose, stated in its section.
 | pl-6 | MEDIUM   | Windows: an explicitly empty MPV_HOME is read as unset, so config files are read mpv would not read | `[x]` | `e93402e` |
 | pl-7 | MEDIUM   | macOS: a draw begun under a colour hold can flush the old range's frame if the hold ends mid-render | `[x]` | `e1cf5f2` |
 | pl-8 | MEDIUM   | release: on a tag, the macOS DMG reaches the draft release before its checks run | `[x]` | `9dc0b0e` |
-| pl-9 | LOW      | tests: no guard holds the mpv patch's `utils-mac.c` hunk | deferred | the release's test pass |
+| pl-9 | LOW      | tests: no guard holds the mpv patch's `utils-mac.c` hunk | `[x]` | `50b8893` (the release's test pass) |
 | pl-10 | LOW     | docs: the macOS audit and its CI job described as they were before the fixes | `[x]` | `e740bf4` |
 | pl-11 | HIGH    | Windows: a later bare-name DLL load (libplacebo's d3d11.dll) can resolve beside Vela.exe | `[x]` | `4d511a2` |
 | pl-12 | MEDIUM  | Windows set: the dependency checks miss delay imports and forwarders; the audit passes a foreign DLL | `[x]` | `2e3913d` |
@@ -269,6 +269,12 @@ which should guard the patch's second hunk and its `cocoa` condition so
 that removing either fails. Until then the macOS check (CI's
 `libmpv-macos`, loading the set on a hosted Mac) is what catches it, as
 it did on 2026-11-16.
+
+Repair (`50b8893`, the release's test pass, written by the working agent):
+the guard requires the hunk after the `ao_coreaudio_utils.c` context, its
+`if not features['cocoa']` condition, the `osdep/utils-mac.c` source and
+the `endif`; removing the hunk, inverting the condition or dropping the
+source line in the real patch each fails the test.
 
 ### pl-10 (mpkg)
 
