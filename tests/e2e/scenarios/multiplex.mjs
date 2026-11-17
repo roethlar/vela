@@ -378,6 +378,13 @@ export default {
       `return !!document.querySelector('[role="dialog"][aria-label="Settings"]')`,
       'Settings dialog for independent Plex removal',
     );
+    // The sources list renders once Settings has read them; the slower
+    // hosted Windows runner looked before that (third Windows run).
+    await driver.waitFor(
+      `const dialog = document.querySelector('[role="dialog"][aria-label="Settings"]');
+       return !!dialog && dialog.innerText.includes('Mock Plex A') && dialog.innerText.includes('Mock Plex B');`,
+      'both Plex rows in Settings',
+    );
     const connected = await driver.exec(
       `const dialog = document.querySelector('[role="dialog"][aria-label="Settings"]');
        return {
