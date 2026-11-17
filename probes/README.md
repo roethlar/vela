@@ -22,7 +22,13 @@ answer is in that log and product code has replaced it.
   plays the end-to-end suite's mock Jellyfin clip in its own window, twice,
   driven by a script in its page (`drive.js`), with screenshots; the set
   comes from CI's newest successful run on main. Hosted Macs give the
-  software OpenGL renderer and no EDR screen.
+  software OpenGL renderer and no EDR screen, so mpv gets `--profile=fast`
+  (as the probe's own Advanced option) to keep up. The hook also prints
+  counters for the macOS display chain and, at start, why a settings file
+  was unavailable and (Windows) the ACL the privacy check read.
+  `m2-nofmt`, `m2-nocs` and `m2-red` are bisection variants of it
+  (`M2_VARIANT`: no contents format; no colour space or EDR flag; every
+  draw cleared to red).
 - `w2-vela`: the same on a hosted Windows runner (`run.ps1`; M2's hook,
   page script and mock server), where the end-to-end suite cannot yet start
   a WebDriver session. Hosted Windows draws Direct3D 11 with WARP.
