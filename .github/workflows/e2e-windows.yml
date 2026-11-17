@@ -161,6 +161,14 @@ jobs:
         run: |
           npm run e2e:verdict
           exit $LASTEXITCODE
+      - name: What the run changed in the worktree
+        if: always()
+        run: |
+          git status --porcelain
+          git diff --stat
+          git diff -- src-tauri/Cargo.toml | Select-Object -First 80
+          git config --show-origin --get-all core.autocrlf
+          exit 0
       - uses: actions/upload-artifact@v7
         if: always()
         with:
