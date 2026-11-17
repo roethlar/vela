@@ -72,7 +72,7 @@ patch("src-tauri/src/player/embedded/macos_gl.rs", [
         {
             """ + COUNTER.format("CAN") + """
             let n = PROBE_CAN.fetch_add(1, Ordering::Relaxed) + 1;
-            if n <= 6 || n % 120 == 0 {
+            if n <= 6 || n % 40 == 0 {
                 eprintln!("probe-gl: canDraw #{n} frame={frame} ready={ready}");
             }
         }
@@ -85,7 +85,7 @@ patch("src-tauri/src/player/embedded/macos_gl.rs", [
         {
             """ + COUNTER.format("DRAW") + """
             let n = PROBE_DRAW.fetch_add(1, Ordering::Relaxed) + 1;
-            if n <= 6 || n % 60 == 0 {
+            if n <= 6 || n % 20 == 0 {
                 eprintln!("probe-gl: draw call #{n} frame={frame} pending={} redraw={redraw}", drawing.frame.pending());
             }
         }
@@ -99,7 +99,7 @@ patch("src-tauri/src/player/embedded/macos_gl.rs", [
 """        {
             """ + COUNTER.format("SIZE") + """
             let n = PROBE_SIZE.fetch_add(1, Ordering::Relaxed) + 1;
-            if n <= 6 || n % 60 == 0 {
+            if n <= 6 || n % 20 == 0 {
                 eprintln!(
                     "probe-gl: render #{n} fbo={fbo} last_fbo={} viewport={viewport:?} bounds={}x{} scale={scale} -> {width}x{height} held={}",
                     drawing.last_fbo, bounds.size.width, bounds.size.height, self.signals.held.load(Ordering::Acquire)
@@ -137,7 +137,7 @@ patch("src-tauri/src/player/embedded/macos_gl.rs", [
     {
         """ + COUNTER.format("CB") + """
         let n = PROBE_CB.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-        if n <= 5 || n % 50 == 0 {
+        if n <= 5 || n % 10 == 0 {
             eprintln!("probe-chain: mpv update callback #{n}");
         }
     }
@@ -147,7 +147,7 @@ patch("src-tauri/src/player/embedded/macos_gl.rs", [
 """        {
             """ + COUNTER.format("DN") + """
             let n = PROBE_DN.fetch_add(1, Ordering::Relaxed) + 1;
-            if n <= 5 || n % 50 == 0 {
+            if n <= 5 || n % 10 == 0 {
                 eprintln!("probe-chain: display_now #{n} asynchronous={}", self.isAsynchronous());
             }
         }
@@ -158,7 +158,7 @@ patch("src-tauri/src/player/embedded/macos_gl.rs", [
             {
                 """ + COUNTER.format("SKIP") + """
                 let n = PROBE_SKIP.fetch_add(1, Ordering::Relaxed) + 1;
-                if n <= 5 || n % 50 == 0 {
+                if n <= 5 || n % 10 == 0 {
                     eprintln!("probe-chain: skip render #{n}");
                 }
             }"""),
@@ -173,7 +173,7 @@ patch("src-tauri/src/player/embedded/macos_host.rs", [
         if !self.display_queue.request() {
             """ + COUNTER.format("COAL") + """
             let n = PROBE_COAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-            if n <= 5 || n % 50 == 0 {
+            if n <= 5 || n % 10 == 0 {
                 eprintln!("probe-chain: request coalesced #{n}");
             }
             return;
@@ -181,7 +181,7 @@ patch("src-tauri/src/player/embedded/macos_host.rs", [
         {
             """ + COUNTER.format("REQ") + """
             let n = PROBE_REQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-            if n <= 5 || n % 50 == 0 {
+            if n <= 5 || n % 10 == 0 {
                 eprintln!("probe-chain: request queued #{n}");
             }
         }"""),
@@ -193,7 +193,7 @@ patch("src-tauri/src/player/embedded/macos_host.rs", [
                 {
                     """ + COUNTER.format("TASK") + """
                     let n = PROBE_TASK.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-                    if n <= 5 || n % 50 == 0 {
+                    if n <= 5 || n % 10 == 0 {
                         eprintln!("probe-chain: main task #{n} id={id} found={}", views.contains_key(&id));
                     }
                 }
