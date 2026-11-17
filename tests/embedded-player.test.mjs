@@ -1142,13 +1142,13 @@ test("overlay mode's renderer is made, drawn and freed on GTK's thread, which ne
   // The renderer is made on GTK's thread, from the play's player, in one
   // place; and freed there, by the play or when the window goes under it.
   const begin = methodBody(overlay, '    pub(super) fn begin(&self, player: &Player) -> Result<(), String> {', 'Target::begin');
-  assert.match(code(begin), /let asked = super::host::on_window_thread\(&self\.app, move \|\| \{[\s\S]*let begun = unsafe \{ begin_drawing\(lib, handle\.0, phase\.clone\(\)\) \};/);
+  assert.match(code(begin), /let asked = on_gtk\(&self\.app, move \|\| \{[\s\S]*let begun = unsafe \{ begin_drawing\(lib, handle\.0, phase\.clone\(\)\) \};/);
   assert.equal(count(code(overlay), 'begin_drawing('), 2, 'its definition and that call');
   assert.equal(count(code(overlay), 'Renderer::create_for('), 1);
   assert.match(code(overlay), /area\.connect_unrealize\(\|area\| end_drawing\(area, false\)\);/);
   assert.match(
     code(methodBody(overlay, '    pub(super) fn end(&self) -> Result<(), String> {', 'Target::end')),
-    /let asked = super::host::on_window_thread\(&self\.app, move \|\| \{\s+if \*phase\.lock\(\)\.unwrap_or_else\(\|e\| e\.into_inner\(\)\) == Phase::Drawing \{\s+if let Some\(area\) = area\(\) \{\s+end_drawing\(&area, true\);/,
+    /let asked = on_gtk\(&self\.app, move \|\| \{\s+if \*phase\.lock\(\)\.unwrap_or_else\(\|e\| e\.into_inner\(\)\) == Phase::Drawing \{\s+if let Some\(area\) = area\(\) \{\s+end_drawing\(&area, true\);/,
   );
   assert.equal(count(code(overlay), 'end_drawing('), 3, 'its definition and those two calls');
   // The player goes only after that: the play's drop ends the drawing
@@ -1159,6 +1159,35 @@ test("overlay mode's renderer is made, drawn and freed on GTK's thread, which ne
     /impl Drop for OverlayLive \{\s+fn drop\(&mut self\) \{\s+if let Err\(reason\) = self\.target\.end\(\) \{\s+keep_forever\(&reason\);\s+\}\s+\}\s+\}/,
   );
   assert.match(setUp, /if let Err\(reason\) = target\.begin\(&player\) \{\s+if target\.drawing\(\) \{\s+keep_forever\(&reason\);\s+\}\s+return Err\(reason\);\s+\}/);
+
+  // A start holds the player slot while it waits for GTK's thread, so GTK's
+  // thread never waits for that slot without doing the overlay's queued work
+  // (review finding ov-1). The overlay asks GTK's thread only through its
+  // queue...
+  assert.equal(count(code(overlay), 'super::host::on_window_thread('), 0);
+  assert.equal(count(code(overlay), 'on_gtk(&self.app, move ||'), 2, 'begin and end');
+  assert.match(
+    code(functionBody(overlay, 'fn on_gtk<T: Send + \'static>(', 'overlay::on_gtk')),
+    /JOBS\.lock\(\)[\s\S]*\.push_back\(Box::new\(move \|\| \{\s+let _ = answer\.send\(ask\(\)\);\s+\}\)\);\s+app\.run_on_main_thread\(run_jobs\)/,
+  );
+  // ...whose work the slot's taker does while it waits...
+  assert.match(
+    code(overlay),
+    /pub\(crate\) fn lock_slot_on_window_thread<T>\(slot: &Mutex<T>\) -> MutexGuard<'_, T> \{\s+lock_doing\(slot, run_jobs\)\s+\}/,
+  );
+  // ...at each of the three places Linux takes the slot on GTK's thread.
+  assert.match(
+    code(functionBody(commands, 'pub fn player_set_rect(', 'player_set_rect')),
+    /#\[cfg\(target_os = "linux"\)\]\s+let slot = crate::player::embedded::lock_slot_on_window_thread\(&state\.current_child\);/,
+  );
+  assert.match(
+    code(host),
+    /fn place_running_play\(app: &tauri::AppHandle\) \{\s+let state = app\.state::<crate::AppState>\(\);\s+let slot = super::overlay::lock_slot_on_window_thread\(&state\.current_child\);/,
+  );
+  assert.match(
+    code(lib),
+    /tauri::RunEvent::ExitRequested[\s\S]*?#\[cfg\(target_os = "linux"\)\]\s+let mut slot = player::embedded::lock_slot_on_window_thread\(&state\.current_child\);\s+#\[cfg\(not\(target_os = "linux"\)\)\]/,
+  );
 });
 
 test('the shipped library is tested itself, in every full embedded E2E run', () => {

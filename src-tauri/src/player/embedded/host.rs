@@ -722,7 +722,7 @@ impl Prepared {
 #[cfg(target_os = "linux")]
 fn place_running_play(app: &tauri::AppHandle) {
     let state = app.state::<crate::AppState>();
-    let slot = state.current_child.lock().unwrap_or_else(|e| e.into_inner());
+    let slot = super::overlay::lock_slot_on_window_thread(&state.current_child);
     if let Some(crate::player::PlayerHandle::Embedded(session)) = slot.as_ref() {
         state.embedded.place_again(app, Some(session));
     }

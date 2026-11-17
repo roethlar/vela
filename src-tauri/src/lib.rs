@@ -520,6 +520,11 @@ pub fn run() {
                 // either sees the flag and never launches, or has already
                 // registered its child here for us to kill — no orphan window.
                 {
+                    // On the window's thread (Linux: through the overlay's
+                    // queue, review finding ov-1).
+                    #[cfg(target_os = "linux")]
+                    let mut slot = player::embedded::lock_slot_on_window_thread(&state.current_child);
+                    #[cfg(not(target_os = "linux"))]
                     let mut slot = state
                         .current_child
                         .lock()

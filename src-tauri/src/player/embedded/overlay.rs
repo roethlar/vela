@@ -21,9 +21,11 @@
 //! lets mpv go (render.h: a render context is freed before its player).
 
 use std::cell::RefCell;
+use std::collections::VecDeque;
 use std::ffi::{c_char, c_void, CStr};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, TryLockError};
+use std::time::Duration;
 
 use gtk::prelude::*;
 use tauri::Manager;
@@ -117,6 +119,71 @@ struct Overlay {
 
 thread_local! {
     static OVERLAY: RefCell<Option<Overlay>> = const { RefCell::new(None) };
+}
+
+/// Work a play's thread asks of GTK's thread and waits for (`Target::begin`,
+/// `Target::end`). A start holds the player slot while it waits for this
+/// work (`playback::play`), and GTK's thread takes that slot too (a page's
+/// rectangle, a play coming into view, exit). So the work is queued here as
+/// well as posted to GTK's main loop, and GTK's thread does it while it
+/// waits for the slot (`lock_slot_on_window_thread`): waiting for the slot
+/// without doing it was a deadlock until the play's wait ran out (review
+/// finding ov-1).
+type Job = Box<dyn FnOnce() + Send>;
+static JOBS: Mutex<VecDeque<Job>> = Mutex::new(VecDeque::new());
+
+/// How long a play's thread waits for GTK's thread, as for any other ask of
+/// the window (`host::on_window_thread`).
+const WINDOW_LIMIT: Duration = Duration::from_secs(10);
+
+/// Do the queued work. GTK's thread only.
+fn run_jobs() {
+    loop {
+        let job = JOBS.lock().unwrap_or_else(|e| e.into_inner()).pop_front();
+        let Some(job) = job else {
+            return;
+        };
+        job();
+    }
+}
+
+/// Have GTK's thread do `ask`, through the queue, and wait for its answer.
+fn on_gtk<T: Send + 'static>(
+    app: &tauri::AppHandle,
+    ask: impl FnOnce() -> T + Send + 'static,
+) -> Result<T, String> {
+    let (answer, answered) = std::sync::mpsc::sync_channel(1);
+    JOBS.lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .push_back(Box::new(move || {
+            let _ = answer.send(ask());
+        }));
+    app.run_on_main_thread(run_jobs)
+        .map_err(|_| "Vela's window could not be asked".to_string())?;
+    answered
+        .recv_timeout(WINDOW_LIMIT)
+        .map_err(|_| "Vela's window did not answer in time".to_string())
+}
+
+/// Take the player slot on GTK's thread, doing the queued work while the
+/// slot is held elsewhere (see `JOBS`). Every taking of that slot on GTK's
+/// thread goes through here.
+pub(crate) fn lock_slot_on_window_thread<T>(slot: &Mutex<T>) -> MutexGuard<'_, T> {
+    lock_doing(slot, run_jobs)
+}
+
+/// Take `slot`, calling `meanwhile` for as long as it is held elsewhere.
+fn lock_doing<T>(slot: &Mutex<T>, mut meanwhile: impl FnMut()) -> MutexGuard<'_, T> {
+    loop {
+        match slot.try_lock() {
+            Ok(guard) => return guard,
+            Err(TryLockError::Poisoned(poisoned)) => return poisoned.into_inner(),
+            Err(TryLockError::WouldBlock) => {
+                meanwhile();
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        }
+    }
 }
 
 /// A redraw mpv asked for is queued on GTK's thread and has not run.
@@ -430,7 +497,7 @@ impl Target {
         let lib = player.lib().clone();
         let handle = SendHandle(player.raw());
         let phase = self.phase.clone();
-        let asked = super::host::on_window_thread(&self.app, move || {
+        let asked = on_gtk(&self.app, move || {
             let handle = handle;
             let mut state = phase.lock().unwrap_or_else(|e| e.into_inner());
             if *state != Phase::Waiting {
@@ -469,7 +536,7 @@ impl Target {
             return Ok(());
         }
         let phase = self.phase.clone();
-        let asked = super::host::on_window_thread(&self.app, move || {
+        let asked = on_gtk(&self.app, move || {
             if *phase.lock().unwrap_or_else(|e| e.into_inner()) == Phase::Drawing {
                 if let Some(area) = area() {
                     end_drawing(&area, true);
@@ -493,5 +560,48 @@ impl Target {
     /// Whether a renderer made from the play's player exists.
     pub(super) fn drawing(&self) -> bool {
         *self.phase.lock().unwrap_or_else(|e| e.into_inner()) == Phase::Drawing
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::mpsc;
+
+    type Work = Arc<Mutex<Option<Box<dyn FnOnce() + Send>>>>;
+
+    // Review finding ov-1. The slot's holder waits for work only the one
+    // waiting for the slot can do, as a start waits for GTK's thread with
+    // the slot held: the waiter does it meanwhile, and both finish.
+    #[test]
+    fn the_slot_is_taken_once_its_holder_has_had_the_work_it_waits_for() {
+        let slot = Arc::new(Mutex::new(0u32));
+        let work: Work = Arc::new(Mutex::new(None));
+        let (holding, held) = mpsc::channel::<()>();
+        let holder = {
+            let slot = slot.clone();
+            let work = work.clone();
+            std::thread::spawn(move || {
+                let mut guard = slot.lock().unwrap_or_else(|e| e.into_inner());
+                let (done, finished) = mpsc::channel::<()>();
+                *work.lock().unwrap_or_else(|e| e.into_inner()) = Some(Box::new(move || {
+                    let _ = done.send(());
+                }));
+                holding.send(()).unwrap();
+                finished
+                    .recv_timeout(Duration::from_secs(5))
+                    .expect("the work waited for was never done");
+                *guard = 1;
+            })
+        };
+        held.recv().unwrap();
+        let guard = lock_doing(&slot, || {
+            if let Some(job) = work.lock().unwrap_or_else(|e| e.into_inner()).take() {
+                job();
+            }
+        });
+        assert_eq!(*guard, 1, "taken after the holder had its work and finished");
+        drop(guard);
+        holder.join().expect("the holder finished");
     }
 }

@@ -28,7 +28,7 @@ mod surface;
 #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 pub(crate) use host::{follow_fullscreen, Host, Launcher};
 #[cfg(target_os = "linux")]
-pub(crate) use overlay::prepare as prepare_overlay;
+pub(crate) use overlay::{lock_slot_on_window_thread, prepare as prepare_overlay};
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) use session::Rect;
 #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
