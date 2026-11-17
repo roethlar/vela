@@ -119,7 +119,12 @@ gives each scenario one folder for all its sessions (`driver.mjs`,
 does in the app Vela ships; and the hosted runner has "Show animations in
 Windows" off, which WebView2 reports as reduced motion, so the workflow
 turns it on. On a desktop of your own with animations off, the motion
-scenarios fail for the same reason.
+scenarios fail for the same reason. And Vela's HTTPS client uses SChannel
+on Windows, which ignores the `SSL_CERT_FILE` a scenario names for its mock
+Plex server's CA: on a disposable runner (`VELA_E2E_DISPOSABLE_WINDOWS=1`)
+the runner trusts that CA in the machine's root store for the scenario and
+removes it afterwards (`windows.ps1`, `trust-ca`); elsewhere those
+scenarios cannot pass on Windows.
 
 **Use a disposable Windows account.** Before every scenario the harness
 deletes the real roaming AppData `vela` directory (normally `%APPDATA%\vela`).

@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory)][ValidateSet('config-location', 'processes', 'process-name', 'process-text', 'place-window', 'screenshot', 'private-file', 'protect-fixtures', 'wait-clients')][string]$Action,
+    [Parameter(Mandatory)][ValidateSet('config-location', 'processes', 'process-name', 'process-text', 'place-window', 'screenshot', 'private-file', 'protect-fixtures', 'trust-ca', 'untrust-ca', 'wait-clients')][string]$Action,
     [string]$Value,
     [string]$Detail
 )
@@ -60,6 +60,28 @@ switch ($Action) {
             Set-Acl -LiteralPath $file.FullName -AclObject $acl
         }
         Write-Json $true
+    }
+    'trust-ca' {
+        # SChannel, which Vela's HTTPS client uses on Windows, ignores
+        # SSL_CERT_FILE: a scenario's mock CA is trusted in the machine's root
+        # store, on a disposable runner only, and removed after the scenario.
+        if ($env:VELA_E2E_DISPOSABLE_WINDOWS -ne '1') {
+            throw 'Trusting a test CA changes the machine; set VELA_E2E_DISPOSABLE_WINDOWS=1 on a disposable Windows account.'
+        }
+        $cert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($Value)
+        $store = [System.Security.Cryptography.X509Certificates.X509Store]::new('Root', 'LocalMachine')
+        $store.Open('ReadWrite')
+        try { $store.Add($cert) } finally { $store.Close() }
+        Write-Json @{ thumbprint = $cert.Thumbprint }
+    }
+    'untrust-ca' {
+        if ($Value -notmatch '^[0-9A-F]{40}$') { throw 'Expected a certificate thumbprint.' }
+        $store = [System.Security.Cryptography.X509Certificates.X509Store]::new('Root', 'LocalMachine')
+        $store.Open('ReadWrite')
+        try {
+            foreach ($cert in @($store.Certificates.Find('FindByThumbprint', $Value, $false))) { $store.Remove($cert) }
+        } finally { $store.Close() }
+        Write-Json @{ removed = $Value }
     }
     'private-file' {
         $acl = Get-Acl -LiteralPath $Value

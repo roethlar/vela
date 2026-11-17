@@ -700,6 +700,21 @@ test("Windows: every session of a scenario's driver shares one WebView2 data fol
     /new Driver\(driverUrl, isWindows \? \{ webviewUserDataFolder: path\.join\(configRoot, 'webview2'\) \} : \{\}\)/);
 });
 
+test("Windows: a scenario's mock CA is trusted for that scenario only, on a disposable runner", () => {
+  const run = harnessText('run.mjs');
+  const trust = run.indexOf("trustedCa = windowsTool('trust-ca', [scenarioEnv.SSL_CERT_FILE]).thumbprint;");
+  const untrust = run.indexOf("windowsTool('untrust-ca', [trustedCa])");
+  assert.ok(trust > 0 && untrust > trust, 'trusted when the scenario starts, removed in its cleanup');
+  assert.match(run, /if \(isWindows && scenarioEnv\.SSL_CERT_FILE\) \{\s*trustedCa = /, 'only on Windows, only for a scenario that names a CA');
+  // Inside the scenario's try, so its finally removes it even when the scenario fails.
+  const body = run.slice(run.indexOf('async function runScenario('), run.indexOf('\n}\n', run.indexOf('async function runScenario(')));
+  assert.ok(body.indexOf('  try {\n    if (isWindows && scenarioEnv.SSL_CERT_FILE)') > 0);
+  assert.ok(body.lastIndexOf('} finally {') < body.indexOf("windowsTool('untrust-ca'"));
+  const tool = harnessText('windows.ps1');
+  assert.match(tool, /'trust-ca' \{[\s\S]*?if \(\$env:VELA_E2E_DISPOSABLE_WINDOWS -ne '1'\) \{\s*throw/, 'never on a machine that is not disposable');
+  assert.match(tool, /'untrust-ca' \{\s*if \(\$Value -notmatch '\^\[0-9A-F\]\{40\}\$'\) \{ throw/);
+});
+
 test('an aliased second driver in another module cannot start another app (pa-6)', () => {
   driverCase(`
     const located = await locate();

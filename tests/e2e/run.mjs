@@ -156,7 +156,15 @@ async function runScenario(scenario, tauriDriverBin) {
   // Windows: one WebView2 data folder for every session of the scenario, as
   // the app Vela ships has one (driver.mjs); Linux's WebKit keeps its own.
   const driver = new Driver(driverUrl, isWindows ? { webviewUserDataFolder: path.join(configRoot, 'webview2') } : {});
+  // Windows: Vela's HTTPS client uses SChannel there, which ignores the
+  // SSL_CERT_FILE a scenario gives for its mock server's CA; that CA is
+  // trusted in the machine's root store for this scenario only (a disposable
+  // runner: windows.ps1 refuses otherwise) and removed in the cleanup below.
+  let trustedCa = null;
   try {
+    if (isWindows && scenarioEnv.SSL_CERT_FILE) {
+      trustedCa = windowsTool('trust-ca', [scenarioEnv.SSL_CERT_FILE]).thumbprint;
+    }
     await waitUntil(driverListening, `tauri-driver on :${driverPort}`);
     await driver.newSession();
     if (isWindows) registerWindowsApp(configRoot, proc.pid, appBinary);
@@ -206,6 +214,10 @@ async function runScenario(scenario, tauriDriverBin) {
     if (isWindows) stopWindowsApps(configRoot);
     killTree();
     if (isWindows) forgetWindowsApp(configRoot);
+    if (trustedCa) {
+      try { windowsTool('untrust-ca', [trustedCa]); }
+      catch (untrustError) { console.error(`e2e: removing the scenario's test CA: ${untrustError.message}`); }
+    }
     activeKills.delete(killTree);
     process.removeListener('exit', killTree);
     fs.closeSync(logFd);
