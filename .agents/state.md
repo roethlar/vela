@@ -36,12 +36,16 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     Slice N1 LANDED at `daa182c`: the NVIDIA refusal is gone
     (`startup.rs`, `select.rs`), with the docs and release notes; release
     run by hand 44098988278 at `daa182c` builds the owner's Linux packages
-    for the NVIDIA test (steps in the slice); a codex hunt over it
-    (`review-final` slice `n1`). Slice W1 LANDED in the commit after it:
-    both suites run in a private headless weston, no X11 display;
-    `markerbutton` draws with `--vo=wlshm`; `playerfallback` proves the
-    start-up marker's recovery instead of X11's refusal, red-proved twice.
-    Its full runs in a clean worktree follow.
+    for the NVIDIA test (steps in the slice). Slice W1 LANDED at
+    `9d44c5e`: both suites run in a private headless weston, no X11
+    display; `markerbutton` draws with `--vo=wlshm`; `playerfallback`
+    proves the start-up marker's recovery instead of X11's refusal,
+    red-proved twice. At `9d44c5e`, in a clean worktree: external 48 of
+    48, embedded 51 of 51, parity verdict PASS. Codex hunts
+    (`.agents/review/codereview-2026-11-17-nvidia-venue.md`): N1 clean;
+    W1 found w1-1 (LOW, two comments still naming Xvfb), repaired at
+    `998d14c`. CI passed at `daa182c`, `9d44c5e` and `998d14c`.
+    WAITING ON THE OWNER: the NVIDIA test (the plan's Slice N1).
   - Landed: the macOS app declares why it reaches the local network
     (`d6a8033`; the notarized app of a release run carries the sentence);
     the player window finds its remembered screen on a Mac, Retina
@@ -101,10 +105,11 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     window at `aa8c0b0` and `74df55a`.
   - Linux unchanged through all of it: both end-to-end suites in full at
     `6b206ec`, `623ec17`, `c49be2a`, `49f2c3c`, `cf23d90`, `959f437`,
-    `3061b52`, `0b2099a`, `2bc6e3c`, `c3ea91d`, `dc3c9e8`, `23d4745` and
-    `74df55a` (48 of 48, 51 of 51, parity PASS; `74df55a` is the final
-    builds' commit, run in a clean worktree on a quiet machine); at
-    `7f1db1f` the embedded suite lost
+    `3061b52`, `0b2099a`, `2bc6e3c`, `c3ea91d`, `dc3c9e8`, `23d4745`,
+    `74df55a` and `9d44c5e` (48 of 48, 51 of 51, parity PASS; `9d44c5e`,
+    the first with both suites in weston, run in a clean worktree,
+    contains the builds' commit `daa182c`, whose one product change acts
+    on NVIDIA's driver alone); at `7f1db1f` the embedded suite lost
     `completionhub` once, at `f2dcbc3` and `019c08b` `markers` once each,
     and at `0357eec` `watchposition` twice on a loaded machine (all in
     Blockers).

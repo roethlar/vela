@@ -2640,8 +2640,9 @@ installer and the macOS app).
   "2026-11-17 (2)" below, and untested there until your NVIDIA test (its
   steps are in that slice).
 - Proven by machine: both end-to-end suites in full at every product
-  commit (48 of 48, 51 of 51, parity PASS), last at `74df55a`, the
-  builds' commit. Intermittent failures in the embedded suite, all in
+  commit (48 of 48, 51 of 51, parity PASS), last at `9d44c5e`, which
+  contains the builds' commit and runs both suites in a headless weston,
+  as Vela runs on Wayland. Intermittent failures in the embedded suite, all in
   `.agents/state.md`, Blockers: `markers` twice (cause not found; not
   seen since `019c08b`), and `watchposition` and `pagefail` now and then
   (about 1 run in 20 alone on a quiet machine, more on a loaded one;

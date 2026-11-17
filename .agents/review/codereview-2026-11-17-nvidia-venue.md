@@ -33,7 +33,7 @@ one candidate, admitted (LOW).
 
 | ID   | Severity | Finding (one line)                                              | Status | Commit |
 |------|----------|------------------------------------------------------------------|--------|--------|
-| w1-1 | LOW      | Two comments in `display.rs` still call the end-to-end venue Xvfb | `[x]` | the commit after `9d44c5e` |
+| w1-1 | LOW      | Two comments in `display.rs` still call the end-to-end venue Xvfb | `[x]` | `998d14c` |
 
 ### w1-1
 
@@ -51,4 +51,6 @@ Admitted.
 Repaired: both comments drop the venue; the empty-display check stays, as
 the reviewer advised. `src-tauri/src/player/launch.rs`'s "probed with mpv
 0.41 on Xvfb" is left: it records where a behaviour was observed, not
-what the venue is.
+what the venue is. No hunt was run over the repair: it changes two
+comments and nothing else, and both new sentences were checked against
+the code they describe.
