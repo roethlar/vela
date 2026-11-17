@@ -40,12 +40,16 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
       hand (43974146432: signed, notarized, the set played from inside the
       DMG's app on both architectures). Probe M2 (Vela's own embedded
       player on a hosted Mac, `probes/m2-vela`) found the picture black:
-      nothing drives the layer's draws (the plan's Probe log); repair in
-      progress (codex, `mdraw`).
-    - In progress (codex, worktree `~/dev/vela-agent-keep/wt/cx-mdraw`):
-      `mdraw` (above). The six hunts' thirteen findings are closed but
-      pl-9, about tests alone
-      (`.agents/review/codereview-2026-11-16-platforms.md`).
+      nothing drove the layer's draws; `cf23d90` drove them through
+      `setNeedsDisplay`, which this host ignores for an asynchronous layer
+      (the plan's Probe log); the repair that follows mpv's own layer is in
+      progress (codex, `mdraw2`).
+    - Windows: probe W2 (`probes/w2-vela`) found Vela refusing its own
+      settings under the built-in Administrator account (the privacy check
+      matches SDDL text, which names that account `LA`); repair in progress
+      (codex, `wacl`).
+    - The six hunts' thirteen findings are closed but pl-9, about tests
+      alone (`.agents/review/codereview-2026-11-16-platforms.md`).
   - Linux unchanged through all of it: both end-to-end suites in full at
     `6b206ec`, `623ec17`, `c49be2a` and `49f2c3c` (48 of 48, 51 of 51,
     parity PASS).

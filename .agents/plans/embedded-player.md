@@ -2372,6 +2372,30 @@ artifact keeps the probe's logs and screenshots.
   machinery and waits for the release's test pass (`.agents/decisions.md`,
   2026-11-14). Meanwhile probe W2 (`probes/w2-vela`) runs M2's method on a
   hosted Windows runner.
+- **2026-11-17, M2 after `cf23d90`: still black.** Run 43983936593: mpv's
+  render update callback now reached the layer through a queued
+  main-thread `setNeedsDisplay`, but Core Animation still drew only a few
+  times (fewer than 60 renders over both plays' ~240 frames) and mpv still
+  logged that rendering was not being called; mpv's own renderer reported
+  no error. `setNeedsDisplay` on an asynchronous CAOpenGLLayer does not make
+  this host draw. mpv's own Cocoa layer (`video/out/mac/gl_layer.swift`)
+  turns asynchronous off and calls the layer's `display()` itself on the
+  main queue, then flushes the transaction, and renders a frame it could
+  not draw with skip. Repair in progress (codex, `mdraw2`): the same. The
+  page's clock also stayed at 0:00 through the first play while mpv played
+  to 6.46 s; the repair looks at that too.
+- **2026-11-17, W2: Vela on Windows starts, and refuses its own settings
+  under the built-in Administrator.** Runs 43982762766, 43984646518
+  (Windows Server 2025). Vela starts outside WebDriver, its page loads and
+  the script runs; then Vela stops at "Vela could not safely read your
+  settings". The runner's account is the built-in Administrator (RID 500);
+  after Vela protects its config directory the DACL reads back as
+  `D:P(A;OICI;FA;;;LA)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)`, the user written as
+  the SDDL alias `LA`, and `storage.rs` `windows_private::verify`, which
+  looks for the numeric SID in that text, calls it "not private". A defect
+  for anyone running Vela as that account (Windows Server, an enabled
+  built-in Administrator, every GitHub-hosted Windows runner). Repair in
+  progress (codex, `wacl`): compare SIDs, not text; then W2 again.
 
 ### Design that follows (2026-11-16)
 
