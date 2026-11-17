@@ -934,7 +934,8 @@
           <p class="muted small">
             Vela's window shows video inside Vela with Vela's own controls,
             using a copy of mpv that comes with Vela.
-            It is experimental and works on macOS, Windows, and Linux with Wayland.
+            It is experimental and works on macOS, Windows, and Linux (Wayland or X11; not
+            with NVIDIA's proprietary driver).
             Switching to mpv's own window applies to the next video.
             To use Vela's window, restart Vela if this run started without embedded playback.
             When it cannot be used, videos play in mpv's own window and a line

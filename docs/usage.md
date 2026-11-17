@@ -78,8 +78,8 @@ Settings → Player → Video player chooses where videos play:
   through a copy of mpv's library that comes with Vela. This is the embedded
   player.
 
-The embedded player runs on macOS, on Windows, and on Linux in a Wayland
-session (not yet with the NVIDIA proprietary driver). Switching to mpv's own
+The embedded player runs on macOS, on Windows, and on Linux under Wayland or
+X11 (not yet with the NVIDIA proprietary driver). Switching to mpv's own
 window applies to the next
 video. To use Vela's window, restart Vela if this run started without embedded
 playback. Whenever the embedded player cannot be used, the video plays in
@@ -111,10 +111,14 @@ What is different from mpv's own window, and why it is marked experimental:
 - On Linux and macOS the picture is drawn by a different mpv renderer
   (`gpu`, where mpv's own window uses `gpu-next`); on Windows it is mpv's own
   `gpu-next` output, inside Vela's window. HDR reaches the screen where the
-  system offers it: on Linux through a display and compositor that pass it
-  through, on Windows with Windows' HDR turned on, on macOS on a screen with
-  extended dynamic range (such as a MacBook Pro's). It can look different
-  from mpv's own window.
+  system offers it: on Linux under Wayland through a display and compositor
+  that pass it through, on Windows with Windows' HDR turned on, on macOS on a
+  screen with extended dynamic range (such as a MacBook Pro's). It can look
+  different from mpv's own window.
+- Under X11, Vela puts the picture under its page itself, in standard range:
+  HDR video is tone-mapped, as for a screen without HDR. Hardware decoding
+  there copies each frame back to memory, which X11's OpenGL needs; 4K at 60
+  frames a second still played without a dropped frame where it was tried.
 - Black-bar cropping is done by a script of Vela's own, and it does not crop
   HDR video.
 - With "Use my own mpv config" on, it applies your `mpv.conf` but not your
@@ -205,7 +209,8 @@ On Linux, Vela turns off WebKitGTK's DMABUF renderer at startup, because it
 crashes the webview on NVIDIA with Wayland. This affects the library UI
 renderer, not mpv's video output, and has no effect on macOS or Windows. The
 one exception is a start with the embedded player chosen, which needs that
-renderer and is never entered with the NVIDIA proprietary driver. A
+renderer (under Wayland and under X11) and is never entered with the NVIDIA
+proprietary driver. A
 `WEBKIT_DISABLE_DMABUF_RENDERER` you set yourself is left as it is. It rules
 the embedded player out only when its value is nonempty and not `0`. An empty
 value or `0` does not cause that refusal; the other requirements for embedded

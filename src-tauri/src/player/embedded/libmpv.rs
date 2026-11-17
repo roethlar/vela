@@ -64,7 +64,7 @@ pub(crate) const RENDER_PARAM_OPENGL_FBO: c_int = 3;
 pub(crate) const RENDER_PARAM_FLIP_Y: c_int = 4;
 #[cfg(any(target_os = "linux", target_os = "macos", test))]
 pub(crate) const RENDER_PARAM_DEPTH: c_int = 5;
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "linux", target_os = "macos", test))]
 const RENDER_PARAM_BLOCK_FOR_TARGET_TIME: c_int = 12;
 #[cfg(any(target_os = "macos", test))]
 const RENDER_PARAM_SKIP_RENDERING: c_int = 13;
@@ -1092,7 +1092,32 @@ impl Renderer {
         get_proc_address: unsafe extern "C" fn(*mut c_void, *const c_char) -> *mut c_void,
         #[cfg(target_os = "linux")] render_fd: c_int,
     ) -> Result<Self, String> {
-        let lib = player.lib().clone();
+        // SAFETY: the caller's contract, with the player's own handle, which
+        // outlives the renderer (the type's contract).
+        unsafe {
+            Self::create_for(
+                player.lib().clone(),
+                player.raw(),
+                get_proc_address,
+                #[cfg(target_os = "linux")]
+                render_fd,
+            )
+        }
+    }
+
+    /// [`Renderer::create`] for a player owned by another thread: GTK's GL
+    /// context lives on GTK's thread, while the play's thread owns the
+    /// [`Player`] (`overlay.rs`).
+    ///
+    /// # Safety
+    /// As for [`Renderer::create`], and `handle` must be the live handle of a
+    /// player of `lib` that is not destroyed before this renderer is dropped.
+    pub(crate) unsafe fn create_for(
+        lib: std::sync::Arc<LibMpv>,
+        handle: *mut RawHandle,
+        get_proc_address: unsafe extern "C" fn(*mut c_void, *const c_char) -> *mut c_void,
+        #[cfg(target_os = "linux")] render_fd: c_int,
+    ) -> Result<Self, String> {
         let mut gl = OpenGlInitParams {
             get_proc_address: Some(get_proc_address),
             get_proc_address_ctx: std::ptr::null_mut(),
@@ -1129,8 +1154,7 @@ impl Renderer {
             data: std::ptr::null_mut(),
         });
         let mut raw: *mut RawRenderContext = std::ptr::null_mut();
-        let code =
-            unsafe { (lib.render_context_create)(&mut raw, player.raw(), params.as_mut_ptr()) };
+        let code = unsafe { (lib.render_context_create)(&mut raw, handle, params.as_mut_ptr()) };
         lib.check(code)?;
         Ok(Renderer { lib, raw })
     }
@@ -1158,14 +1182,32 @@ impl Renderer {
     /// `height` pixels with `depth` bits per channel, bottom row first.
     #[cfg(target_os = "linux")]
     pub(crate) fn draw(&self, width: i32, height: i32, depth: i32) {
+        self.draw_into_framebuffer(0, width, height, depth, true);
+    }
+
+    /// [`Renderer::draw`] into framebuffer `framebuffer`, which GTK binds for
+    /// a GL area's drawing (`overlay.rs`). `wait_for_target_time` false: hand
+    /// over the frame now rather than wait until it is due, for a caller that
+    /// must not wait, GTK's own thread (mpv's `video-timing-offset` 0 makes
+    /// frames arrive when due).
+    #[cfg(target_os = "linux")]
+    pub(crate) fn draw_into_framebuffer(
+        &self,
+        framebuffer: i32,
+        width: i32,
+        height: i32,
+        depth: i32,
+        wait_for_target_time: bool,
+    ) {
         let mut fbo = OpenGlFbo {
-            fbo: 0,
+            fbo: framebuffer,
             w: width,
             h: height,
             internal_format: 0,
         };
         let mut flip: c_int = 1;
         let mut depth: c_int = depth;
+        let mut block: c_int = wait_for_target_time.into();
         let mut params = [
             RenderParam {
                 kind: RENDER_PARAM_OPENGL_FBO,
@@ -1178,6 +1220,10 @@ impl Renderer {
             RenderParam {
                 kind: RENDER_PARAM_DEPTH,
                 data: (&mut depth as *mut c_int).cast(),
+            },
+            RenderParam {
+                kind: RENDER_PARAM_BLOCK_FOR_TARGET_TIME,
+                data: (&mut block as *mut c_int).cast(),
             },
             RenderParam {
                 kind: RENDER_PARAM_END,

@@ -189,14 +189,14 @@ impl AppState {
 
 /// Decide, before any window exists, how this run of Vela creates its window,
 /// and do what that decision needs done first. Call once, first thing in
-/// `main`. Returns whether this run is in embedded window mode, in which
-/// WebKit's GPU renderer must be left on; every other run is started exactly
-/// as it always was. The reasoning is in `player::embedded::startup`.
+/// `main`. Returns whether this run is in embedded window mode or overlay
+/// mode, in which WebKit's GPU renderer must be left on; every other run is
+/// started exactly as it always was. The reasoning is in
+/// `player::embedded::startup`.
 pub fn prepare_startup() -> bool {
     #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
     {
-        use player::embedded::startup;
-        startup::prepare() == startup::WindowMode::Embedded
+        player::embedded::startup::prepare().plays_in_window()
     }
     #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
     {
@@ -331,6 +331,11 @@ pub fn run() {
             // What the window's fullscreen really is, for the player view.
             #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
             player::embedded::follow_fullscreen(app.handle());
+
+            // Overlay mode (Linux under X11): the page goes over the video
+            // area now, before anything is played (overlay.rs).
+            #[cfg(target_os = "linux")]
+            player::embedded::prepare_overlay(app.handle());
 
             // Automatic's step-down dispatcher. Deliberately NOT folded into the
             // completion dispatcher below, and deliberately declared BEFORE its

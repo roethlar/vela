@@ -26,6 +26,7 @@ const libmpv = read('src-tauri/src/player/embedded/libmpv.rs');
 const session = read('src-tauri/src/player/embedded/session.rs');
 const surface = read('src-tauri/src/player/embedded/surface.rs');
 const hdr = read('src-tauri/src/player/embedded/hdr.rs');
+const overlay = read('src-tauri/src/player/embedded/overlay.rs');
 const embeddedMod = read('src-tauri/src/player/embedded/mod.rs');
 const cargo = read('src-tauri/Cargo.toml');
 const tauriConf = JSON.parse(read('src-tauri/tauri.conf.json'));
@@ -55,6 +56,28 @@ function functionBody(source, signature, what) {
   assert.notEqual(end, -1, `${what} must have a closing brace`);
   return source.slice(start, end);
 }
+
+// An `impl` block, closing brace included, so that `methodBody` finds its
+// last method's end too.
+function implBody(source, header, what) {
+  const start = source.indexOf(`\n${header}`);
+  assert.notEqual(start, -1, `${what} must exist`);
+  const end = source.indexOf('\n}\n', start);
+  assert.notEqual(end, -1, `${what} must have a closing brace`);
+  return source.slice(start, end + 3);
+}
+
+// Linux has two kinds of play: on the Wayland host's surface (`Live`,
+// `set_up_surface`), and composited by GTK under X11 (`OverlayLive`,
+// `set_up_overlay`, `overlay.rs`). Each has its own turn.
+const TURN = '    fn turn(&mut self, shared: &Shared, stopping: &Stopping) -> bool {';
+const liveTurn = () => methodBody(implBody(session, 'impl PlayLoop for Live {', 'the Wayland play'), TURN, 'Live::turn');
+const overlayTurn = () =>
+  methodBody(
+    implBody(session, 'impl PlayLoop for OverlayLive {', 'the GTK-composited play'),
+    '    fn turn(&mut self, _shared: &Shared, stopping: &Stopping) -> bool {',
+    'OverlayLive::turn',
+  );
 
 test("the window's app id is the name of the desktop file every package installs", () => {
   // On Wayland a desktop finds a window's desktop file, and so its icon, by
@@ -116,7 +139,7 @@ test('titlebar replacement preserves size and mapping and restores the original 
   assert.doesNotMatch(code(decorations), /\.(show_all|destroy|set_visual|set_app_paintable|set_title|set_geometry_hints|set_default_size|maximize|unmaximize|fullscreen|unfullscreen)\(/);
 });
 
-test("every start is today's unless embedded window mode was decided", () => {
+test("every start is today's unless embedded window mode or overlay mode was decided", () => {
   // The decision is the first thing main does, before anything can have
   // started a thread or a window.
   assert.match(
@@ -124,7 +147,7 @@ test("every start is today's unless embedded window mode was decided", () => {
     /fn main\(\) \{\n\s+#\[cfg_attr\(not\(target_os = "linux"\), allow\(unused_variables\)\)\]\n\s+let embedded_window = vela_lib::prepare_startup\(\);/,
   );
   // WebKit's GPU renderer stays off, as it has been for everyone, unless
-  // this run is in embedded window mode.
+  // this run is in embedded window mode or overlay mode, which both need it.
   assert.match(
     main,
     /#\[cfg\(target_os = "linux"\)\]\n\s+if !embedded_window && std::env::var_os\("WEBKIT_DISABLE_DMABUF_RENDERER"\)\.is_none\(\) \{\n\s+std::env::set_var\("WEBKIT_DISABLE_DMABUF_RENDERER", "1"\);\n\s+\}\n\n\s+vela_lib::run\(\)/,
@@ -165,11 +188,19 @@ test("every start is today's unless embedded window mode was decided", () => {
     assert.equal(count(shippedStartup, read), 0, `start-up never calls ${read}`);
   }
 
-  // What "decided" means: the start-up module's answer, on Linux only.
+  // What "decided" means: the start-up module's answer, either of the two
+  // modes that change how WebKit draws (only Linux decides either)...
   assert.match(
     functionBody(lib, 'pub fn prepare_startup() -> bool {', 'prepare_startup'),
-    /#\[cfg\(any\(target_os = "linux", target_os = "windows", target_os = "macos"\)\)\]\s+\{\s+use player::embedded::startup;\s+startup::prepare\(\) == startup::WindowMode::Embedded\s+\}\s+#\[cfg\(not\(any\(target_os = "linux", target_os = "windows", target_os = "macos"\)\)\)\]\s+\{\s+false\s+\}/,
+    /#\[cfg\(any\(target_os = "linux", target_os = "windows", target_os = "macos"\)\)\]\s+\{\s+player::embedded::startup::prepare\(\)\.plays_in_window\(\)\s+\}\s+#\[cfg\(not\(any\(target_os = "linux", target_os = "windows", target_os = "macos"\)\)\)\]\s+\{\s+false\s+\}/,
   );
+  // ...which are those two and no other. The start-up marker, an embedded
+  // play being offered and what Settings says all ask the same question.
+  assert.match(
+    code(methodBody(startup, '    pub(crate) fn plays_in_window(self) -> bool {', 'WindowMode::plays_in_window')),
+    /match self \{\s+WindowMode::Today => false,\s+WindowMode::Embedded => true,\s+#\[cfg\(target_os = "linux"\)\]\s+WindowMode::Overlay => true,\s+\}$/,
+  );
+  assert.match(read('src-tauri/src/player/select.rs'), /\} else if started\.mode\.plays_in_window\(\) \{/);
 
   // The window is transparent only in that mode. The configuration file,
   // which every other start uses untouched, says nothing about it.
@@ -183,16 +214,17 @@ test("every start is today's unless embedded window mode was decided", () => {
   }
 });
 
-test('embedded window mode is entered only behind its safety marker, which the loaded page clears', () => {
+test('embedded window mode and overlay mode are entered only behind the safety marker, which the loaded page clears', () => {
   const prepare = functionBody(startup, 'pub(crate) fn prepare() -> WindowMode {', 'startup::prepare');
   // One decision, from the facts.
   assert.match(prepare, /let mut decision = decide\(facts\);/);
   assert.equal(prepare.split('decide(').length - 1, 1);
   // A marker that was found is removed, so the start after this one may try
-  // again; and the mode is kept only if a new marker could be left.
+  // again; and either mode is kept only if a new marker could be left (each
+  // changes how WebKit draws the whole window).
   assert.match(
     prepare,
-    /if marker_left_behind \{[\s\S]{0,200}std::fs::remove_file\(path\);[\s\S]{0,200}if decision\.mode == WindowMode::Embedded \{[\s\S]{0,300}let left = marker\s+\.as_ref\(\)\s+\.is_some_and\(\|path\| std::fs::write\(path, b""\)\.is_ok\(\)\);\s+if left \{[\s\S]{0,700}libc::mallopt\(libc::M_ARENA_MAX, 4\)[\s\S]{0,60}\} else \{\s+decision = Decision \{\s+mode: WindowMode::Today,\s+refused: Some\(EmbeddedUnavailable::FailedLastStart\),/,
+    /if marker_left_behind \{[\s\S]{0,200}std::fs::remove_file\(path\);[\s\S]{0,200}if decision\.mode\.plays_in_window\(\) \{[\s\S]{0,300}let left = marker\s+\.as_ref\(\)\s+\.is_some_and\(\|path\| std::fs::write\(path, b""\)\.is_ok\(\)\);\s+if left \{[\s\S]{0,700}libc::mallopt\(libc::M_ARENA_MAX, 4\)[\s\S]{0,60}\} else \{\s+decision = Decision \{\s+mode: WindowMode::Today,\s+refused: Some\(EmbeddedUnavailable::FailedLastStart\),/,
   );
   assert.equal(code(startup).split('mallopt').length - 1, 1, 'the allocator is touched in that one place');
   assert.match(prepare, /let mode = decision\.mode;\s+let _ = DECISION\.set\(decision\);\s+mode$/);
@@ -206,13 +238,13 @@ test('embedded window mode is entered only behind its safety marker, which the l
   assert.match(page, /invoke\("player_window_ready"\)/);
 });
 
-test('an embedded play is offered only in a run that started in embedded window mode', () => {
+test('an embedded play is offered only in a run that started in embedded window mode or overlay mode', () => {
   const library = functionBody(host, '    fn library(', 'Host::library');
-  const gate = library.indexOf('if decided.mode != WindowMode::Embedded {');
+  const gate = library.indexOf('if !decided.mode.plays_in_window() {');
   assert.notEqual(gate, -1);
   assert.match(
     library.slice(gate),
-    /^if decided\.mode != WindowMode::Embedded \{\s+return Err\(decided\.refused\.unwrap_or\(EmbeddedUnavailable::NeedsRestart\)\);\s+\}/,
+    /^if !decided\.mode\.plays_in_window\(\) \{\s+return Err\(decided\.refused\.unwrap_or\(EmbeddedUnavailable::NeedsRestart\)\);\s+\}/,
   );
   // Nothing about the machine is examined, and no library is loaded, before
   // that.
@@ -387,12 +419,23 @@ test('a play that outlasts the wait for it neither starts unannounced nor goes u
   // goes that will not end (`Leftovers`). This proves a real play uses them
   // (review finding ec-2).
   const shippedSession = code(session.slice(0, session.indexOf('#[cfg(test)]\nmod tests')));
-  // Building a play does not hand mpv its file; the last step does, and
-  // only a play that won its start is announced and drawn.
-  const setUp = functionBody(session, 'fn set_up(', 'set_up');
-  assert.equal(count(setUp, 'loadfile'), 0);
-  assert.equal(count(setUp, 'live.load('), 0);
-  assert.equal(count(shippedSession, '"loadfile"'), 1);
+  // Building a play, of either kind, does not hand mpv its file; the last
+  // step does, and only a play that won its start is announced and drawn.
+  for (const setUp of [
+    functionBody(session, 'fn set_up(', 'set_up'),
+    functionBody(session, 'fn set_up_surface(', 'set_up_surface'),
+    functionBody(session, 'fn set_up_overlay(', 'set_up_overlay'),
+  ]) {
+    assert.equal(count(setUp, 'loadfile'), 0);
+    assert.equal(count(setUp, '.load('), 0);
+  }
+  // Each kind of play hands mpv its file in its own `load` and nowhere else;
+  // and a play is loaded in one place.
+  assert.equal(count(shippedSession, '"loadfile"'), 2);
+  assert.equal(
+    (shippedSession.match(/fn load\(&self, url: &str\) -> Result<\(\), String> \{\s+self\.player\s+\.command\(&\["loadfile", url\]\)/g) ?? []).length,
+    2,
+  );
   assert.equal(count(shippedSession, 'live.load('), 1);
   assert.match(
     session,
@@ -470,9 +513,9 @@ test("the window's own surface is used on the window's thread, at once, and neve
   const prepare = methodBody(host, '    pub(crate) fn prepare(', 'Host::prepare');
   assert.match(
     prepare,
-    /let surface = on_window_thread\(app, \{\s+let app = app\.clone\(\);\s+let guest = guest\.clone\(\);\s+move \|\| \{\s+let facts = window_facts\(&app\)\?;\s+let rect = rect_in_window\(facts\.page, reported\.unwrap_or\(whole\(facts\.page\)\)\);[\s\S]{0,300}unsafe \{ VideoSurface::create\(&guest, facts\.surface, rect\.width, rect\.height\) \}/,
+    /let surface = on_window_thread\(app, \{\s+let app = app\.clone\(\);\s+move \|\| \{\s+let facts = window_facts\(&app\)\?;\s+let rect = rect_in_window\(facts\.page, reported\.unwrap_or\(whole\(facts\.page\)\)\);[\s\S]{0,300}unsafe \{ VideoSurface::create\(&guest, facts\.surface, rect\.width, rect\.height\) \}/,
   );
-  const embedded = ['egl', 'hdr', 'host', 'libmpv', 'mod', 'options', 'session', 'startup', 'surface'].map((name) => [
+  const embedded = ['egl', 'hdr', 'host', 'libmpv', 'mod', 'options', 'overlay', 'session', 'startup', 'surface'].map((name) => [
     name,
     read(`src-tauri/src/player/embedded/${name}.rs`),
   ]);
@@ -496,6 +539,10 @@ test("the window's own surface is used on the window's thread, at once, and neve
         // Tables of functions in loaded libraries, and an mpv handle.
         egl: ['Api', 'Api'],
         libmpv: ['LibMpv', 'LibMpv', 'Player'],
+        // mpv's handle, not the window's: taken to GTK's thread for the one
+        // call that makes a renderer from it, while the play's thread waits
+        // for that call (`Target::begin`).
+        overlay: ['SendHandle'],
       }[name] ?? [];
     assert.deepEqual(sends, allowed, `${name}.rs: what is declared safe to send`);
   }
@@ -513,7 +560,7 @@ test("the window's own surface is used on the window's thread, at once, and neve
   // The play's own thread does that waiting, first thing.
   assert.match(
     session,
-    /fn set_up\(start: &Start, mut surface: VideoSurface, shared: &Arc<Shared>\) -> Result<Live, String> \{\s+(?:\/\/[^\n]*\n\s+)*surface\.settle\(\)\?;/,
+    /fn set_up_surface\(start: &Start, mut surface: VideoSurface, shared: &Arc<Shared>\) -> Result<Live, String> \{\s+(?:\/\/[^\n]*\n\s+)*surface\.settle\(\)\?;/,
   );
   assert.match(
     surface,
@@ -695,9 +742,12 @@ test('mpv is told what it draws for in one place, together with the surface', ()
   assert.equal(count(follow, 'hdr::carry_out(step, tagging, player, surface, now);'), 2);
   for (const reached of ['hdr::answered(', 'hdr::drained(']) {
     assert.equal(count(code(session), reached), 2, reached);
-    assert.equal(count(functionBody(session, 'fn set_up(', 'set_up'), reached), 1, reached);
-    assert.equal(count(methodBody(session, '    fn turn(&mut self, shared: &Shared, stopping: &Stopping) -> bool {', 'Live::turn'), reached), 1, reached);
+    assert.equal(count(functionBody(session, 'fn set_up_surface(', 'set_up_surface'), reached), 1, reached);
+    assert.equal(count(liveTurn(), reached), 1, reached);
   }
+  // The GTK-composited play draws in standard range and has no part in it.
+  assert.equal(count(code(functionBody(session, 'fn set_up_overlay(', 'set_up_overlay')), 'hdr::'), 0);
+  assert.equal(count(code(overlayTurn()), 'hdr::'), 0);
   for (const direct of ['.describe(', '.tag(', '.untag(', '.ask(', '.observe(', '.unobserve(', '.set_target(']) {
     assert.equal(count(code(session), direct), 0, `the session never calls ${direct} itself`);
   }
@@ -706,6 +756,7 @@ test('mpv is told what it draws for in one place, together with the surface', ()
   for (const [name, source] of [
     ['hdr.rs', hdr],
     ['mod.rs', embeddedMod],
+    ['overlay.rs', overlay],
     ['surface.rs', surface],
     ['session.rs', session],
     ['libmpv.rs', libmpv],
@@ -813,7 +864,7 @@ test("what the compositor says about the display is followed from a play's start
   // ...before the first picture, once mpv has every other option, with what
   // this machine can do, waiting for mpv's answers there and only there
   // (no renderer exists yet, so this thread may wait for mpv)...
-  const setUp = functionBody(session, 'fn set_up(', 'set_up');
+  const setUp = functionBody(session, 'fn set_up_surface(', 'set_up_surface');
   assert.match(
     setUp,
     /let capabilities = Capabilities \{\s+can_describe: surface\.colour_support\(\),\s+ten_bit_window: window\.depth == 10,\s+\};\s+let mut tagging = Tagging::new\(\);/,
@@ -832,14 +883,21 @@ test("what the compositor says about the display is followed from a play's start
   assert.notEqual(rendererMade, -1);
   assert.equal(count(code(session), '.wait_for_event('), 1);
   assert.ok(setUp.indexOf('player.wait_for_event(') < rendererMade);
-  assert.equal(count(code(session.slice(0, session.indexOf('#[cfg(test)]\nmod tests'))), '.set_wakeup('), 1);
+  // One wake-up callback per kind of play, each set before its renderer
+  // exists: here, and in the GTK-composited play before GTK's thread is
+  // asked to make one.
+  assert.equal(count(code(session.slice(0, session.indexOf('#[cfg(test)]\nmod tests'))), '.set_wakeup('), 2);
   const wakeup = setUp.indexOf('unsafe { player.set_wakeup(wake_from_mpv, context) };');
   assert.ok(wakeup !== -1 && settle < wakeup && wakeup < rendererMade);
+  const overlaySetUp = functionBody(session, 'fn set_up_overlay(', 'set_up_overlay');
+  const overlayWakeup = overlaySetUp.indexOf('unsafe { player.set_wakeup(wake_from_mpv, Arc::as_ptr(shared) as *mut c_void) };');
+  const overlayRenderer = overlaySetUp.indexOf('target.begin(&player)');
+  assert.ok(overlayWakeup !== -1 && overlayRenderer !== -1 && overlayWakeup < overlayRenderer);
+  assert.equal(count(code(overlaySetUp), 'target.begin('), 1);
   // After the renderer, set-up only hands over what it built.
-  assert.doesNotMatch(
-    code(setUp.slice(rendererMade)),
-    /player\.(property|command|set_option|initialize|wait_for_event|next_event)\(/,
-  );
+  for (const after of [setUp.slice(rendererMade), overlaySetUp.slice(overlayRenderer)]) {
+    assert.doesNotMatch(code(after), /player\.(property|command|set_option|initialize|wait_for_event|next_event)\(/);
+  }
   // Before mpv has anything to draw: building a play gives mpv no file,
   // and the file is handed over only once the play is built.
   assert.equal(count(setUp, 'loadfile'), 0);
@@ -850,7 +908,7 @@ test("what the compositor says about the display is followed from a play's start
   assert.match(setUp, /capabilities,\s+tagging,\s+\}\)$/, 'and the running play keeps both');
 
   // ...and on every turn of the running play.
-  const run = methodBody(session, '    fn turn(&mut self, shared: &Shared, stopping: &Stopping) -> bool {', 'Live::turn');
+  const run = liveTurn();
   assert.match(
     run,
     /let now = Instant::now\(\);\s+follow_colour\(\s+&self\.player,\s+&mut self\.surface,\s+self\.capabilities,\s+&mut self\.tagging,\s+now,\s+\);/,
@@ -869,11 +927,25 @@ test('the running play never waits for mpv and does with each frame what hdr dec
   // loop is the one they decide for. A turn of it is `PlayLoop::turn`; the
   // loop around the turns is the trait's `run`, the same for the play and
   // for the tests that drive it without a display.
-  const run = methodBody(session, '    fn turn(&mut self, shared: &Shared, stopping: &Stopping) -> bool {', 'Live::turn');
+  const run = liveTurn();
   const shipped = code(session.slice(0, session.indexOf('#[cfg(test)]\nmod tests')));
   const loop = methodBody(session, '    fn run(&mut self, shared: &Shared) {', 'Live::run');
-  assert.equal(count(shipped, 'fn run(&mut self, shared: &Shared)'), 1, 'the play has no loop of its own');
-  assert.equal(count(shipped, 'fn turn(&mut self, shared: &Shared, stopping: &Stopping) -> bool {'), 1);
+  assert.equal(count(shipped, 'fn run(&mut self, shared: &Shared)'), 1, 'no play has a loop of its own');
+  // The Wayland play's turn, and the one that hands a Linux play's turn to
+  // its kind and does nothing else.
+  assert.equal(count(shipped, TURN.trim()), 2);
+  assert.match(
+    implBody(session, 'impl PlayLoop for LinuxLive {', 'a Linux play'),
+    /fn turn\(&mut self, shared: &Shared, stopping: &Stopping\) -> bool \{\s+match self \{\s+LinuxLive::Surface\(play\) => play\.turn\(shared, stopping\),\s+LinuxLive::Overlay\(play\) => play\.turn\(shared, stopping\),\s+\}\s+\}/,
+  );
+  // The GTK-composited play's turn only reads mpv's events, without waiting,
+  // every kind named: GTK's thread draws (`overlay.rs`).
+  const composited = overlayTurn();
+  assert.match(
+    composited,
+    /loop \{\s+if stopping\.expired\(Instant::now\(\)\) \{\s+return false;\s+\}\s+match self\.player\.next_event\(\) \{\s+Event::None => return true,\s+(?:\/\/[^\n]*\n\s+)*Event::Shutdown => return false,\s+(?:\/\/[^\n]*\n\s+)*Event::Answer \{ \.\. \} \| Event::TargetChanged \{ \.\. \} \| Event::Other => \{\}\s+\}\s+\}/,
+  );
+  assert.doesNotMatch(code(composited), /_ =>|wait_for_event|\.property\(|\.command\(|set_option|roundtrip/);
   assert.match(session, /\n                                live\.run\(&shared\);\n/);
   // The loop: wait on the surface (a gone compositor ends it), then the stop
   // decision, then a turn, every time round. A stop does not end it: mpv is
@@ -957,17 +1029,20 @@ test('the running play never waits for mpv and does with each frame what hdr dec
   assert.equal(count(code(run), 'self.renderer.draw('), 3);
   assert.equal(count(code(run), 'self.renderer.frame_shown()'), 3, 'every frame drawn is reported');
   // The one waiting call the play's thread makes after the renderer exists
-  // is the file handed to mpv, once.
+  // is the file handed to mpv, once: each kind of play in its own `load`.
   const shippedSession = code(session.slice(0, session.indexOf('#[cfg(test)]\nmod tests')));
-  assert.equal(count(shippedSession, '.command('), 1);
-  assert.match(shippedSession, /fn load\(&self, url: &str\) -> Result<\(\), String> \{\s+self\.player\s+\.command\(&\["loadfile", url\]\)/);
+  assert.equal(count(shippedSession, '.command('), 2);
+  assert.equal(
+    (shippedSession.match(/fn load\(&self, url: &str\) -> Result<\(\), String> \{\s+self\.player\s+\.command\(&\["loadfile", url\]\)/g) ?? []).length,
+    2,
+  );
 });
 
 test("mpv's reports of a changed target reach hdr from the start of a play to its end, and nothing else", () => {
   // Review finding hd-2: something other than Vela can change mpv's
   // targets. The unit tests in hdr.rs decide what is done about it; this
   // proves mpv is asked to report the change and every report reaches them.
-  const setUp = functionBody(session, 'fn set_up(', 'set_up');
+  const setUp = functionBody(session, 'fn set_up_surface(', 'set_up_surface');
   // Observed once, straight after mpv has started, and before the colour is
   // settled (the first report is read there).
   assert.equal(count(code(session), 'hdr::observe_targets('), 1);
@@ -982,15 +1057,19 @@ test("mpv's reports of a changed target reach hdr from the start of a play to it
   // play, and to nothing else: the session decides nothing about it.
   const shippedSession = code(session.slice(0, session.indexOf('#[cfg(test)]\nmod tests')));
   // Each report goes there with the registration it was made under, and
-  // what a finished change changed is said, as for an answer.
-  assert.equal(count(shippedSession, 'TargetChanged'), 2);
+  // what a finished change changed is said, as for an answer. (The third
+  // mention is the GTK-composited play's turn, which names the kind among
+  // those it is never sent: it asks for no report, above.)
+  assert.equal(count(shippedSession, 'TargetChanged'), 3);
+  assert.equal(count(code(functionBody(session, 'fn set_up_overlay(', 'set_up_overlay')), 'observe'), 0);
+  assert.equal(count(code(overlayTurn()), 'TargetChanged'), 1);
   assert.equal(
     (shippedSession.match(/Event::TargetChanged \{\s+registration,\s+option,\s+value,\s+\} => say\(hdr::target_changed\(\s+registration,\s+&option,\s+value\.as_deref\(\),/g) ?? []).length,
     2,
   );
   assert.equal(count(shippedSession, 'hdr::target_changed('), 2);
   assert.equal(count(setUp, 'hdr::target_changed('), 1);
-  assert.equal(count(methodBody(session, '    fn turn(&mut self, shared: &Shared, stopping: &Stopping) -> bool {', 'Live::turn'), 'hdr::target_changed('), 1);
+  assert.equal(count(liveTurn(), 'hdr::target_changed('), 1);
   // The play's thread reads no target itself.
   assert.doesNotMatch(shippedSession, /\.property\("target/);
   // What mpv reports came from the user's configuration or from whatever
@@ -1026,6 +1105,60 @@ test("mpv's reports of a changed target reach hdr from the start of a play to it
     shippedHdr,
     /\b(?:io|fs|process|panic|env)::|\b(?:stderr|stdout|write_all|write_fmt|write_str|panic_any|unwrap|expect|expect_err|unwrap_err|libc|extern|unsafe)\b|\.write\(|\blog::|\btracing::/,
   );
+});
+
+// ---- Overlay mode: X11 (`overlay.rs`)
+
+test("overlay mode's renderer is made, drawn and freed on GTK's thread, which never waits for mpv", () => {
+  // Under X11 GTK composites the video: mpv's renderer lives on GTK's
+  // thread, which draws the whole window, so that thread must never wait for
+  // mpv (render.h: mpv's video thread waits for the thread that draws); and
+  // the renderer must be freed there before the play's thread lets its
+  // player go (render.h). The E2E suite under `--x11` shows a play plays;
+  // this shows those rules hold.
+  // The overlay is put into Vela's window as Vela starts, in that mode only.
+  assert.match(code(lib), /#\[cfg\(target_os = "linux"\)\]\s+player::embedded::prepare_overlay\(app\.handle\(\)\);/);
+  assert.equal(count(code(lib), 'prepare_overlay('), 1);
+  assert.match(
+    functionBody(overlay, 'pub(crate) fn prepare(app: &tauri::AppHandle) {', 'overlay::prepare'),
+    /\{\s+if super::startup::decision\(\)\.mode != super::startup::WindowMode::Overlay \{\s+return;\s+\}/,
+  );
+  // GTK's thread hands mpv its framebuffer and does not wait for the frame's
+  // time...
+  assert.match(
+    code(functionBody(overlay, 'fn render(', 'overlay::render')),
+    /renderer\.draw_into_framebuffer\(framebuffer, width, height, 8, false\);/,
+  );
+  assert.equal(count(code(overlay), 'draw_into_framebuffer('), 1);
+  assert.match(
+    code(methodBody(libmpv, '    pub(crate) fn draw_into_framebuffer(', 'Renderer::draw_into_framebuffer')),
+    /let mut block: c_int = wait_for_target_time\.into\(\);[\s\S]*RenderParam \{\s+kind: RENDER_PARAM_BLOCK_FOR_TARGET_TIME,\s+data: \(&mut block as \*mut c_int\)\.cast\(\),\s+\},/,
+  );
+  // ...because mpv hands frames over when they are due, which the play asks
+  // for before mpv starts.
+  const setUp = code(functionBody(session, 'fn set_up_overlay(', 'set_up_overlay'));
+  const timing = setUp.indexOf('.set_option("video-timing-offset", "0")');
+  assert.ok(timing !== -1 && timing < setUp.indexOf('.initialize()'));
+  // The renderer is made on GTK's thread, from the play's player, in one
+  // place; and freed there, by the play or when the window goes under it.
+  const begin = methodBody(overlay, '    pub(super) fn begin(&self, player: &Player) -> Result<(), String> {', 'Target::begin');
+  assert.match(code(begin), /let asked = super::host::on_window_thread\(&self\.app, move \|\| \{[\s\S]*let begun = unsafe \{ begin_drawing\(lib, handle\.0, phase\.clone\(\)\) \};/);
+  assert.equal(count(code(overlay), 'begin_drawing('), 2, 'its definition and that call');
+  assert.equal(count(code(overlay), 'Renderer::create_for('), 1);
+  assert.match(code(overlay), /area\.connect_unrealize\(\|area\| end_drawing\(area, false\)\);/);
+  assert.match(
+    code(methodBody(overlay, '    pub(super) fn end(&self) -> Result<(), String> {', 'Target::end')),
+    /let asked = super::host::on_window_thread\(&self\.app, move \|\| \{\s+if \*phase\.lock\(\)\.unwrap_or_else\(\|e\| e\.into_inner\(\)\) == Phase::Drawing \{\s+if let Some\(area\) = area\(\) \{\s+end_drawing\(&area, true\);/,
+  );
+  assert.equal(count(code(overlay), 'end_drawing('), 3, 'its definition and those two calls');
+  // The player goes only after that: the play's drop ends the drawing
+  // first, and a renderer that may still exist keeps the play's thread, and
+  // with it the player, for good.
+  assert.match(
+    code(session),
+    /impl Drop for OverlayLive \{\s+fn drop\(&mut self\) \{\s+if let Err\(reason\) = self\.target\.end\(\) \{\s+keep_forever\(&reason\);\s+\}\s+\}\s+\}/,
+  );
+  assert.match(setUp, /if let Err\(reason\) = target\.begin\(&player\) \{\s+if target\.drawing\(\) \{\s+keep_forever\(&reason\);\s+\}\s+return Err\(reason\);\s+\}/);
 });
 
 test('the shipped library is tested itself, in every full embedded E2E run', () => {

@@ -6,8 +6,10 @@
 // rather than at the start of every play. A config that does not ask for it
 // gets no such line.
 //
-// "Cannot run" here is the suite's ordinary venue, an X11 display: the
-// embedded player needs Wayland. In a run of the embedded player itself
+// "Cannot run" here is an app whose mpv library is missing: this scenario
+// points the library's directory at an empty one. (It used to be the
+// suite's X11 display, until X11 gained the embedded player through GTK's
+// own compositing, `overlay.rs`.) In a run of the embedded player itself
 // there is nothing to fall back from, so this scenario is not part of it.
 //
 // mpv runs with `--vo=null` here, so nothing is drawn. The notice is observed
@@ -20,10 +22,11 @@ import { MpvIpc, mpvSocketSnapshot, waitForNewMpvSocket } from '../mpv.mjs';
 import { makeClips, mockSource, openDetailAndPlay, openLibraryGrid, pollUntil, seedConfig } from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
 
-const NOTICE = 'Embedded player: needs a Wayland session';
+const NOTICE = 'Embedded player: its mpv library did not load';
 let mock;
 let logFile;
 let configRootPath;
+let emptySet;
 
 // Change only the player setting, in the config the app itself has been
 // writing. Call it while the app is down.
@@ -101,10 +104,9 @@ async function waitForHome(driver) {
 
 export default {
   name: 'playerfallback',
-  skipOnWindows: 'Tests the X11-only "needs a Wayland session" fallback notice; Windows supports embedding on its desktop. embeddedlatestart tests startup fallback on Windows.',
   onlyPlayer: 'external',
   onlyPlayerWhy:
-    'its premise is a venue where the embedded player cannot run (X11), so the play goes to the external player; in a run of the embedded player there is nothing to fall back from',
+    'its premise is an app where the embedded player cannot run (its library is missing), so the play goes to the external player; in a run of the embedded player there is nothing to fall back from',
   // Not row 11. Its notice is the D3 fallback notice, for a play the user DID
   // ask for; row 11's notice is for a play the user did not ask for, a
   // step-down (playback.rs, osd_notice), which no venue here can force. The
@@ -134,6 +136,14 @@ export default {
       mpv_extra_args: `--vo=null\n--ao=null\n--msg-level=cplayer=trace\n--log-file=${logFile}`,
       player: 'embedded',
     });
+  },
+
+  // A development build loads the library from VELA_LIBMPV_DIR: an empty
+  // directory has none, on every platform and display.
+  environment({ configRoot }) {
+    emptySet = path.join(configRoot, 'no-libmpv');
+    fs.mkdirSync(emptySet, { recursive: true });
+    return { VELA_LIBMPV_DIR: emptySet };
   },
 
   async cleanup() {

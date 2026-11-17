@@ -266,7 +266,7 @@ packaging/libmpv/check-in-container.sh registry.fedoraproject.org/fedora:latest
 
 ### Trying the embedded player
 
-Experimental, on Linux (Wayland), Windows and macOS. Settings → Player →
+Experimental, on Linux (Wayland and X11), Windows and macOS. Settings → Player →
 Video player offers it, and says why when it cannot be used. Every released
 package carries its library; a Linux package you build yourself carries it
 when built with `--with-libmpv` (see "Packaging the set" below), and
@@ -291,10 +291,15 @@ state are in `.agents/plans/embedded-player.md`.
    window removes the field.
 
 The setting is read when Vela starts, because it decides how the window is
-created: with `"player": "embedded"` the window is transparent, so that video
-on a surface underneath it can show through, and WebKitGTK's GPU renderer
-is left on, which every other start turns off. Change the setting and
-restart. Before starting that way Vela leaves a marker file in its config
+created. With `"player": "embedded"` under Wayland the window is
+transparent, so that video on a surface underneath it can show through.
+Under X11 ("overlay mode", `src-tauri/src/player/embedded/overlay.rs`) the
+window stays opaque, and as Vela starts a GL area takes the web view's place
+with the web view, made transparent, over it; mpv draws into the GL area
+and GTK composites the two, in standard range. Either way WebKitGTK's GPU
+renderer is left on, which every other start turns off: without it GTK
+does not composite the page over what lies under it correctly. Change the
+setting and restart. Before starting that way Vela leaves a marker file in its config
 directory and the page removes it once it has loaded; if a start does not
 get that far, the next one starts the ordinary way.
 
@@ -304,21 +309,24 @@ embedded player was given and then could not start: the same play carries
 on in the external player, and the embedded one is not tried again until
 Vela is restarted. Vela's standard error has
 the detail (`vela: playing in the external player: ...`, and for a library
-that did not load, the loader's own message). Reasons include an X11
-session, the NVIDIA proprietary driver (untested, so excluded), a
-compositor without `wl_subcompositor` or `wp_viewporter`, and a
-`WEBKIT_DISABLE_DMABUF_RENDERER` set in your own environment.
+that did not load, the loader's own message). Reasons include the NVIDIA
+proprietary driver (both of Linux's ways need WebKitGTK's GPU renderer,
+which is known to fail on that driver, and no NVIDIA machine has tried
+them), a Wayland compositor without `wl_subcompositor` or `wp_viewporter`,
+and a `WEBKIT_DISABLE_DMABUF_RENDERER` set in your own environment.
 
 What exists so far: the picture, inside the window, in HDR on a display and
-compositor that offer it (KDE's does), a control bar and keys over it
+compositor that offer it (KDE's does; under X11 in standard range), a
+control bar and keys over it
 (pause, seeking, volume, tracks, fullscreen, the skip button, Close or `q`
 or Escape), and black-bar cropping by Vela's own `vela-crop.lua`. With "use
 my own mpv configuration"
 on, the embedded player applies your `mpv.conf` but not your scripts folder,
 per-script option files or key bindings.
 
-`npm run e2e -- --embedded` runs the E2E suite in this player; see
-[tests/e2e/README.md](../tests/e2e/README.md). Every playback behaviour the
+`npm run e2e -- --embedded` runs the E2E suite in this player, and
+`npm run e2e -- --embedded --x11` runs it in overlay mode on an X11 display;
+see [tests/e2e/README.md](../tests/e2e/README.md). Every playback behaviour the
 plan lists must be shown in both players: each scenario declares which of
 those rows it stands for, and `npm run check` fails when a row is shown in
 one player and neither shown nor exempted in the other (README, "Parity").
@@ -721,9 +729,11 @@ is manual: nothing automated compares the pins with an advisory database.
 - **Playback:** by default mpv runs out of process. Vela owns launch
   configuration, stream authentication (including credential-safe Plex
   headers), JSON IPC, progress tracking, and sequence handoff; mpv owns
-  decoding and video output. The experimental embedded player (Linux on
-  Wayland) loads Vela's shipped libmpv in process instead and draws on a
-  Wayland surface under the webview; everything else is shared, through one
-  launch description and the same JSON IPC.
+  decoding and video output. The experimental embedded player loads Vela's
+  shipped libmpv in process instead and shows the video under the webview: on
+  Linux on a Wayland surface under the window, or under X11 in a GTK GL area
+  under the web view; on Windows as mpv's own Direct3D 11 output inside the
+  window; on macOS through mpv's render API under the page. Everything else
+  is shared, through one launch description and the same JSON IPC.
 - **Persistence:** defensive, atomic JSON stores keep application config and
   playlists separate, with cross-process locking and fail-closed parsing.

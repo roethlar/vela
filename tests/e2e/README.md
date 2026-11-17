@@ -170,18 +170,19 @@ command-line and environment checks use Windows process evidence; an unreadable
 environment fails rather than appearing empty. The environment reader supports
 x64 processes only and reads Windows' native process structures.
 
-All existing scenario meanings and assertions remain. Windows runs 47 external
-and 51 embedded scenarios. `playerfallback` is skipped on Windows: it specifically
-asserts X11's "needs a Wayland session" notice, while Windows supports embedding
-on its desktop. `embeddedlatestart` still exercises a failed embedded startup
-and external fallback. The ordinary player-only exclusions remain:
+All existing scenario meanings and assertions remain. `playerfallback` runs on
+Windows as everywhere: its premise is an app whose mpv library is missing (it
+points the library's directory at an empty one), which holds on every
+platform. `embeddedlatestart` still exercises a failed embedded startup and
+external fallback. The ordinary player-only exclusions remain:
 
 - External runs skip `embeddedcontrols`, `embeddedcrop`, `embeddedfullscreenend`,
   `embeddedlatestart`, `embeddedplay`, `embeddedskip`, and `embeddedtracks`:
   these exercise the embedded view, renderer or startup lifecycle.
 - Embedded runs skip `autocrop` (the external player's stock crop script),
   `markerbutton` (mpv's own OSD button), and `windowsetting` (mpv's separate
-  window), as well as `playerfallback` above.
+  window), as well as `playerfallback` (a fall back from the embedded player
+  to the external one).
 
 Every Windows skip records its reason in `results/<player>.json`, and contributes
 no parity coverage. Results carry `platform: "win32"`; the verdict rejects mixed
@@ -480,7 +481,8 @@ one (`.agents/plans/embedded-player.md`). Two things change:
   library inside Vela's own process.
 - The venue is a private headless Wayland compositor (`weston
   --backend=headless --fake-seat --renderer=gl --idle-time=0`) instead of
-  Xvfb, because that player needs Wayland. Weston has no colour management
+  Xvfb, for the Wayland host (the video on a surface under Vela's window,
+  where the owner's own desktop plays it). Weston has no colour management
   and no fractional scaling, so nothing about HDR or scaled displays is
   exercised here. `--fake-seat` gives it a seat: without one weston never
   activates the app's window, so the page never has focus (`:focus` never
@@ -492,6 +494,19 @@ one (`.agents/plans/embedded-player.md`). Two things change:
 It additionally needs `weston` and a built libmpv set: by default the one
 `scripts/build-libmpv.sh --container` leaves in `.libmpv/out/libmpv`, or
 wherever `VELA_LIBMPV_DIR` points.
+
+`--embedded --x11` runs the embedded suite on an X11 display instead: under
+X11 Vela composites the video itself, under the page (overlay mode,
+`src-tauri/src/player/embedded/overlay.rs`), and this is that mode's venue.
+The display is the X server of a private headless weston (Xwayland, weston
+started with `--xwayland`; the X display is read from weston's log,
+`artifacts/weston-x11.log`), not Xvfb: on X11 a window goes fullscreen only
+when a window manager makes it so, Xvfb has none and weston has one for
+X11 windows, and Xwayland draws OpenGL with the GPU, as an X11 desktop does.
+Its screen, 1920×1080, is larger than Vela's window, so that fullscreen
+shows. With `VELA_E2E_HEADED=1` it uses the desktop's own X server. Its
+results go to `results/embedded-x11.json`, which the parity verdict does not
+read (the verdict compares the external run with the Wayland one).
 
 A full `--embedded` run (no scenario named) first runs
 `npm run test:libmpv`: Rust tests, ignored in an ordinary `cargo test`,
@@ -508,9 +523,10 @@ mpv's target. If they fail,
 or cannot load the set, the run fails before any scenario. A run of named
 scenarios skips them and says so; `npm run test:libmpv` runs them alone.
 
-So there are two venues: an ordinary run (the external player, on a private
-Xvfb display) and an `--embedded` run (the embedded player, on a private
-weston). A scenario can belong to one player with `onlyPlayer: 'embedded'`
+So there are three venues: an ordinary run (the external player, on a
+private Xvfb display), an `--embedded` run (the embedded player, on a
+private weston) and an `--embedded --x11` run (the embedded player in
+overlay mode, on a private weston's X server). A scenario can belong to one player with `onlyPlayer: 'embedded'`
 or `onlyPlayer: 'external'` (and `onlyPlayerWhy`). In a run of the other
 player it is reported as `SKIP` and not counted; named explicitly, it fails
 instead.

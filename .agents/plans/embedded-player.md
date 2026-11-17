@@ -2630,8 +2630,12 @@ installer and the macOS app).
 
 **Linux (Wayland, as you use it now).**
 - Has: all of the above; HDR in Vela's window through the compositor.
-- Lacks: Vela's window on X11, and with NVIDIA's proprietary driver (the
-  video plays in mpv's own window and Settings says why).
+  Under X11 too, Vela's window (overlay mode, added 2026-11-17), in
+  standard range: HDR video is tone-mapped there, and hardware decoding
+  copies frames back (4K60 without a dropped frame in probe X1).
+- Lacks: Vela's window with NVIDIA's proprietary driver (the video plays
+  in mpv's own window and Settings says why); whether that stays the one
+  approved difference is asked of you in `.agents/state.md`.
 - Proven by machine: both end-to-end suites in full at every product
   commit (48 of 48, 51 of 51, parity PASS), last at `23d4745`, the
   builds' commit. Intermittent failures in the embedded suite, all in
@@ -2784,7 +2788,49 @@ what is not known is found by probes first, logged below.
   under Wayland 1080p60 drew with no drop at 16%. So one host, GTK's own
   compositing, serves X11 and NVIDIA alike, in standard range (GTK 3
   composites in 8-bit sRGB; mpv tone-maps HDR into it, as on macOS before
-  its EDR layer).
+  its EDR layer). [Overturned for NVIDIA, and for the renderer off, by the
+  next entry: these pages had painted everything before the overlay
+  existed.]
+- **Overlay mode in Vela: WebKit's GPU renderer stays on, and NVIDIA stays
+  out.** Under X11 (Xvfb), the overlay as probe X1 built it ran in Vela with
+  WebKit's DMABUF renderer off, as every start but embedded window mode had
+  it: the player view showed the library page still under its transparent
+  parts, a trail of seek thumbs, and no video. With the renderer on: the
+  test pattern under the player bar and nothing stale. Throwaway probes
+  (PyGObject, WebKitGTK 2.54, outside the repo; under Xvfb, and on weston's
+  Xwayland, which has DRI3) found why. With the renderer off, a web view
+  whose background is transparent loses the page's later repaints, whatever
+  lies under it (a GL area, a cairo-drawn area, nothing but the window): an
+  opaque page vanished at its next change, a panel shown later never
+  appeared, and only an element that kept moving was drawn. Neither GDK's
+  software GL paths (`GDK_GL=software-draw-gl`, `-surface`, both) nor
+  WebKit's compositing switched off (`WEBKIT_DISABLE_COMPOSITING_MODE=1`)
+  changed that; with the renderer on, every case drew right. So overlay
+  mode is X11 with the renderer on, in an opaque window, entered behind the
+  start-up marker as embedded window mode is (`startup.rs`, `main.rs`).
+  NVIDIA's proprietary driver: that renderer is what fails there (Tauri's
+  documentation, read 2026-11-17: blank or white windows,
+  "AcceleratedSurfaceDMABuf was unable to construct a complete
+  framebuffer", Wayland's "Error 71"; no driver or WebKitGTK version is
+  named as fixing it, and the one complete workaround is turning the
+  renderer off), and both of Linux's hosts need a transparent page; so
+  Vela's window stays refused there with its reason, as before. A way that
+  needs no transparent page changes the player's look (the video above or
+  beside a strip of Vela's controls instead of under them), and no NVIDIA
+  machine is at hand to try anything on: the owner's decision, asked in
+  `.agents/state.md`.
+- **Overlay mode's own end-to-end venue.** `npm run e2e -- --embedded
+  --x11` (new) runs the embedded suite under X11. Its first run, on Xvfb,
+  failed six of 51: four that make Vela's window fullscreen (Xvfb has no
+  window manager, and on X11 a window goes fullscreen only when one makes
+  it so), `embeddedlatestart`, and `uifoundation`, which found a defect:
+  putting the overlay into the window took GTK's focus off the page, so
+  keys went nowhere until the page was clicked (repaired: the page gets
+  the focus back when it had it, `overlay.rs`). The venue is now the X
+  server of a private headless weston (`--xwayland`), whose window manager
+  makes X11 windows fullscreen and whose X server draws OpenGL on the GPU
+  (`tests/e2e/run.mjs`, `tests/e2e/README.md`). `embeddedlatestart`: the
+  next entry.
 - **A shared mpv log hid the fallback notice (`embeddedlatestart`).** Found
   when the embedded suite first ran under X11. The scenario saw the notice
   in an mpv `--log-file`, and both players take the same options, so both

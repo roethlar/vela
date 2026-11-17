@@ -1,14 +1,17 @@
 //! The embedded player: mpv's library drawing inside Vela's own window.
 //!
-//! Linux draws through the render API into a Wayland/EGL surface; Windows
-//! gives mpv the main window's HWND and lets gpu-next own its D3D11 child.
-//! macOS uses the render API in a CGL layer below WKWebView. All share the
-//! startup recovery, launch, session and IPC lifecycle.
+//! Linux draws through the render API into a Wayland/EGL surface, or under
+//! X11 into a GTK GL area under the page (`overlay.rs`); Windows gives mpv
+//! the main window's HWND and lets gpu-next own its D3D11 child. macOS uses
+//! the render API in a CGL layer below WKWebView. All share the startup
+//! recovery, launch, session and IPC lifecycle.
 
 #[cfg(target_os = "linux")]
 mod egl;
 #[cfg(target_os = "linux")]
 mod hdr;
+#[cfg(target_os = "linux")]
+mod overlay;
 #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 mod host;
 #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
@@ -24,6 +27,8 @@ mod surface;
 
 #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 pub(crate) use host::{follow_fullscreen, Host, Launcher};
+#[cfg(target_os = "linux")]
+pub(crate) use overlay::prepare as prepare_overlay;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) use session::Rect;
 #[cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
