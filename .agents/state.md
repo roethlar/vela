@@ -66,8 +66,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     that product code.
   - Linux unchanged through all of it: both end-to-end suites in full at
     `6b206ec`, `623ec17`, `c49be2a`, `49f2c3c`, `cf23d90`, `959f437`,
-    `3061b52`, `0b2099a`, `2bc6e3c` and `c3ea91d` (48 of 48, 51 of 51,
-    parity PASS); at `7f1db1f` the embedded suite lost `completionhub`
+    `3061b52`, `0b2099a`, `2bc6e3c`, `c3ea91d` and `dc3c9e8` (48 of 48,
+    51 of 51, parity PASS); at `7f1db1f` the embedded suite lost `completionhub`
     once, and at `f2dcbc3` and `019c08b` `markers` once each (both in
     Blockers).
   - THE RELEASE'S TEST PASS (2026-11-17; the decision of 2026-11-16
@@ -104,10 +104,20 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     failures were the suite's own (`658a924`, `8d1a8b5`, `931542b`). A
     second codex hunt found tp-4 to tp-7, repaired (`1342e6a`,
     `f29d77c`, `d1cc1b3`, `d48bc08`: Settings controls now carry
-    aria-busy until loaded); a third hunt reads `019c08b..dc3c9e8`.
-    RELEASE_NOTES.md describes the embedded player on all three
-    platforms and both fixes. The release run 44018388540 predates
-    `3c4a510` and `d48bc08`; a release run after them replaces it.
+    aria-busy until loaded); a third and a fourth found tp-8 and tp-9,
+    repaired (`6f92baa`, `17893e6`), and a fifth was clean. The fifth
+    Windows run (44028451739 at `a465771`, with the repaired set) passed
+    the embedded suite in full (50) and the external but for
+    `markerbutton` (45 passed), which found a third real defect: the
+    marker script drew no skip button when a play was paused inside a
+    marker before mpv's OSD had a size, the case the scenario makes.
+    Reproduced with real mpv and repaired in the script (this commit;
+    the plan's Probe log), with tests under LuaJIT and Lua 5.2, which
+    CI's `frontend` job now installs. RELEASE_NOTES.md describes the
+    embedded player on all three platforms and the fixes. Release run
+    44028491195 at `a465771` passed (it carries `3c4a510` and
+    `d48bc08`); this repair changes a shipped script, so a release run
+    after it replaces that one.
   - Type-checking Windows and macOS Rust from Linux:
     `scripts/check-other-platforms.sh` (repo-guidance, Verification).
 - VELA 1.0.66 IS READY TO BE RELEASED, AS FAR AS THE AGENT CAN TAKE IT

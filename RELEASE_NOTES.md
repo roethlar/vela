@@ -86,6 +86,9 @@ Vela's own window on Linux (with Wayland), Windows and macOS.
 
 ## Fixes
 
+- In mpv's own window, show the skip button when a play is paused inside an
+  intro, credits or commercials before its picture has come up. The button
+  waited for the play to move, and a paused play does not.
 - On Windows, Vela's window now plays from an HTTPS server whose certificate
   comes from an authority Windows trusts even when its revocation cannot be
   checked, as browsers do. Certificate chain and host-name checks stay on.

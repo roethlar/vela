@@ -89,6 +89,11 @@ cargo audit --file Cargo.lock
 cd ..
 ```
 
+`npm run check` also runs the marker script mpv loads
+(`src-tauri/resources/mpv-scripts/vela-markers.lua`) under LuaJIT and Lua 5.2,
+the two Luas mpv runs it with (`luajit` and `lua5.2`); a Lua that is not
+installed is skipped, with that reason.
+
 Linux end-to-end tests drive the real debug app, WebKitGTK, and mpv on a private
 Xvfb display with a throwaway Vela config:
 
@@ -656,7 +661,8 @@ CI (`ci.yml`) builds the set and proves it in its own `libmpv` job, and builds
 no package. Its `frontend` job installs `bsdtar` and squashfs-tools before
 `npm run check`, so the tests of the check (most of
 `tests/libmpv-packaging.test.mjs`, which pack and unpack packages they make
-themselves) run there and are not skipped.
+themselves) run there and are not skipped; it installs LuaJIT and Lua 5.2 for
+the same reason, for `tests/markers-script.test.mjs`.
 
 What has been seen, and what follows from it:
 

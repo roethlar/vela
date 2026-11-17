@@ -2492,6 +2492,19 @@ artifact keeps the probe's logs and screenshots.
   44018857651 and W2 run 44018869179: each played twice in Vela's window
   and closed from the page, the test pattern on screen (macOS under Vela's
   control bar).
+- **2026-11-17, Windows run 5 at `a465771`: the embedded suite passes in
+  full; a defect in the marker script.** Run 44028451739, with the set CI
+  built after `3c4a510` (44025886388): embedded 50 passed, none failed;
+  external 45 passed and `markerbutton` failed, "the button to show", as
+  it had once in run 3. The scenario pauses the play and moves it into the
+  intro; its position reached the script before mpv's OSD had a size, so
+  the script drew nothing, and a paused play sends no later position to
+  try again with. Reproduced with real mpv on Linux, started paused inside
+  the intro: the old script never showed the button (3 of 3), the repaired
+  one within 0.06 s (3 of 3). Repaired in the script (this commit: the OSD
+  size arriving reads the position again), with tests that run it under
+  LuaJIT and Lua 5.2 (`tests/markers-script.test.mjs`). A Windows run at
+  the repair follows.
 
 ### Design that follows (2026-11-16)
 

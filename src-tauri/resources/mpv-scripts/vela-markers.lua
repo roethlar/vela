@@ -192,8 +192,9 @@ end
 
 -- Returns whether the button actually reached the screen. The caller latches
 -- `armed` only on success, so a tick that arrives before the video output has
--- published its dimensions simply retries on the next one instead of latching a
--- button nobody can see.
+-- published its dimensions retries on the next one, or when the dimensions
+-- arrive (a paused play sends no next one), instead of latching a button
+-- nobody can see.
 local function draw_button(marker)
     local w, h = osd_size()
     if not w then
@@ -322,10 +323,15 @@ if #markers > 0 then
     mp.add_key_binding(nil, "activate-skip", activate_skip)
     mp.observe_property("time-pos", "number", on_position)
     -- Re-render against the new geometry so the drawn box and its hitbox stay
-    -- the same rectangle when the window is resized or fullscreened.
+    -- the same rectangle when the window is resized or fullscreened. A
+    -- position seen inside a range before the OSD had a size armed nothing,
+    -- and a paused play sends no further position to retry with, so the size
+    -- arriving reads the position again.
     mp.observe_property("osd-dimensions", "native", function()
         if armed then
             arm(armed)
+        else
+            on_position(nil, mp.get_property_number("time-pos"))
         end
     end)
     mp.register_event("end-file", reset)
