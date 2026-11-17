@@ -532,6 +532,11 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   core dump; Vela's process stays up). The Arch package of run
   44098988278 is on that machine (`~/vela-nv-test/`) for the owner to
   install (`sudo`). What to do with the AppImage is the owner's decision.
+  The owner installed it; after a real restart (the first plays went to
+  mpv's window with "restart Vela to use it": that Vela never restarted),
+  the owner, 2026-11-17: "playback works in both the embedded and external
+  players without issue". N1 IS PROVEN ON NVIDIA. Follow-up asked by the
+  owner: `.agents/plans/settings-restructure.md` (draft).
 
 - No known product blocker.
 - A timing failure in a local end-to-end run proves nothing until the
