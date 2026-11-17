@@ -518,9 +518,10 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   throwaway config asking for Vela's window. It started in embedded window
   mode (no refusal line, which a refused start prints), stayed up 20 s with
   no "Error 71" and no WebKit renderer error, and its page loaded (the
-  start-up marker was gone within a second). Not yet known: whether the
-  window draws (no screenshot tool there; the owner's eyes), and a play
-  (no media source configured in the throwaway config).
+  start-up marker was gone within a second). The window DRAWS: the owner,
+  looking at that machine's screen, "looks correct with the add source
+  prompt" (2026-11-17). Not yet known: a play in Vela's window there (no
+  media source in the throwaway config).
 
 - No known product blocker.
 - A timing failure in a local end-to-end run proves nothing until the
