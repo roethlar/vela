@@ -127,6 +127,79 @@ patch("src-tauri/src/player/embedded/macos_host.rs", [
         );"""),
 ])
 
+# The display chain on macOS, link by link: mpv's update callbacks, the
+# requests that queue a main-thread task (and those coalesced), each task with
+# whether it found its play's view, each display_now, each skip render.
+patch("src-tauri/src/player/embedded/macos_gl.rs", [
+("""    let target = unsafe { &*context.cast::<PlacementTarget>() };
+    target.request_display();""",
+"""    let target = unsafe { &*context.cast::<PlacementTarget>() };
+    {
+        """ + COUNTER.format("CB") + """
+        let n = PROBE_CB.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+        if n <= 5 || n % 50 == 0 {
+            eprintln!("probe-chain: mpv update callback #{n}");
+        }
+    }
+    target.request_display();"""),
+("""        self.display();
+        CATransaction::flush();""",
+"""        {
+            """ + COUNTER.format("DN") + """
+            let n = PROBE_DN.fetch_add(1, Ordering::Relaxed) + 1;
+            if n <= 5 || n % 50 == 0 {
+                eprintln!("probe-chain: display_now #{n} asynchronous={}", self.isAsynchronous());
+            }
+        }
+        self.display();
+        CATransaction::flush();"""),
+("""        if drawing.frame.needs_skip() {""",
+"""        if drawing.frame.needs_skip() {
+            {
+                """ + COUNTER.format("SKIP") + """
+                let n = PROBE_SKIP.fetch_add(1, Ordering::Relaxed) + 1;
+                if n <= 5 || n % 50 == 0 {
+                    eprintln!("probe-chain: skip render #{n}");
+                }
+            }"""),
+])
+
+patch("src-tauri/src/player/embedded/macos_host.rs", [
+("""    pub(super) fn request_display(&self) {
+        if !self.display_queue.request() {
+            return;
+        }""",
+"""    pub(super) fn request_display(&self) {
+        if !self.display_queue.request() {
+            """ + COUNTER.format("COAL") + """
+            let n = PROBE_COAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+            if n <= 5 || n % 50 == 0 {
+                eprintln!("probe-chain: request coalesced #{n}");
+            }
+            return;
+        }
+        {
+            """ + COUNTER.format("REQ") + """
+            let n = PROBE_REQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+            if n <= 5 || n % 50 == 0 {
+                eprintln!("probe-chain: request queued #{n}");
+            }
+        }"""),
+("""            queue.begin();
+            VIEWS.with_borrow(|views| {
+                if let Some(view) = views.get(&id) {""",
+"""            queue.begin();
+            VIEWS.with_borrow(|views| {
+                {
+                    """ + COUNTER.format("TASK") + """
+                    let n = PROBE_TASK.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                    if n <= 5 || n % 50 == 0 {
+                        eprintln!("probe-chain: main task #{n} id={id} found={}", views.contains_key(&id));
+                    }
+                }
+                if let Some(view) = views.get(&id) {"""),
+])
+
 # Why a settings or connections file is "unavailable" at start (the page shows
 # only a generic sentence), and, on Windows, the ACL the privacy check read
 # back (probe W2 found Vela refusing its own settings on a hosted runner).
