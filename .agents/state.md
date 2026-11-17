@@ -113,10 +113,14 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     marker before mpv's OSD had a size, the case the scenario makes.
     Reproduced with real mpv and repaired in the script (this commit;
     the plan's Probe log), with tests under LuaJIT and Lua 5.2, which
-    CI's `frontend` job now installs. RELEASE_NOTES.md describes the
-    embedded player on all three platforms and the fixes. Release run
-    44028491195 at `a465771` passed (it carries `3c4a510` and
-    `d48bc08`); this repair changes a shipped script, so a release run
+    CI's `frontend` job now installs. The sixth Windows run
+    (44034984612 at `0357eec`) passed the embedded suite in full again
+    (50) and `markerbutton`; its `playlistplay` found a fourth real
+    defect: Playlists chosen while Vela starts was put back to Home by
+    the boot's first Home load (repaired in the page, this commit; the
+    plan's Probe log). RELEASE_NOTES.md describes the embedded player on
+    all three platforms and the fixes. Release run 44034987765 at
+    `0357eec` passed; this repair changes the page, so a release run
     after it replaces that one.
   - Type-checking Windows and macOS Rust from Linux:
     `scripts/check-other-platforms.sh` (repo-guidance, Verification).

@@ -86,6 +86,8 @@ Vela's own window on Linux (with Wayland), Windows and macOS.
 
 ## Fixes
 
+- Playlists chosen while Vela is still starting now stays open. Vela used to
+  switch back to Home once its servers had loaded.
 - In mpv's own window, show the skip button when a play is paused inside an
   intro, credits or commercials before its picture has come up. The button
   waited for the play to move, and a paused play does not.

@@ -2505,6 +2505,20 @@ artifact keeps the probe's logs and screenshots.
   size arriving reads the position again), with tests that run it under
   LuaJIT and Lua 5.2 (`tests/markers-script.test.mjs`). A Windows run at
   the repair follows.
+- **2026-11-17, Windows run 6 at `0357eec`: the embedded suite passes in
+  full again; a race at start.** Run 44034984612: embedded 50 passed, none
+  failed; external 44 passed, `markerbutton` among them, and two failed.
+  `playlistplay` clicked Playlists as soon as the sidebar showed it and
+  stayed on Home: the sidebar's Home and Playlists are there before the
+  sources load, and the boot's first Home load, which starts once they
+  have, set the view back to Home. Repaired in the page (this commit: a
+  boot that finds Playlists chosen loads only the sidebar's libraries; Home
+  loads when it is opened), with `tests/boot-navigation.test.mjs`, which
+  runs the page's own boot functions against a backend whose source list
+  arrives late. `playlistedit` looked for a playlist the moment its page
+  opened, before the page had listed them (the suite's; repaired after
+  this). The release run at `0357eec` (44034987765) passed; its installer
+  and app carry the repaired marker script.
 
 ### Design that follows (2026-11-16)
 

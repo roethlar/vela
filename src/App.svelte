@@ -644,7 +644,12 @@
       authenticated = sources.length > 0;
       if (authenticated) {
         void loadServerPlaylists();
-        await loadEverything();
+        // The sidebar's Playlists is there before the sources have loaded, and
+        // Vela's own playlists need none. Playlists chosen meanwhile stays:
+        // Home's first load would put Home back over it (loadHome sets the
+        // mode), so only the sidebar's libraries load; Home loads when opened.
+        if (mode === "playlists") await loadSections(++sourceGen);
+        else await loadEverything();
       }
     } catch (e) {
       setError(String(e));
