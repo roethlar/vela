@@ -363,7 +363,24 @@ pub fn run() {
                     // offline server cannot stall the next video; retaining the
                     // lock across that write makes any later user edit win.
                     let _edit = state.watch_edit_lock.lock().await;
-                    let admitted = match commands::admit_clean_completion(&completion) {
+                    use tauri::Emitter;
+                    let admitted = match commands::admit_clean_completion(&completion, || {
+                        // The tracker's first refresh, now after admission: Home
+                        // may answer its local reads before even asking a server.
+                        // No successor verdict yet; the final report owns that.
+                        let source_id = completion.item_key.split_once(':')
+                            .map(|(source, _)| source).unwrap_or_default();
+                        let _ = app_handle.emit(
+                            "playback-ended",
+                            serde_json::json!({
+                                "sourceId": source_id,
+                                "itemKey": completion.item_key,
+                                "sessionId": completion.session_id,
+                                "runOver": false,
+                                "failedToStart": false,
+                            }),
+                        );
+                    }).await {
                         Ok(admitted) => admitted,
                         Err(error) => {
                             eprintln!("vela: couldn't persist clean playback completion: {error}");
@@ -373,11 +390,12 @@ pub fn run() {
                     if !admitted {
                         // A newer same-key/watch-key session owns the item now.
                         // Skip every clean-completion side effect: no sequence
-                        // advance, terminal continuation, refresh, or server mark.
+                        // advance, terminal continuation, second refresh, or
+                        // server mark (the first refresh, which every end
+                        // gets, has gone out).
                         continue;
                     }
 
-                    use tauri::Emitter;
                     let after = commands::advance_playlist(&state, &completion.session_id).await;
                     if after == commands::AfterCleanEnd::ContinuePlaying {
                         // Terminal policy reads the literal carousel that was

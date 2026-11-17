@@ -233,7 +233,7 @@ export default {
     );
     await pollUntil(
       () => resumeResponses() === successResumeBaseline + 1,
-      'the tracker Home response before PlayedItems succeeds',
+      'the admitted-completion Home response before PlayedItems succeeds',
     );
     assert.equal(
       mock.state.playedServed.length,
@@ -275,7 +275,7 @@ export default {
     await proveExactRefreshesAndNoSuccessor(
       successSockets,
       successResumeBaseline,
-      'success must stop after the tracker and post-attempt refreshes',
+      'success must stop after the admission and post-attempt refreshes',
     );
     await screenshot('01-success-followup');
 
@@ -301,7 +301,7 @@ export default {
     );
     await pollUntil(
       () => resumeResponses() === failureResumeBaseline + 1,
-      'the tracker Home response before PlayedItems fails',
+      'the admitted-completion Home response before PlayedItems fails',
     );
     assert.equal(
       mock.state.playedServed.length,
@@ -346,7 +346,7 @@ export default {
     await proveExactRefreshesAndNoSuccessor(
       failureSockets,
       failureResumeBaseline,
-      'failure must stop after the tracker and unconditional post-attempt refreshes',
+      'failure must stop after the admission and unconditional post-attempt refreshes',
     );
     await screenshot('02-failure-fallback');
     // The end of its proof of its rows in this player (proof.mjs).

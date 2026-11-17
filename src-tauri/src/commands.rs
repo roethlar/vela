@@ -6243,10 +6243,10 @@ async fn play_by_key_locked(
             if_embedded_cannot_start,
             steps_taken,
         };
-        // Every tracker tail publishes a refresh after its final sampled server
-        // check-in. That keeps quit/error progress current; a joined clean EOF gets
-        // a second, authoritative refresh from the async dispatcher after exact-
-        // session completion curation and any backend-owned successor start.
+        // A tracker tail publishes a refresh after its final sampled server
+        // check-in for quits/errors. For clean EOF the dispatcher publishes that
+        // first refresh after local admission, then a second, authoritative one
+        // after the servers' played-state writes and any successor start.
         // This first one also names its session and says whether the run is
         // over (`end_is_run_over`): an end that is not clean reaches no
         // dispatcher, and the page leaves the run's fullscreen on it.
@@ -6331,14 +6331,19 @@ async fn play_by_key_locked(
                         crate::recents::finish_session(cfg, &key, &finishing_session, position_ms, now_ms);
                     },
                 );
-                if let Some(app) = &app {
+                // A proven clean EOF gets its first refresh from the dispatcher,
+                // after local admission. Publishing it here would let Home read
+                // recents/tombstones before that admission. Ordinary stops still
+                // refresh here; they never reach the clean-completion dispatcher.
+                let clean_eof = advance.saw_eof(&session_id);
+                if let Some(app) = app.as_ref().filter(|_| !clean_eof) {
                     use tauri::Manager;
                     // A plain thread outside any runtime: the active
                     // session's lock is waited for here, and held only to
                     // read it.
                     let run_over = tracker_end_is_run_over(
                         &app.state::<AppState>(),
-                        advance.saw_eof(&session_id),
+                        clean_eof,
                         &session_id,
                     );
                     let _ = app.emit(
@@ -7432,20 +7437,46 @@ pub async fn server_playlist_play(
 /// Persist local completion for a joined clean EOF. The caller holds
 /// `watch_edit_lock`, keeping this admission ordered with explicit watched-
 /// state edits and the later best-effort server synchronization.
-pub(crate) fn admit_clean_completion(completion: &PlaybackCompletion) -> Result<bool, String> {
-    let play_key = completion.item_key.clone();
-    let watch_key = completion.watch_key.clone();
-    let session_id = completion.session_id.clone();
-    let started_at_ms = completion.started_at_ms;
-    config::update(move |cfg| {
-        Ok(crate::recents::complete_clean_session(
-            cfg,
-            &play_key,
-            watch_key.as_deref(),
-            &session_id,
-            started_at_ms,
-        ))
+/// The first refresh belongs to this boundary too: even immediately answered
+/// local reads must see the admitted settings. It goes out once admission has
+/// been tried, whatever the outcome, as the tracker's did before: a failed
+/// write, or a newer session that owns the item, leaves Home showing what the
+/// settings hold, but the page still hears that the play ended. The tracker
+/// never waits for the dispatcher, and settings I/O runs off the async
+/// runtime's workers.
+pub(crate) async fn admit_clean_completion(
+    completion: &PlaybackCompletion,
+    refresh: impl FnOnce(),
+) -> Result<bool, String> {
+    admit_clean_completion_with(completion.clone(), config::update, refresh).await
+}
+
+type CleanCompletionChange =
+    Box<dyn FnOnce(&mut config::AppConfig) -> Result<bool, String> + Send>;
+
+/// The real admission/refresh boundary, with the settings writer supplied so a
+/// test can hold the write and answer the refresh's local reads immediately.
+async fn admit_clean_completion_with(
+    completion: PlaybackCompletion,
+    update: impl FnOnce(CleanCompletionChange) -> Result<bool, String> + Send + 'static,
+    refresh: impl FnOnce(),
+) -> Result<bool, String> {
+    let admitted = tauri::async_runtime::spawn_blocking(move || {
+        update(Box::new(move |cfg| {
+            Ok(crate::recents::complete_clean_session(
+                cfg,
+                &completion.item_key,
+                completion.watch_key.as_deref(),
+                &completion.session_id,
+                completion.started_at_ms,
+            ))
+        }))
     })
+    .await
+    .map_err(|_| "clean playback completion worker failed".to_string())
+    .and_then(|admitted| admitted);
+    refresh();
+    admitted
 }
 
 /// Best-effort all-backing half of a locally admitted clean completion. The
@@ -10803,6 +10834,109 @@ mod tests {
         advance.mark_ended(completed.clone());
         assert_eq!(advance.take_ready(), Some(completed));
         assert_eq!(advance.take_ready(), None);
+    }
+
+    #[tokio::test]
+    async fn clean_completion_first_refresh_reads_after_the_admission_write() {
+        let dir = std::env::temp_dir().join(format!("vela-clean-refresh-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.json");
+        let lock_path = dir.join("config.lock");
+        let mut completed = completion("ended", "test:episode");
+        completed.watch_key = Some("test:watch-owner".to_string());
+        let mut episode = catalog_item(&completed.item_key, "episode", 1, false);
+        episode.watch_key = completed.watch_key.clone();
+        config::update_at(&path, &lock_path, |cfg| {
+            crate::recents::record_play_start(cfg, episode, false, "ended".to_string(), 10);
+            Ok(())
+        }).unwrap();
+
+        let (write_entered, writing) = tokio::sync::oneshot::channel();
+        let (release_write, may_write) = std::sync::mpsc::channel();
+        let (refreshed, local_reads) = tokio::sync::oneshot::channel();
+        let write_path = path.clone();
+        let read_path = path.clone();
+        let dispatch = tokio::spawn(admit_clean_completion_with(
+            completed,
+            move |change| {
+                write_entered.send(()).unwrap();
+                // Hold admission before it takes any config lock. A refresh
+                // published too early can therefore read both old lists at once.
+                may_write.recv_timeout(Duration::from_secs(5)).unwrap();
+                config::update_at(&write_path, &lock_path, change)
+            },
+            move || {
+                // The two local Home commands can answer immediately, even
+                // while get_hubs/the server's played-state write is still pending.
+                let recents = crate::recents::list(&config::load_unmigrated_at(&read_path).unwrap());
+                let tombstones = config::load_unmigrated_at(&read_path).unwrap().hidden_from_continue;
+                refreshed.send((recents, tombstones)).unwrap();
+            },
+        ));
+        let (recents, tombstones) = tokio::time::timeout(Duration::from_secs(10), async {
+            writing.await.unwrap();
+            let before = config::load_unmigrated_at(&path).unwrap();
+            assert_eq!(crate::recents::list(&before).len(), 1);
+            assert!(before.hidden_from_continue.is_empty());
+            release_write.send(()).unwrap();
+            assert!(dispatch.await.unwrap().unwrap());
+            local_reads.await.unwrap()
+        }).await.expect("admission and its refresh must finish after the write is released");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert!(recents.is_empty(), "the first refresh read recents before admission");
+        for key in ["test:episode", "test:watch-owner"] {
+            assert!(tombstones.iter().any(|hidden| hidden == key),
+                "the first refresh read tombstones before admission: missing {key}");
+        }
+    }
+
+    #[tokio::test]
+    async fn clean_completion_refreshes_once_after_a_failed_or_rejected_admission() {
+        // The page hears of every end, as it did from the tracker: a failed
+        // write, or a newer session that owns the item, still releases the
+        // first refresh, once, after the attempt.
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering::SeqCst};
+        use std::sync::Arc;
+        let refreshes = Arc::new(AtomicUsize::new(0));
+        let after_attempt = |attempted: &Arc<AtomicBool>| {
+            let (attempted, refreshes) = (attempted.clone(), refreshes.clone());
+            move || {
+                assert!(attempted.load(SeqCst), "the refresh went out before admission was tried");
+                refreshes.fetch_add(1, SeqCst);
+            }
+        };
+
+        let attempted = Arc::new(AtomicBool::new(false));
+        let tried = attempted.clone();
+        let failed = admit_clean_completion_with(
+            completion("ended", "test:episode"),
+            move |_| {
+                tried.store(true, SeqCst);
+                Err("write failed".to_string())
+            },
+            after_attempt(&attempted),
+        ).await;
+        assert_eq!(failed, Err("write failed".to_string()));
+        assert_eq!(refreshes.load(SeqCst), 1, "a failed admission still refreshes, once");
+
+        let attempted = Arc::new(AtomicBool::new(false));
+        let tried = attempted.clone();
+        let rejected = admit_clean_completion_with(
+            completion("ended", "test:episode"),
+            move |change| {
+                tried.store(true, SeqCst);
+                let mut cfg = config::AppConfig::default();
+                crate::recents::record_play_start(
+                    &mut cfg, catalog_item("test:episode", "episode", 1, false),
+                    false, "newer".to_string(), 20,
+                );
+                change(&mut cfg)
+            },
+            after_attempt(&attempted),
+        ).await;
+        assert_eq!(rejected, Ok(false));
+        assert_eq!(refreshes.load(SeqCst), 2, "a superseded admission still refreshes, once");
     }
 
     // pc-2: the tracker's end says whether a clean end of file was seen for

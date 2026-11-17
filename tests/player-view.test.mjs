@@ -999,7 +999,10 @@ test("the dispatcher's report of a clean end names its session and says whether 
           commands::clean_end_report(&completion, after),
       );`),
   );
-  assert.equal(lib.split('"playback-ended"').length - 1, 1, 'the dispatcher sends it once, there');
+  assert.equal(lib.split('commands::clean_end_report(&completion, after)').length - 1, 1,
+    'the dispatcher sends the successor verdict once, in the final report');
+  assert.equal(lib.split('"playback-ended"').length - 1, 2,
+    'the other report is the first refresh after local admission, with no successor verdict');
   assert.match(
     commands,
     shape(`"runOver": after == AfterCleanEnd::RunOver,
@@ -1336,7 +1339,7 @@ test("the tracker's report of an end names its session and says whether the run 
     play,
     shape(`let run_over = tracker_end_is_run_over(
         &app.state::<AppState>(),
-        advance.saw_eof(&session_id),
+        clean_eof,
         &session_id,
     );
     let _ = app.emit(
