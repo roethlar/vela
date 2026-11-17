@@ -2422,6 +2422,34 @@ artifact keeps the probe's logs and screenshots.
   neither was at fault. The first time Vela's macOS embedded code played
   video on a Mac. Not measured by any machine: a real Mac's GPU at mpv's
   default settings, HDR.
+- **2026-11-17, M2 and W2 at `91c72f6`, after the hunts' repairs pl-14 to
+  pl-19.** M2 run 43998117150 and W2 run 43998126292: both play in Vela's
+  window as before.
+- **2026-11-17, W3: why the Windows end-to-end suite gets no session; the
+  harness repaired.** The suite still got none at `ba0ebad`, after the
+  settings repair (run 44003362983). Probe W3 (`probes/w3-webdriver`, run
+  44003737295) started a debug Vela six ways: through tauri-driver and
+  Edge WebDriver as the suite does, through Edge WebDriver alone with its
+  verbose log, and alone, each with and without the suite's pin of the
+  WebView2 runtime folder. None got a session or a DevTools port. Edge
+  WebDriver's log: it launches the app with its DevTools port and
+  automation switches in `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`, its own
+  data folder in `WEBVIEW2_USER_DATA_FOLDER`, and fails with
+  "DevToolsActivePort file doesn't exist". Vela's browser process had the
+  driver's data folder but none of its arguments, only wry's own
+  `--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection`: wry
+  always sets browser arguments, and on the hosted runner (an elevated
+  account, WebView2 156) the variable never reaches the browser. Other
+  Tauri projects report the same on runtimes 150 to 156 (their fixes:
+  arguments the app sets itself, in a test-only build). Repair `94662e3`:
+  the suite's Windows build gives each window, through `tauri build
+  --config`, wry's default arguments plus `--remote-debugging-port=0`; the
+  browser writes DevToolsActivePort into the driver's folder and the
+  launch finds it. The shipped app is unchanged. Run 44006356946 at that
+  commit: `markwatched` PASS, the first scenario to pass on Windows. Both
+  Windows suites in full follow (run 44007571185), and every Windows run
+  is recorded "dirty" (the worktree changed during the run), which the
+  verdict refuses; `f2dcbc3` makes the runner say what changed.
 
 ### Design that follows (2026-11-16)
 
