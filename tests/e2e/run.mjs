@@ -457,7 +457,12 @@ for (const scenario of scenarios) {
 // for neither player and writes none.
 if (!live) {
   const tree = recordedTree(treeAtStart, [...treeSamples, readTree()]);
-  if (tree.changedDuringRun) console.error('e2e: the worktree changed during the run; its results are recorded as dirty');
+  if (tree.changedDuringRun) {
+    console.error('e2e: the worktree changed during the run; its results are recorded as dirty');
+    // What changed, so the cause can be found (paths and git's status codes only).
+    const changed = [...treeSamples, readTree()].find((s) => s.head !== treeAtStart.head || s.status !== treeAtStart.status);
+    console.error(`e2e: at the start ${treeAtStart.head}: ${JSON.stringify(treeAtStart.status)}; later ${changed.head}: ${JSON.stringify(changed.status)}`);
+  }
   fs.mkdirSync(resultsDir, { recursive: true });
   fs.writeFileSync(
     path.join(resultsDir, `${runPlayer}.json`),
