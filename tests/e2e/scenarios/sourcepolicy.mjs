@@ -191,6 +191,12 @@ async function playVersion(driver, sourceName) {
 export default {
   name: 'sourcepolicy',
   rows: ['6'],
+  skipOnWindows:
+    "Its distant copy is reached at the IPv4-mapped address ::ffff:127.0.0.1, which Vela classifies as the Internet; " +
+    "only a dual-stack client socket reaches it, and Windows' IPv6 sockets are IPv6-only by default, so on Windows Vela " +
+    "never gets that copy (run 44007571185 chose the local one) and no other loopback-routed address is classified as " +
+    'the Internet. The source policy is the same code on every platform and this scenario runs on Linux; row 6 is shown ' +
+    'on Windows by multiplex and mergedview.',
 
   async seed({ configRoot }) {
     const mediaDir = makeClips(configRoot, ['policy-local.mp4', 'policy-distant.mp4']);
