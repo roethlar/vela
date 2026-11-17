@@ -64,6 +64,13 @@ async function addTitle(driver, title, playlistName) {
     `return !!document.querySelector('.addsubmenu[aria-label="Choose a playlist"]')`,
     'the Add to Playlist submenu',
   );
+  // The submenu opens on "Loading playlists…" and lists them, enabled, once
+  // they have loaded (the first Windows run looked before that).
+  await driver.waitFor(
+    `return [...document.querySelectorAll('.addsubmenu[aria-label="Choose a playlist"] button')]
+      .some((b) => !b.disabled && b.textContent.replace(/\\s+/g, ' ').trim().startsWith(${JSON.stringify(`${playlistName} `)}))`,
+    `the ${playlistName} choice, loaded`,
+  );
   const target = await driver.find(
     'xpath',
     `//div[@aria-label='Choose a playlist']//button[starts-with(normalize-space(.),'${playlistName} ')]`,
