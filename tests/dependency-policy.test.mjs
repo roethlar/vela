@@ -1199,11 +1199,24 @@ test('macOS LGPL switches and SDK-only build patch reject regressions (green and
     assert.deepEqual([...candidate.matchAll(/^\+\+\+ b\/(.*)$/gm)].map((m) => m[1]), ['meson.build'], 'build description only');
     assert.match(candidate, /^\+    objc_link_flags = \['-isysroot', macos_sdk_path\]$/m, 'SDK only');
     assert.doesNotMatch(candidate.split('\n').filter((l) => l.startsWith('+')).join('\n'), /\/usr\/local|\/opt\/homebrew/, 'no host search path');
+    // pl-9: the Apple audio outputs call cfstr_from_cstr from
+    // osdep/utils-mac.c, which meson.build compiles only with cocoa; without
+    // this hunk the library fails to load (undefined _cfstr_from_cstr).
+    assert.match(
+      candidate,
+      /^ +'audio\/out\/ao_coreaudio_utils\.c'\)\n\+    if not features\['cocoa'\]\n\+        sources \+= files\('osdep\/utils-mac\.c'\)\n\+    endif\n endif$/m,
+      'utils-mac.c for the audio outputs without cocoa',
+    );
   };
   guard(patch);
   assert.throws(() => guard(patch.replace('+++ b/meson.build', '+++ b/player/main.c')), /build description/);
   assert.throws(() => guard(patch.replace("+    objc_link_flags = ['-isysroot', macos_sdk_path]", "+    objc_link_flags = ['-L/usr/local/lib']")), /SDK only/);
   assert.throws(() => guard(patch + '\n+    link_flags += ["-L/opt/homebrew/lib"]\n'), /host search path/);
+  const utilsHunk = /^@@ -882,2 \+882,5 @@\n(?:[ +].*\n)*?(?=@@)/m;
+  assert.match(patch, utilsHunk, 'the fixture holds the utils-mac.c hunk');
+  assert.throws(() => guard(patch.replace(utilsHunk, '')), /utils-mac\.c for the audio outputs/);
+  assert.throws(() => guard(patch.replace("+    if not features['cocoa']", "+    if features['cocoa']")), /utils-mac\.c for the audio outputs/);
+  assert.throws(() => guard(patch.replace("+        sources += files('osdep/utils-mac.c')\n", '')), /utils-mac\.c for the audio outputs/);
 });
 
 macRequired('CI', macJob, [
