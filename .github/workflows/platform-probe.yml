@@ -34,7 +34,7 @@ jobs:
       # A probe that builds Vela needs the repository's Node (and installs
       # its npm itself).
       - uses: actions/setup-node@v7
-        if: startsWith(inputs.probe, 'm2-') || inputs.probe == 'w2-vela'
+        if: startsWith(inputs.probe, 'm2-') || inputs.probe == 'w2-vela' || inputs.probe == 'w3-webdriver'
         with:
           node-version-file: .node-version
           package-manager-cache: false

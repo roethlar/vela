@@ -32,4 +32,11 @@ answer is in that log and product code has replaced it.
 - `w2-vela`: the same on a hosted Windows runner (`run.ps1`; M2's hook,
   page script and mock server), where the end-to-end suite cannot yet start
   a WebDriver session. Hosted Windows draws Direct3D 11 with WARP.
+- `w3-webdriver`: why that suite gets no WebDriver session (`run.ps1`). A
+  debug Vela started six ways, one at a time and with no scenario: through
+  tauri-driver and Edge WebDriver as the suite does, through Edge WebDriver
+  alone with its verbose log, and alone with a DevTools port asked of
+  WebView2; each with and without the suite's pin of the WebView2 runtime
+  folder. Each keeps the session's answer, the processes every three
+  seconds, a screenshot and the Application event log's errors.
 - `libmpv-macos`: build the pinned macOS 11+ universal set on `macos-latest`, load/play/audit both architectures (Intel under Rosetta), and retain build/configure/check logs, MANIFEST and every dylib's `otool -L`. Budget estimate: 30–60 minutes cold, unmeasured; the workflow allows 170 minutes.
