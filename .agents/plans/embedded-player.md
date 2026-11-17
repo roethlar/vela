@@ -2450,6 +2450,26 @@ artifact keeps the probe's logs and screenshots.
   Windows suites in full follow (run 44007571185), and every Windows run
   is recorded "dirty" (the worktree changed during the run), which the
   verdict refuses; `f2dcbc3` makes the runner say what changed.
+- **2026-11-17, the Windows suites in full, first and second runs.** Run
+  44007571185 at `2ab8ac5`: external 31 passed, 16 failed; embedded 37
+  passed, 14 failed; dirty. One cause was Vela's: under Cargo 1.100's
+  build-dir layout tauri-build 2.6 copies resources into
+  `target\debug\build\`, so a debug or `--no-bundle` build had no mpv
+  scripts next to the binary and markers and autocrop were missing
+  (`e87ffe2`: `build.rs` copies them where Tauri looks; installed bundles
+  were never affected). The rest were the venue: Git for Windows' CRLF
+  checkout and the Tauri CLI's LF rewrite of `Cargo.toml` (dirty;
+  `2302240`), Edge WebDriver's new data folder per session (page storage
+  lost across a restart; `f089797`), the runner's animations off (reduced
+  motion; `ae11f7f`), SChannel ignoring `SSL_CERT_FILE` (the Plex
+  scenarios, where Vela then asked the real plex.tv with a synthetic
+  token and got 401; `73666ac`), and scenario timing on the slower runner
+  (`f177a85`, `1b83109`, `7687583`, `2546470`); `sourcepolicy`'s distant
+  mock is unreachable from Windows' IPv6-only sockets and is skipped
+  there (`019c08b`; its row 6 is shown by `multiplex` and `mergedview`).
+  Run 44013741142 at `e87ffe2`, not dirty: external 39 passed, 8 failed;
+  embedded 42 passed, 9 failed, every failure one whose repair landed
+  after that commit. A third run at `019c08b` (44018219446) follows.
 
 ### Design that follows (2026-11-16)
 
