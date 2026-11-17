@@ -1183,6 +1183,31 @@ test('macOS draws and skips use the tested nonblocking render parameters', () =>
   assert.doesNotMatch(methodBody(source, '    pub(crate) fn draw(', 'Linux draw'), /with_macos_|BLOCK_FOR_TARGET_TIME/);
 });
 
+test('macOS protects zero video timing throughout the play using asynchronous observations and sets', () => {
+  const mac = code(read('src-tauri/src/player/embedded/macos_session.rs'));
+  const timing = code(read('src-tauri/src/player/embedded/macos_timing.rs'));
+  assert.match(session, /#\[cfg\(any\(target_os = "macos", test\)\)\]\s+#\[path = "macos_timing.rs"\]\s+mod macos_timing;/);
+  const setup = functionBody(mac, 'pub(super) fn set_up(', 'macOS setup');
+  assert.match(setup, /let timing = Timing::observe\(&player, Instant::now\(\)\)\?;/);
+  assert.ok(setup.indexOf('Timing::observe(') < setup.indexOf('surface.drawing.start('));
+  assert.match(setup, /targets: Targets::new\(\),\s+timing,/);
+  const turn = methodBody(mac, '    fn turn(', 'macOS turn');
+  assert.match(turn, /if let Err\(reason\) = self\.timing\.check_deadline\(Instant::now\(\)\) \{\s+eprintln!\([^;]*\);\s+return false;/);
+  assert.match(turn, /Event::Answer \{ request, taken \} => \{\s+if let Err\(reason\) = self\.timing\.answered\(request, taken, &self\.player\) \{\s+eprintln!\([^;]*\);\s+return false;/);
+  assert.match(turn, /Event::TargetChanged \{\s+registration,\s+option,\s+value,\s+\} => \{\s+if let Err\(reason\) = self\.timing\.reported\(\s*registration, &option, value\.as_deref\(\), &self\.player, Instant::now\(\),\s*\) \{[\s\S]*?return false;/);
+  const shippedTiming = timing.slice(0, timing.indexOf('#[cfg(test)]'));
+  assert.match(shippedTiming, /const OPTION: &str = "video-timing-offset";/);
+  assert.match(shippedTiming, /mpv\.observe\(FIRST_ID, OPTION\)/);
+  assert.match(shippedTiming, /if !needs_restoration\(value\)/);
+  assert.match(shippedTiming, /mpv\.ask\(request, OPTION, "0"\)/);
+  assert.match(shippedTiming, /mpv\.observe\(request, OPTION\)/);
+  assert.doesNotMatch(shippedTiming, /\.property\(|\.set_option\(|\.hold\(/);
+  // TargetAccess is the existing asynchronous adapter; no new blocking API.
+  const adapter = code(libmpv).slice(code(libmpv).indexOf('impl super::session::macos_hdr::TargetAccess for Player'));
+  assert.match(methodBody(adapter, '    fn ask(', 'macOS async set'), /self\.lib\.set_property_async/);
+  assert.match(methodBody(adapter, '    fn observe(', 'macOS observation'), /self\.lib\.observe_property/);
+});
+
 test('macOS main-thread drawable flush does not request a vertical-sync wait', () => {
   const gl = code(read('src-tauri/src/player/embedded/macos_gl.rs'));
   const create = methodBody(gl, '    fn new(', 'CGL context creation');

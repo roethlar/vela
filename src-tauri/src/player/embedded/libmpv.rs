@@ -154,8 +154,8 @@ pub(crate) enum Event {
     /// `request`: whether mpv took the value.
     Answer { request: u64, taken: bool },
     /// One of mpv's targets has changed, by Vela's ask or by anything else,
-    /// or is reported afresh. The only properties Vela observes are those
-    /// `hdr` names ([`super::hdr::Targetable::observe`]); `registration` is
+    /// or is reported afresh. Observations protect colour targets and macOS
+    /// video timing; `registration` is
     /// the one this report was made under. `value` is the value as text, or
     /// `None` when mpv cannot say.
     TargetChanged {

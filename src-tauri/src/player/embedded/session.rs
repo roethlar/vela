@@ -51,6 +51,10 @@ use macos::{set_up, Live};
 #[path = "macos_hdr.rs"]
 pub(super) mod macos_hdr;
 
+#[cfg(any(target_os = "macos", test))]
+#[path = "macos_timing.rs"]
+mod macos_timing;
+
 /// Where the video is, in the window's own units, relative to the window.
 #[cfg(any(target_os = "linux", target_os = "macos", test))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

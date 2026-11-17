@@ -2,6 +2,7 @@
 //! Page position reports run independently in player::report over mpv's IPC.
 
 use super::macos_hdr::{allow_restoration, decide, Decision, Range, TargetAccess, Targets};
+use super::macos_timing::Timing;
 use super::*;
 
 #[derive(Clone, Copy)]
@@ -25,6 +26,7 @@ pub(super) struct Live {
     primaries: Option<String>,
     video_registration: u64,
     targets: Targets,
+    timing: Timing,
     displayed: Option<Range>,
     switching: Option<Switch>,
     generation: u64,
@@ -58,6 +60,7 @@ pub(super) fn set_up(
     if !player.observe_video_params(video_registration) {
         return Err("mpv could not report video colour parameters".into());
     }
+    let timing = Timing::observe(&player, Instant::now())?;
     surface.drawing.hold(1);
     surface.drawing.start(&player)?;
     let now = Instant::now();
@@ -68,6 +71,7 @@ pub(super) fn set_up(
         primaries: None,
         video_registration,
         targets: Targets::new(),
+        timing,
         displayed: None,
         generation: 1,
         switching: Some(Switch {
@@ -201,6 +205,10 @@ impl PlayLoop for Live {
             if stopping.expired(Instant::now()) {
                 return false;
             }
+            if let Err(reason) = self.timing.check_deadline(Instant::now()) {
+                eprintln!("vela: embedded macOS timing protection stopped: {reason}");
+                return false;
+            }
             match self.player.next_event() {
                 Event::None => {
                     if let Err(reason) = self.colour_turn() {
@@ -231,6 +239,10 @@ impl PlayLoop for Live {
                     }
                 }
                 Event::Answer { request, taken } => {
+                    if let Err(reason) = self.timing.answered(request, taken, &self.player) {
+                        eprintln!("vela: embedded macOS timing protection stopped: {reason}");
+                        return false;
+                    }
                     if !self.targets.answered(request, taken, &self.player) {
                         eprintln!("vela: embedded macOS colour switch stopped: mpv refused a protected target");
                         return false;
@@ -241,6 +253,12 @@ impl PlayLoop for Live {
                     option,
                     value,
                 } => {
+                    if let Err(reason) = self.timing.reported(
+                        registration, &option, value.as_deref(), &self.player, Instant::now(),
+                    ) {
+                        eprintln!("vela: embedded macOS timing protection stopped: {reason}");
+                        return false;
+                    }
                     self.targets
                         .reported(registration, &option, value.as_deref());
                 }

@@ -11,6 +11,7 @@ pub(super) fn required_args() -> Vec<LaunchArg> {
         LaunchArg::set("force-window", "no"),
         // render.h pairs this with BLOCK_FOR_TARGET_TIME=0: hand frames to
         // the main-thread renderer when due, without making that thread wait.
+        // macos_timing observes and restores it after runtime profile changes.
         LaunchArg::set("video-timing-offset", "0"),
         LaunchArg::set("target-prim", "bt.709"),
         LaunchArg::set("target-trc", "srgb"),
