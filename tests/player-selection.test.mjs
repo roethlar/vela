@@ -537,13 +537,11 @@ function playerGuidance(file) {
 }
 
 for (const file of ['src/lib/Settings.svelte', 'docs/usage.md', 'RELEASE_NOTES.md']) {
-  test(`${file}: switching to the external player is explained as a next-video change`, () => {
-    assert.ok(/Switching to mpv's own window applies to the next video\./.test(playerGuidance(file)), 'explain when an external choice applies');
-    assert.doesNotMatch(playerGuidance(file), /(?:a change|change of player) takes effect the next time Vela starts/i);
-  });
-
-  test(`${file}: embedded restart guidance is conditional on how this run started`, () => {
-    assert.ok(/To use Vela's window, restart Vela if this run started without embedded playback\./.test(playerGuidance(file)), 'explain when embedded playback needs a restart');
+  // Owner, 2026-11-17: every start is ready for Vela's window, so neither
+  // choice needs a restart.
+  test(`${file}: either player choice is explained as a next-video change, with no restart`, () => {
+    assert.ok(/Either choice applies to the next video; no restart is needed\./.test(playerGuidance(file)), 'explain when a choice applies');
+    assert.doesNotMatch(playerGuidance(file), /restart Vela|takes effect the next time Vela starts/i);
   });
 }
 

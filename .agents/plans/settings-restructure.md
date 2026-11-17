@@ -1,6 +1,19 @@
 # Plan: Settings restructured; a restart prompt for the video player
 
-Status: DRAFT, 2026-11-17, awaiting the owner's approval; nothing is built.
+Status: APPROVED by the owner, 2026-11-17 ("yes"), with S1 amended as
+below at the owner's question "why can we not just always start vela with
+the assumption that internal is the preferred? then neither setting would
+need a restart." S1 landed (`.agents/state.md` names the commit); S2 next.
+
+## Slice S1, as amended and approved: every start is ready for Vela's window
+
+Every start is embedded window mode (transparent window; on Linux,
+WebKit's GPU renderer on) whichever player is chosen, unless something
+rules it out (a start-up marker, no Wayland, the renderer turned off in
+the user's environment), and then it says why. So neither choice needs a
+restart and there is no prompt; the restart sentence goes from Settings,
+`docs/usage.md` and the release notes. The original S1 below (a
+restart-or-cancel dialog) is superseded.
 
 ## Why
 

@@ -12,11 +12,13 @@
 //! need none of those Linux renderer/driver restrictions; only the saved
 //! choice and the recovery marker determine its window mode.
 //!
-//! So there are two ways to start. **Today's**: an opaque window with that
-//! renderer off, exactly as before this player existed, and what every start
-//! is unless the user has chosen the embedded player. **Embedded window
-//! mode**: a transparent window with the renderer on. Changing the setting
-//! therefore takes effect at the next start.
+//! So there are two ways to start. **Embedded window mode**: a transparent
+//! window with the renderer on, ready for Vela's window. Every start is this,
+//! whichever player is chosen (owner, 2026-11-17), so that changing the
+//! choice needs no restart: it applies to the next video. mpv's own window
+//! plays the same from it. **Today's**: an opaque window with that renderer
+//! off, as before this player existed, only for a start that cannot be ready
+//! (below); it says why.
 //!
 //! Because embedded window mode changes how the whole window is drawn, a
 //! failure there could leave the user unable to reach Settings to turn it
@@ -39,9 +41,7 @@ pub(crate) enum WindowMode {
 /// What is known when the process starts, before any window exists.
 #[cfg(target_os = "linux")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct Facts<'a> {
-    /// The saved `player` setting; `None` when unset or unreadable.
-    pub(crate) player_setting: Option<&'a str>,
+pub(crate) struct Facts {
     /// A marker left by a previous start in embedded window mode.
     pub(crate) marker_left_behind: bool,
     /// The session is Wayland and GTK is not being forced onto X11.
@@ -50,36 +50,33 @@ pub(crate) struct Facts<'a> {
     pub(crate) renderer_turned_off_by_user: bool,
 }
 
-/// The decision, and when the embedded player was asked for but this start
-/// cannot serve it, why.
+/// The decision, and when this start cannot be ready for Vela's window, why
+/// (whichever player is chosen: the choice can change during the run).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Decision {
     pub(crate) mode: WindowMode,
     pub(crate) refused: Option<EmbeddedUnavailable>,
 }
 
-/// Decide how this run starts. Anything short of "the user chose the
-/// embedded player and nothing known rules it out" is today's start.
+/// Decide how this run starts: ready for Vela's window unless something
+/// known rules it out. The saved player choice plays no part.
 #[cfg(target_os = "linux")]
-pub(crate) fn decide(facts: Facts<'_>) -> Decision {
-    let today = |refused| Decision {
+pub(crate) fn decide(facts: Facts) -> Decision {
+    let today = |reason| Decision {
         mode: WindowMode::Today,
-        refused,
+        refused: Some(reason),
     };
-    if facts.player_setting != Some("embedded") {
-        return today(None);
-    }
     if facts.marker_left_behind {
-        return today(Some(EmbeddedUnavailable::FailedLastStart));
+        return today(EmbeddedUnavailable::FailedLastStart);
     }
     if !facts.wayland_session {
-        return today(Some(EmbeddedUnavailable::NotWayland));
+        return today(EmbeddedUnavailable::NotWayland);
     }
-    // NVIDIA's proprietary driver is not ruled out (owner, 2026-11-17): the
-    // renderer this mode needs once crashed there, so a start there is the
-    // user's choice, untested, and the marker above is what catches it.
+    // NVIDIA's proprietary driver is not ruled out (owner, 2026-11-17; Vela's
+    // window played on the owner's RTX 5090 that day); the marker above
+    // catches a start that fails there.
     if facts.renderer_turned_off_by_user {
-        return today(Some(EmbeddedUnavailable::RendererOff));
+        return today(EmbeddedUnavailable::RendererOff);
     }
     Decision {
         mode: WindowMode::Embedded,
@@ -90,13 +87,7 @@ pub(crate) fn decide(facts: Facts<'_>) -> Decision {
 /// Windows has no Wayland or WebKitGTK restriction. The library is
 /// checked when Settings/playing asks for availability, as on Linux.
 #[cfg(any(target_os = "windows", target_os = "macos", test))]
-fn decide_windows(player_setting: Option<&str>, marker_left_behind: bool) -> Decision {
-    if player_setting != Some("embedded") {
-        return Decision {
-            mode: WindowMode::Today,
-            refused: None,
-        };
-    }
+fn decide_windows(marker_left_behind: bool) -> Decision {
     if marker_left_behind {
         return Decision {
             mode: WindowMode::Today,
@@ -109,10 +100,10 @@ fn decide_windows(player_setting: Option<&str>, marker_left_behind: bool) -> Dec
     }
 }
 
-/// macOS uses only the saved choice and one-start recovery, just like Windows.
+/// macOS uses only the one-start recovery, just like Windows.
 #[cfg(any(target_os = "macos", test))]
-fn decide_macos(player_setting: Option<&str>, marker_left_behind: bool) -> Decision {
-    decide_windows(player_setting, marker_left_behind)
+fn decide_macos(marker_left_behind: bool) -> Decision {
+    decide_windows(marker_left_behind)
 }
 
 #[cfg(target_os = "macos")]
@@ -131,7 +122,7 @@ static DECISION: std::sync::OnceLock<Decision> = std::sync::OnceLock::new();
 // Keep the environment as the user supplied it: main may subsequently turn
 // WebKit's renderer off for today's window, which is not a user refusal.
 #[cfg(target_os = "linux")]
-static SYSTEM_FACTS: std::sync::OnceLock<Facts<'static>> = std::sync::OnceLock::new();
+static SYSTEM_FACTS: std::sync::OnceLock<Facts> = std::sync::OnceLock::new();
 
 /// What would rule out choosing embedded mode on this system, independent
 /// of the saved choice and the one-start recovery marker. Reuses `decide`.
@@ -283,7 +274,6 @@ pub(crate) fn prepare() -> WindowMode {
     let marker_left_behind = marker.as_ref().is_some_and(|path| path.exists());
     #[cfg(target_os = "linux")]
     let facts = Facts {
-        player_setting: player_setting.as_deref(),
         marker_left_behind,
         wayland_session: wayland_session(
             std::env::var_os("WAYLAND_DISPLAY").as_deref(),
@@ -294,16 +284,15 @@ pub(crate) fn prepare() -> WindowMode {
     };
     #[cfg(target_os = "linux")]
     let _ = SYSTEM_FACTS.set(Facts {
-        player_setting: Some("embedded"),
         marker_left_behind: false,
         ..facts
     });
     #[cfg(target_os = "linux")]
     let mut decision = decide(facts);
     #[cfg(target_os = "windows")]
-    let mut decision = decide_windows(player_setting.as_deref(), marker_left_behind);
+    let mut decision = decide_windows(marker_left_behind);
     #[cfg(target_os = "macos")]
-    let mut decision = decide_macos(player_setting.as_deref(), marker_left_behind);
+    let mut decision = decide_macos(marker_left_behind);
     if marker_left_behind {
         // Whatever this start is, the next one may try again.
         if let Some(path) = &marker {
@@ -334,9 +323,14 @@ pub(crate) fn prepare() -> WindowMode {
             };
         }
     }
-    if let Some(reason) = &decision.refused {
+    if let Some(reason) = decision
+        .refused
+        .as_ref()
+        .filter(|_| player_setting.as_deref() == Some("embedded"))
+    {
         // Said once, here, because nothing later can say it: a play in this
-        // run will only be told the embedded player is not in use.
+        // run will only be told the embedded player is not in use. Only to
+        // someone who chose Vela's window; mpv's window is not affected.
         eprintln!(
             "vela: the embedded player is selected, but this start cannot use it: {}",
             reason.notice()
@@ -355,8 +349,7 @@ mod tests {
     use std::os::unix::fs::OpenOptionsExt;
 
     /// Everything in favour of embedded window mode.
-    const WILLING: Facts<'static> = Facts {
-        player_setting: Some("embedded"),
+    const WILLING: Facts = Facts {
         marker_left_behind: false,
         wayland_session: true,
         renderer_turned_off_by_user: false,
@@ -369,21 +362,25 @@ mod tests {
         }
     }
 
-    // The promise to everyone who has not chosen the embedded player: nothing
-    // about their start changes, whatever else is true of the machine.
+    // Every start that can be is ready for Vela's window, so that choosing
+    // either player needs no restart; one that cannot always says why.
     #[test]
-    fn without_the_embedded_setting_every_start_is_todays() {
-        for setting in [None, Some("external"), Some(""), Some("Embedded"), Some("internal")] {
-            for marker_left_behind in [false, true] {
-                for wayland_session in [false, true] {
-                    for renderer_turned_off_by_user in [false, true] {
-                        let facts = Facts {
-                            player_setting: setting,
-                            marker_left_behind,
-                            wayland_session,
-                            renderer_turned_off_by_user,
-                        };
-                        assert_eq!(decide(facts), today(None), "{facts:?}");
+    fn a_start_is_embedded_window_mode_unless_something_rules_it_out_and_then_says_why() {
+        for marker_left_behind in [false, true] {
+            for wayland_session in [false, true] {
+                for renderer_turned_off_by_user in [false, true] {
+                    let facts = Facts {
+                        marker_left_behind,
+                        wayland_session,
+                        renderer_turned_off_by_user,
+                    };
+                    let decided = decide(facts);
+                    if facts == WILLING {
+                        assert_eq!(decided.mode, WindowMode::Embedded, "{facts:?}");
+                        assert_eq!(decided.refused, None, "{facts:?}");
+                    } else {
+                        assert_eq!(decided.mode, WindowMode::Today, "{facts:?}");
+                        assert!(decided.refused.is_some(), "{facts:?} must say why");
                     }
                 }
             }
@@ -391,7 +388,7 @@ mod tests {
     }
 
     #[test]
-    fn the_embedded_setting_alone_starts_embedded_window_mode() {
+    fn nothing_against_it_starts_embedded_window_mode() {
         assert_eq!(
             decide(WILLING),
             Decision {
@@ -688,18 +685,9 @@ mod windows_tests {
     use super::*;
 
     #[test]
-    fn windows_start_requires_the_saved_embedded_choice() {
-        for setting in [None, Some("external"), Some("unknown")] {
-            assert_eq!(
-                decide_windows(setting, false),
-                Decision {
-                    mode: WindowMode::Today,
-                    refused: None,
-                }
-            );
-        }
+    fn windows_start_is_embedded_window_mode_whatever_the_choice() {
         assert_eq!(
-            decide_windows(Some("embedded"), false),
+            decide_windows(false),
             Decision {
                 mode: WindowMode::Embedded,
                 refused: None,
@@ -710,13 +698,12 @@ mod windows_tests {
     #[test]
     fn windows_failed_start_recovers_to_an_opaque_window() {
         assert_eq!(
-            decide_windows(Some("embedded"), true),
+            decide_windows(true),
             Decision {
                 mode: WindowMode::Today,
                 refused: Some(EmbeddedUnavailable::FailedLastStart),
             }
         );
-        assert_eq!(decide_windows(Some("external"), true).refused, None);
     }
 }
 
@@ -726,18 +713,11 @@ mod macos_tests {
     use super::*;
 
     #[test]
-    fn macos_start_uses_the_saved_choice_and_recovers_for_one_start() {
-        for setting in [None, Some("external"), Some(""), Some("Embedded")] {
-            for marker in [false, true] {
-                assert_eq!(decide_macos(setting, marker), Decision {
-                    mode: WindowMode::Today, refused: None,
-                });
-            }
-        }
-        assert_eq!(decide_macos(Some("embedded"), false), Decision {
+    fn macos_start_is_embedded_window_mode_and_recovers_for_one_start() {
+        assert_eq!(decide_macos(false), Decision {
             mode: WindowMode::Embedded, refused: None,
         });
-        assert_eq!(decide_macos(Some("embedded"), true), Decision {
+        assert_eq!(decide_macos(true), Decision {
             mode: WindowMode::Today, refused: Some(EmbeddedUnavailable::FailedLastStart),
         });
     }

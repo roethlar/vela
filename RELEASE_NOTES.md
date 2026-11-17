@@ -73,13 +73,12 @@ Vela's own window on Linux (with Wayland), Windows and macOS.
   window, on Linux, Windows and macOS: Settings → Player → Video player. It
   has its own control bar, keys and mouse actions (click to pause,
   double-click for full screen, the wheel for volume), and is off by default.
-  On Linux it runs in a Wayland session (not under X11; with NVIDIA's
-  proprietary driver it is offered but untested); on Windows it shows mpv's own Direct3D 11
+  On Linux it runs in a Wayland session (not under X11), NVIDIA's
+  proprietary driver included; on Windows it shows mpv's own Direct3D 11
   output inside Vela's window; on macOS it draws through mpv's render API,
   decoding with VideoToolbox straight to the picture, with HDR on a screen
-  with extended dynamic range. Switching to mpv's own
-  window applies to the next video. To use Vela's window, restart Vela if
-  this run started without embedded playback. Whenever it cannot be used,
+  with extended dynamic range. Either choice applies to the next video; no
+  restart is needed. Whenever it cannot be used,
   the video plays in mpv's own window and a line on screen says why. It uses
   its own copy of mpv's library, which every package now carries (the Linux
   packages, both Windows installers and the macOS app); Settings says so when
@@ -174,9 +173,8 @@ app.
 
 - The rare queued watch-edit race disclosed in 1.0.0 remains an accepted
   limitation.
-- The embedded player is experimental: on Linux it needs a Wayland session,
-  and with the NVIDIA proprietary driver it is untested (if Vela's window
-  comes up blank there, start Vela once with
+- The embedded player is experimental: on Linux it needs a Wayland session
+  (if Vela's window ever comes up blank, start Vela once with
   `WEBKIT_DISABLE_DMABUF_RENDERER=1` and choose mpv's own window); on Linux and macOS
   its picture is drawn by a different mpv renderer than mpv's own window; it
   does not crop HDR video. `docs/usage.md` lists the differences.
