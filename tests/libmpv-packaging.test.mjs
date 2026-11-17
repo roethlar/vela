@@ -1024,10 +1024,10 @@ const checkUnavailable = !onLinux
 
 // Without bsdtar every test below that runs the check is skipped, with that
 // reason printed, and a skipped test holds nothing. GitHub's `frontend` job
-// runs `npm run check` on a runner that is not known to have bsdtar and
-// installs nothing, so until its workflow installs libarchive-tools, CI
-// does not run these tests; a developer's machine and the E2E venue do
-// (docs/development.md, "Packaging the set", says what the workflow needs).
+// installs libarchive-tools and squashfs-tools before `npm run check` (since
+// `4ab145b`), so CI runs these tests, as a developer's machine and the E2E
+// venue do (docs/development.md, "Packaging the set", says what the workflow
+// needs).
 
 // The kinds of package the check unpacks, each made here from a file tree
 // with nothing but bsdtar: `pack(root, tree)` writes the package into `root`
