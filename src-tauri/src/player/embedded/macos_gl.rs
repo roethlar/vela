@@ -145,7 +145,9 @@ impl GlContext {
         };
         {
             let _current = gl.enter()?;
-            let mut interval = 1;
+            // CGLFlushDrawable runs on main too. Do not wait for vblank here;
+            // mpv hands over due frames and Core Animation presents the layer.
+            let mut interval = 0;
             // SAFETY: live, locked current context; parameter points to one GLint.
             check_cgl(
                 unsafe {

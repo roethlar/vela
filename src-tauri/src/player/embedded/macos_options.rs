@@ -9,6 +9,9 @@ pub(super) fn required_args() -> Vec<LaunchArg> {
     vec![
         LaunchArg::set("vo", "libmpv"),
         LaunchArg::set("force-window", "no"),
+        // render.h pairs this with BLOCK_FOR_TARGET_TIME=0: hand frames to
+        // the main-thread renderer when due, without making that thread wait.
+        LaunchArg::set("video-timing-offset", "0"),
         LaunchArg::set("target-prim", "bt.709"),
         LaunchArg::set("target-trc", "srgb"),
         LaunchArg::set("target-peak", "203"),
@@ -40,6 +43,7 @@ mod tests {
         };
         assert_eq!(value("vo"), Some("libmpv"));
         assert_eq!(value("force-window"), Some("no"));
+        assert_eq!(value("video-timing-offset"), Some("0"));
         assert_eq!(value("wid"), None);
         assert_eq!(value("target-prim"), Some("bt.709"));
         assert_eq!(value("target-trc"), Some("srgb"));

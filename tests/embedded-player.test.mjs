@@ -1144,10 +1144,30 @@ test('macOS skips only unconsumed frames under CGL then Rust locks, without ackn
   assert.ok(draw.indexOf('.draw_into(') < draw.indexOf('drawing.frame.consumed();'));
   assert.match(draw, /renderer\.0\.frame_shown\(\);\s+if held != 0 \{\s+self\.black\.store\(held, Ordering::Release\);\s+\}\s+drawing\.frame\.consumed\(\);/);
   assert.match(code(libmpv), /const RENDER_PARAM_SKIP_RENDERING: c_int = 13;/);
-  const renderSkip = methodBody(code(libmpv), '    pub(crate) fn skip(', 'mpv skip');
-  assert.match(renderSkip, /let mut skip: c_int = 1;/);
-  assert.match(renderSkip, /kind: RENDER_PARAM_SKIP_RENDERING,\s+data: \(&mut skip as \*mut c_int\)\.cast\(\),/);
-  assert.match(renderSkip, /kind: RENDER_PARAM_END,\s+data: std::ptr::null_mut\(\),/);
-  assert.match(renderSkip, /self\.lib\s*\.check\(unsafe \{ \(self\.lib\.render_context_render\)\(self\.raw, params\.as_mut_ptr\(\)\) \}\)/);
-  assert.doesNotMatch(renderSkip, /RENDER_PARAM_OPENGL_FBO/);
+  const skipParams = functionBody(code(libmpv), 'fn with_macos_skip_params<R>(', 'mpv skip parameters');
+  assert.match(skipParams, /let mut skip: c_int = 1;/);
+  assert.match(skipParams, /kind: RENDER_PARAM_SKIP_RENDERING,\s+data: \(&mut skip as \*mut c_int\)\.cast\(\),/);
+  assert.match(skipParams, /kind: RENDER_PARAM_END,\s+data: std::ptr::null_mut\(\),/);
+  assert.doesNotMatch(skipParams, /RENDER_PARAM_OPENGL_FBO/);
+});
+
+test('macOS draws and skips use the tested nonblocking render parameters', () => {
+  const source = code(libmpv);
+  for (const [method, helper] of [['draw_into', 'draw'], ['skip', 'skip']]) {
+    assert.match(source, new RegExp(`#\\[cfg\\(target_os = "macos"\\)\\]\\s+pub\\(crate\\) fn ${method}\\(`));
+    assert.match(source, new RegExp(`#\\[cfg\\(any\\(target_os = "macos", test\\)\\)\\]\\s+fn with_macos_${helper}_params<R>`));
+    const body = methodBody(source, `    pub(crate) fn ${method}(`, `macOS ${method}`);
+    assert.match(body, new RegExp(`self\\.lib\\.check\\(with_macos_${helper}_params\\(`));
+    assert.match(body, /\|params\| \{\s+unsafe \{ \(self\.lib\.render_context_render\)\(self\.raw, params\.as_mut_ptr\(\)\) \}/);
+  }
+  const draw = methodBody(source, '    pub(crate) fn draw_into(', 'macOS draw');
+  assert.match(draw, /with_macos_draw_params\(\s*target,\s*width,\s*height,\s*depth,/);
+  assert.doesNotMatch(methodBody(source, '    pub(crate) fn draw(', 'Linux draw'), /with_macos_|BLOCK_FOR_TARGET_TIME/);
+});
+
+test('macOS main-thread drawable flush does not request a vertical-sync wait', () => {
+  const gl = code(read('src-tauri/src/player/embedded/macos_gl.rs'));
+  const create = methodBody(gl, '    fn new(', 'CGL context creation');
+  assert.match(create, /let mut interval = 0;\s+check_cgl\(\s+unsafe \{\s+CGLSetParameter\(\s+context,\s+CGLContextParameter::CGLCPSwapInterval,\s+NonNull::from\(&mut interval\),/);
+  assert.match(methodBody(gl, '    fn draw(', 'macOS draw'), /CGLFlushDrawable\(context\)/);
 });

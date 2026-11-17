@@ -45,26 +45,28 @@ pub(crate) struct RawRenderContext {
 }
 
 /// `mpv_render_param`.
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(any(target_os = "linux", target_os = "macos", test))]
 #[repr(C)]
 pub(crate) struct RenderParam {
     pub(crate) kind: c_int,
     pub(crate) data: *mut c_void,
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(any(target_os = "linux", target_os = "macos", test))]
 pub(crate) const RENDER_PARAM_END: c_int = 0;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) const RENDER_PARAM_API_TYPE: c_int = 1;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) const RENDER_PARAM_OPENGL_INIT_PARAMS: c_int = 2;
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(any(target_os = "linux", target_os = "macos", test))]
 pub(crate) const RENDER_PARAM_OPENGL_FBO: c_int = 3;
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(any(target_os = "linux", target_os = "macos", test))]
 pub(crate) const RENDER_PARAM_FLIP_Y: c_int = 4;
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(any(target_os = "linux", target_os = "macos", test))]
 pub(crate) const RENDER_PARAM_DEPTH: c_int = 5;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", test))]
+const RENDER_PARAM_BLOCK_FOR_TARGET_TIME: c_int = 12;
+#[cfg(any(target_os = "macos", test))]
 const RENDER_PARAM_SKIP_RENDERING: c_int = 13;
 #[cfg(target_os = "linux")]
 pub(crate) const RENDER_PARAM_DRM_DISPLAY_V2: c_int = 16;
@@ -84,7 +86,7 @@ pub(crate) struct OpenGlInitParams {
 }
 
 /// `mpv_opengl_fbo`.
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(any(target_os = "linux", target_os = "macos", test))]
 #[repr(C)]
 pub(crate) struct OpenGlFbo {
     pub(crate) fbo: c_int,
@@ -1129,58 +1131,30 @@ impl Renderer {
         target: i32,
         width: i32,
         height: i32,
-        mut depth: c_int,
+        depth: c_int,
     ) -> Result<(), String> {
-        let mut fbo = OpenGlFbo {
-            fbo: target,
-            w: width,
-            h: height,
-            internal_format: 0,
-        };
-        let mut flip: c_int = 1;
-        let mut params = [
-            RenderParam {
-                kind: RENDER_PARAM_OPENGL_FBO,
-                data: (&mut fbo as *mut OpenGlFbo).cast(),
+        self.lib.check(with_macos_draw_params(
+            target,
+            width,
+            height,
+            depth,
+            |params| {
+                // SAFETY: a live render context whose OpenGL context is current;
+                // the helper keeps all parameter storage alive through this call.
+                unsafe { (self.lib.render_context_render)(self.raw, params.as_mut_ptr()) }
             },
-            RenderParam {
-                kind: RENDER_PARAM_FLIP_Y,
-                data: (&mut flip as *mut c_int).cast(),
-            },
-            RenderParam {
-                kind: RENDER_PARAM_DEPTH,
-                data: (&mut depth as *mut c_int).cast(),
-            },
-            RenderParam {
-                kind: RENDER_PARAM_END,
-                data: std::ptr::null_mut(),
-            },
-        ];
-        // SAFETY: a live render context whose OpenGL context is current, and
-        // parameters that outlive the call.
-        self.lib
-            .check(unsafe { (self.lib.render_context_render)(self.raw, params.as_mut_ptr()) })
+        ))
     }
 
     /// Consume a frame that CA declined to draw. render.h permits omitting
     /// the target with SKIP_RENDERING, but still requires a current GL context.
     #[cfg(target_os = "macos")]
     pub(crate) fn skip(&self) -> Result<(), String> {
-        let mut skip: c_int = 1;
-        let mut params = [
-            RenderParam {
-                kind: RENDER_PARAM_SKIP_RENDERING,
-                data: (&mut skip as *mut c_int).cast(),
-            },
-            RenderParam {
-                kind: RENDER_PARAM_END,
-                data: std::ptr::null_mut(),
-            },
-        ];
-        // SAFETY: same current, locked CGL context as draw_into; parameters
-        // outlive the call. A skipped frame still needs frame_shown afterwards.
-        self.lib
-            .check(unsafe { (self.lib.render_context_render)(self.raw, params.as_mut_ptr()) })
+        self.lib.check(with_macos_skip_params(|params| {
+            // SAFETY: same current, locked CGL context as draw_into; parameter
+            // storage outlives the call. Skipping still needs frame_shown after.
+            unsafe { (self.lib.render_context_render)(self.raw, params.as_mut_ptr()) }
+        }))
     }
 
     /// Tell mpv the frame it drew has been dealt with; it times the next one
@@ -1203,6 +1177,115 @@ impl Drop for Renderer {
             (self.lib.render_context_set_update_callback)(self.raw, None, std::ptr::null_mut());
             (self.lib.render_context_free)(self.raw);
         }
+    }
+}
+
+// Main-thread drawing must not wait for mpv's target time (render.h, parameter
+// 12). macos_options pairs this with video-timing-offset=0 so the video thread
+// hands frames over when due. Keep the parameter storage alive in these helpers
+// through the render call, and exercise the same lists in tests on every OS.
+#[cfg(any(target_os = "macos", test))]
+fn with_macos_draw_params<R>(
+    target: i32,
+    width: i32,
+    height: i32,
+    mut depth: c_int,
+    render: impl FnOnce(&mut [RenderParam]) -> R,
+) -> R {
+    let mut fbo = OpenGlFbo {
+        fbo: target,
+        w: width,
+        h: height,
+        internal_format: 0,
+    };
+    let mut flip: c_int = 1;
+    let mut block_for_target_time: c_int = 0;
+    let mut params = [
+        RenderParam {
+            kind: RENDER_PARAM_OPENGL_FBO,
+            data: (&mut fbo as *mut OpenGlFbo).cast(),
+        },
+        RenderParam {
+            kind: RENDER_PARAM_FLIP_Y,
+            data: (&mut flip as *mut c_int).cast(),
+        },
+        RenderParam {
+            kind: RENDER_PARAM_DEPTH,
+            data: (&mut depth as *mut c_int).cast(),
+        },
+        RenderParam {
+            kind: RENDER_PARAM_BLOCK_FOR_TARGET_TIME,
+            data: (&mut block_for_target_time as *mut c_int).cast(),
+        },
+        RenderParam {
+            kind: RENDER_PARAM_END,
+            data: std::ptr::null_mut(),
+        },
+    ];
+    render(&mut params)
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn with_macos_skip_params<R>(render: impl FnOnce(&mut [RenderParam]) -> R) -> R {
+    let mut skip: c_int = 1;
+    let mut block_for_target_time: c_int = 0;
+    let mut params = [
+        RenderParam {
+            kind: RENDER_PARAM_SKIP_RENDERING,
+            data: (&mut skip as *mut c_int).cast(),
+        },
+        RenderParam {
+            kind: RENDER_PARAM_BLOCK_FOR_TARGET_TIME,
+            data: (&mut block_for_target_time as *mut c_int).cast(),
+        },
+        RenderParam {
+            kind: RENDER_PARAM_END,
+            data: std::ptr::null_mut(),
+        },
+    ];
+    render(&mut params)
+}
+
+#[cfg(test)]
+mod macos_render_tests {
+    use super::*;
+
+    #[test]
+    fn macos_draw_params_disable_target_time_wait() {
+        with_macos_draw_params(7, 1920, 1080, 16, |params| {
+            // ABI values from mpv 0.42.0 render.h, including terminator.
+            let kinds: Vec<_> = params.iter().map(|param| param.kind).collect();
+            assert_eq!(kinds, [3, 4, 5, 12, 0]);
+            assert!(params[..4].iter().all(|param| !param.data.is_null()));
+            assert!(params[4].data.is_null());
+            // SAFETY: the helper owns these correctly typed values throughout
+            // the callback, just as it does for mpv_render_context_render.
+            unsafe {
+                let fbo = &*params[0].data.cast::<OpenGlFbo>();
+                assert_eq!(
+                    (fbo.fbo, fbo.w, fbo.h, fbo.internal_format),
+                    (7, 1920, 1080, 0)
+                );
+                assert_eq!(*params[1].data.cast::<c_int>(), 1);
+                assert_eq!(*params[2].data.cast::<c_int>(), 16);
+                assert_eq!(*params[3].data.cast::<c_int>(), 0);
+            }
+        });
+    }
+
+    #[test]
+    fn macos_skip_params_disable_target_time_wait_without_a_target() {
+        with_macos_skip_params(|params| {
+            let kinds: Vec<_> = params.iter().map(|param| param.kind).collect();
+            assert_eq!(kinds, [13, 12, 0]);
+            assert!(params[..2].iter().all(|param| !param.data.is_null()));
+            assert!(params[2].data.is_null());
+            // SAFETY: both inputs are c_ints owned by the helper for this call.
+            unsafe {
+                assert_eq!(*params[0].data.cast::<c_int>(), 1);
+                assert_eq!(*params[1].data.cast::<c_int>(), 0);
+            }
+        });
     }
 }
 
