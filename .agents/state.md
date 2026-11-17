@@ -49,23 +49,30 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
       matched SDDL text, which names that account `LA`); repaired at
       `96c0f4d`, after which W2 played twice in Vela's window on a hosted
       Windows runner with the test pattern on screen (run 43987838828).
-    - The six hunts' thirteen findings are closed but pl-9, about tests
-      alone (`.agents/review/codereview-2026-11-16-platforms.md`).
+    - The platforms review (`.agents/review/codereview-2026-11-16-platforms.md`):
+      twelve codex hunts found pl-1 to pl-26, and all are closed (pl-9,
+      about tests alone, in the release's test pass at `50b8893`); the
+      twelfth hunt, over the last repairs, found nothing.
   - THE OWNER'S CHECKS: `.agents/plans/embedded-player.md`, "For the
     owner: each platform, what it has, what to check (2026-11-17)": what
     each platform has and lacks, what machines proved, what to look at, in
-    order. Builds: release run by hand 43991901348 at `cd4f4ee` (every
-    leg's checks passed). Repairs of the latest hunt (pl-14 to pl-19) are
-    in progress; a later release run will replace it and be named here.
+    order. Builds: release run by hand 44000903570 at `068bf91` (every job
+    passed; it carries pl-1 to pl-22). pl-23 to pl-26 and the
+    `completionhub` repair (Blockers) came after it; a release run at a
+    head that carries them replaces it and is named here.
   - Linux unchanged through all of it: both end-to-end suites in full at
-    `6b206ec`, `623ec17`, `c49be2a` and `49f2c3c` (48 of 48, 51 of 51,
-    parity PASS).
+    `6b206ec`, `623ec17`, `c49be2a`, `49f2c3c`, `cf23d90`, `959f437`,
+    `3061b52`, `0b2099a` and `2bc6e3c` (48 of 48, 51 of 51, parity PASS);
+    at `7f1db1f` the embedded suite lost `completionhub` once (the race in
+    Blockers).
   - The end-to-end suite has a Windows port (`9617815`, workflow
-    `e2e-windows.yml`, by hand), but its first full run (43964966316)
-    started no WebDriver session in any scenario: a harness fault on
-    Windows whose repair waits for the release's test pass (the plan's
-    Probe log). Probe W2 (`probes/w2-vela`) checks Vela on Windows
-    meanwhile.
+    `e2e-windows.yml`, by hand), but no run of it has started a WebDriver
+    session: 43964966316 at `acf0a40` (all 110 scenarios) and 44003362983
+    at `ba0ebad` (one scenario, after the settings repair `96c0f4d`) both
+    timed out in Edge WebDriver's POST /session. Its repair is part of the
+    release's test pass, now under way; probe W3 (`probes/w3-webdriver`,
+    run 44003737295) looks for where the session hangs. Probe W2
+    (`probes/w2-vela`) checks Vela on Windows meanwhile.
   - Type-checking Windows and macOS Rust from Linux:
     `scripts/check-other-platforms.sh` (repo-guidance, Verification).
 - VELA 1.0.66 IS READY TO BE RELEASED, AS FAR AS THE AGENT CAN TAKE IT
@@ -423,13 +430,16 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     state in between.
   - The external player runs the same code; it has not been seen to fail
     there.
-  - Not fixed, on purpose: the effect is negligible and the ordering here
-    has a long review history (`tests/clean-eof-refresh-order.test.mjs`).
-    It waits for the release's test pass (decision of 2026-11-14 on
-    tests). Candidate fix: the page reads the two local lists after
-    `get_hubs` has answered, and the two local commands wait, bounded, for
-    a completion that has been handed to the dispatcher and not yet
-    admitted.
+  - Left unfixed until 2026-11-17: the effect is negligible and the
+    ordering here has a long review history
+    (`tests/clean-eof-refresh-order.test.mjs`); it waited for the
+    release's test pass (decision of 2026-11-14 on tests). Seen again
+    2026-11-17, once in the full embedded run at `7f1db1f` (50 of 51). Now
+    in that pass: a codex coding task (`cxhub`) repairs it, from this
+    entry. Candidate fix recorded here: the page reads the two local lists
+    after `get_hubs` has answered, and the two local commands wait,
+    bounded, for a completion that has been handed to the dispatcher and
+    not yet admitted.
   - Until then: an embedded run that fails the verdict on `completionhub`
     alone is this race until shown otherwise; run the scenario again by
     itself before reading it as a regression.
