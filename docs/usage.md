@@ -79,7 +79,8 @@ Settings → Player → Video player chooses where videos play:
   player.
 
 The embedded player runs on macOS, on Windows, and on Linux in a Wayland
-session (not yet with the NVIDIA proprietary driver). Switching to mpv's own
+session; with the NVIDIA proprietary driver it is offered but untested (the
+way back if it fails there is below). Switching to mpv's own
 window applies to the next
 video. To use Vela's window, restart Vela if this run started without embedded
 playback. Whenever the embedded player cannot be used, the video plays in
@@ -205,7 +206,11 @@ On Linux, Vela turns off WebKitGTK's DMABUF renderer at startup, because it
 crashes the webview on NVIDIA with Wayland. This affects the library UI
 renderer, not mpv's video output, and has no effect on macOS or Windows. The
 one exception is a start with the embedded player chosen, which needs that
-renderer and is never entered with the NVIDIA proprietary driver. A
+renderer, on every driver. With the NVIDIA proprietary driver that start is
+untested. If Vela closes before its window has loaded, the next start uses
+mpv's own window and says why. If Vela's window comes up blank, start Vela
+once with `WEBKIT_DISABLE_DMABUF_RENDERER=1`, which starts it the ordinary
+way, and choose mpv's own window in Settings. A
 `WEBKIT_DISABLE_DMABUF_RENDERER` you set yourself is left as it is. It rules
 the embedded player out only when its value is nonempty and not `0`. An empty
 value or `0` does not cause that refusal; the other requirements for embedded

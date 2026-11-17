@@ -46,8 +46,6 @@ pub(crate) struct Facts<'a> {
     pub(crate) marker_left_behind: bool,
     /// The session is Wayland and GTK is not being forced onto X11.
     pub(crate) wayland_session: bool,
-    /// The NVIDIA proprietary kernel driver is loaded.
-    pub(crate) nvidia_driver: bool,
     /// The user's own environment turns WebKit's GPU renderer off.
     pub(crate) renderer_turned_off_by_user: bool,
 }
@@ -77,11 +75,9 @@ pub(crate) fn decide(facts: Facts<'_>) -> Decision {
     if !facts.wayland_session {
         return today(Some(EmbeddedUnavailable::NotWayland));
     }
-    if facts.nvidia_driver {
-        // The renderer embedded window mode needs is the one that crashed on
-        // this driver, and nothing here has been run on NVIDIA hardware.
-        return today(Some(EmbeddedUnavailable::NvidiaDriver));
-    }
+    // NVIDIA's proprietary driver is not ruled out (owner, 2026-11-17): the
+    // renderer this mode needs once crashed there, so a start there is the
+    // user's choice, untested, and the marker above is what catches it.
     if facts.renderer_turned_off_by_user {
         return today(Some(EmbeddedUnavailable::RendererOff));
     }
@@ -91,7 +87,7 @@ pub(crate) fn decide(facts: Facts<'_>) -> Decision {
     }
 }
 
-/// Windows has no Wayland, WebKitGTK or NVIDIA restriction. The library is
+/// Windows has no Wayland or WebKitGTK restriction. The library is
 /// checked when Settings/playing asks for availability, as on Linux.
 #[cfg(any(target_os = "windows", target_os = "macos", test))]
 fn decide_windows(player_setting: Option<&str>, marker_left_behind: bool) -> Decision {
@@ -293,7 +289,6 @@ pub(crate) fn prepare() -> WindowMode {
             std::env::var_os("WAYLAND_DISPLAY").as_deref(),
             std::env::var_os("GDK_BACKEND").as_deref(),
         ),
-        nvidia_driver: std::path::Path::new("/proc/driver/nvidia/version").exists(),
         renderer_turned_off_by_user: std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER")
             .is_some_and(|value| value != "0" && !value.is_empty()),
     };
@@ -364,7 +359,6 @@ mod tests {
         player_setting: Some("embedded"),
         marker_left_behind: false,
         wayland_session: true,
-        nvidia_driver: false,
         renderer_turned_off_by_user: false,
     };
 
@@ -382,17 +376,14 @@ mod tests {
         for setting in [None, Some("external"), Some(""), Some("Embedded"), Some("internal")] {
             for marker_left_behind in [false, true] {
                 for wayland_session in [false, true] {
-                    for nvidia_driver in [false, true] {
-                        for renderer_turned_off_by_user in [false, true] {
-                            let facts = Facts {
-                                player_setting: setting,
-                                marker_left_behind,
-                                wayland_session,
-                                nvidia_driver,
-                                renderer_turned_off_by_user,
-                            };
-                            assert_eq!(decide(facts), today(None), "{facts:?}");
-                        }
+                    for renderer_turned_off_by_user in [false, true] {
+                        let facts = Facts {
+                            player_setting: setting,
+                            marker_left_behind,
+                            wayland_session,
+                            renderer_turned_off_by_user,
+                        };
+                        assert_eq!(decide(facts), today(None), "{facts:?}");
                     }
                 }
             }
@@ -429,13 +420,6 @@ mod tests {
                 ..WILLING
             }),
             today(Some(EmbeddedUnavailable::NotWayland))
-        );
-        assert_eq!(
-            decide(Facts {
-                nvidia_driver: true,
-                ..WILLING
-            }),
-            today(Some(EmbeddedUnavailable::NvidiaDriver))
         );
         assert_eq!(
             decide(Facts {

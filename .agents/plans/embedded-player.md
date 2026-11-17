@@ -2635,10 +2635,10 @@ installer and the macOS app).
 
 **Linux (Wayland, as you use it now).**
 - Has: all of the above; HDR in Vela's window through the compositor.
-- Lacks: Vela's window with NVIDIA's proprietary driver (the video plays
-  in mpv's own window and Settings says why), until Slice N1 of the
-  amendment "2026-11-17 (2)" below lands: you chose to have it offered
-  there, and your NVIDIA machine is its test.
+- Lacks: nothing the other platforms have. Vela's window with NVIDIA's
+  proprietary driver is offered since Slice N1 of the amendment
+  "2026-11-17 (2)" below, and untested there until your NVIDIA test (its
+  steps are in that slice).
 - Proven by machine: both end-to-end suites in full at every product
   commit (48 of 48, 51 of 51, parity PASS), last at `74df55a`, the
   builds' commit. Intermittent failures in the embedded suite, all in
@@ -2878,7 +2878,9 @@ what is not known is found by probes first, logged below.
 
 ## Amendment, 2026-11-17 (2): NVIDIA offered; Linux's end-to-end runs on Wayland only (owner's answers)
 
-Status: DRAFT, awaiting the owner's approval; nothing below is built.
+Status: APPROVED by the owner, 2026-11-17 ("Approve both"). N1 landed
+(the NVIDIA refusal is gone; `.agents/state.md` names its commit and the
+release run with the owner's builds); W1 next.
 
 The owner's answers of 2026-11-17 (`.agents/decisions.md`, that date):
 offer Vela's window on NVIDIA's proprietary driver ("I have a couple of

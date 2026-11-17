@@ -15,8 +15,9 @@ fn main() {
     // has no effect.
     //
     // The one exception is embedded window mode, which needs that renderer: a
-    // transparent window does not repaint without it. That mode is never
-    // entered on the NVIDIA driver.
+    // transparent window does not repaint without it. On the NVIDIA driver
+    // that mode is the user's choice and untested; a start there that fails
+    // is caught by the start-up marker (`player/embedded/startup.rs`).
     #[cfg(target_os = "linux")]
     if !embedded_window && std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
         std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");

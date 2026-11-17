@@ -32,11 +32,12 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     moves from Xvfb (X11) to weston, where the embedded suite already
     runs (the same entry).
   - THE PLAN FOR BOTH: `.agents/plans/embedded-player.md`, "Amendment,
-    2026-11-17 (2)": Slice N1 (the NVIDIA refusal goes; a release run by
-    hand gives the owner builds for the NVIDIA test), then Slice W1 (the
-    venue; `playerfallback` proves the start-up marker's recovery instead
-    of X11's refusal). DRAFT, AWAITING THE OWNER'S APPROVAL; nothing is
-    built until then.
+    2026-11-17 (2)", APPROVED by the owner 2026-11-17 ("Approve both").
+    Slice N1 LANDED: the NVIDIA refusal is gone (`startup.rs`,
+    `select.rs`), with the docs and release notes; next, a release run by
+    hand gives the owner Linux builds for the NVIDIA test (steps in the
+    slice). Then Slice W1 (the venue; `playerfallback` proves the start-up
+    marker's recovery instead of X11's refusal).
   - Landed: the macOS app declares why it reaches the local network
     (`d6a8033`; the notarized app of a release run carries the sentence);
     the player window finds its remembered screen on a Mac, Retina

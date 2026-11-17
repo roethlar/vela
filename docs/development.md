@@ -305,8 +305,7 @@ on in the external player, and the embedded one is not tried again until
 Vela is restarted. Vela's standard error has
 the detail (`vela: playing in the external player: ...`, and for a library
 that did not load, the loader's own message). Reasons include an X11
-session, the NVIDIA proprietary driver (untested, so excluded), a
-compositor without `wl_subcompositor` or `wp_viewporter`, and a
+session, a compositor without `wl_subcompositor` or `wp_viewporter`, and a
 `WEBKIT_DISABLE_DMABUF_RENDERER` set in your own environment.
 
 What exists so far: the picture, inside the window, in HDR on a display and

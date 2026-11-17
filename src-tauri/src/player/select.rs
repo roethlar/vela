@@ -55,9 +55,6 @@ pub(crate) enum EmbeddedUnavailable {
     /// The session is X11, or GTK was told to use X11.
     #[cfg(any(test, target_os = "linux"))]
     NotWayland,
-    /// The NVIDIA proprietary driver is in use; untested there.
-    #[cfg(any(test, target_os = "linux"))]
-    NvidiaDriver,
     /// The user's environment turns off the WebKit renderer it depends on.
     #[cfg(any(test, target_os = "linux"))]
     RendererOff,
@@ -93,8 +90,6 @@ impl EmbeddedUnavailable {
             #[cfg(any(test, target_os = "linux"))]
             EmbeddedUnavailable::NotWayland => "needs a Wayland session",
             #[cfg(any(test, target_os = "linux"))]
-            EmbeddedUnavailable::NvidiaDriver => "not on NVIDIA drivers yet",
-            #[cfg(any(test, target_os = "linux"))]
             EmbeddedUnavailable::RendererOff => "WebKit GPU drawing is off",
             #[cfg(any(test, target_os = "linux", target_os = "windows", target_os = "macos"))]
             EmbeddedUnavailable::LibraryMissing => "its mpv library did not load",
@@ -126,8 +121,6 @@ impl EmbeddedUnavailable {
             Self::FailedLastStart => "Videos play in mpv's own window because Vela did not finish starting with video in its window last time; this run started without it, and the next start tries again.",
             #[cfg(any(test, target_os = "linux"))]
             Self::NotWayland => "Videos play in mpv's own window because video in Vela's window requires a Wayland session.",
-            #[cfg(any(test, target_os = "linux"))]
-            Self::NvidiaDriver => "Videos play in mpv's own window because video in Vela's window does not support the NVIDIA proprietary driver yet.",
             #[cfg(any(test, target_os = "linux"))]
             Self::RendererOff => "Videos play in mpv's own window because your environment disables the renderer needed for video in Vela's window.",
             #[cfg(any(test, target_os = "linux", target_os = "windows", target_os = "macos"))]
@@ -302,7 +295,6 @@ mod tests {
             (NeedsRestart, restarting),
             (FailedLastStart, failed_start),
             (NotWayland, "Videos play in mpv's own window because video in Vela's window requires a Wayland session."),
-            (NvidiaDriver, "Videos play in mpv's own window because video in Vela's window does not support the NVIDIA proprietary driver yet."),
             (RendererOff, "Videos play in mpv's own window because your environment disables the renderer needed for video in Vela's window."),
             (LibraryMissing, "Videos play in mpv's own window because the library needed for video in Vela's window could not be loaded."),
             (CompositorLacks, "Videos play in mpv's own window because this desktop cannot provide the video surface Vela's window needs."),
@@ -311,7 +303,7 @@ mod tests {
             (StartFailed, "Videos play in mpv's own window because a video failed to start in Vela's window earlier in this run; restarting Vela tries again."),
         ] {
             cases.push((Embedded, active.clone(), Err(reason), Ok(()), Some(expected)));
-            if matches!(reason, NotWayland | NvidiaDriver | RendererOff) {
+            if matches!(reason, NotWayland | RendererOff) {
                 cases.push((External, today.clone(), Err(NeedsRestart), Err(reason), Some(expected)));
                 cases.push((Embedded, today.clone(), Err(NeedsRestart), Err(reason), Some(expected)));
                 cases.push((Embedded, Decision { mode: WindowMode::Today, refused: Some(reason) }, Err(reason), Ok(()), Some(expected)));
@@ -391,7 +383,6 @@ mod tests {
             NeedsRestart,
             FailedLastStart,
             NotWayland,
-            NvidiaDriver,
             RendererOff,
             LibraryMissing,
             CompositorLacks,
@@ -401,9 +392,8 @@ mod tests {
         ];
         for reason in &all {
             match reason {
-                NotOnThisSystem | NeedsRestart | FailedLastStart | NotWayland | NvidiaDriver
-                | RendererOff | LibraryMissing | CompositorLacks | NoGpuFormat | WindowNotReady
-                | StartFailed => {}
+                NotOnThisSystem | NeedsRestart | FailedLastStart | NotWayland | RendererOff
+                | LibraryMissing | CompositorLacks | NoGpuFormat | WindowNotReady | StartFailed => {}
             }
         }
         all
