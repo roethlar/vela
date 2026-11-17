@@ -2614,12 +2614,15 @@ artifact keeps the probe's logs and screenshots.
 
 Written once, at the end of the amendment's work, as the amendment asks.
 The builds are the artifacts of the release workflow run by hand at
-`74df55a`, run 44087348857 (`gh run download 44087348857 --repo
+`daa182c`, run 44098988278 (`gh run download 44098988278 --repo
 roethlar/vela`: `vela-macos` the DMG, `vela-windows` the NSIS installer and
 the MSI, `vela-linux` the AppImage, deb and rpm, `vela-arch`; kept until
-2027-02-15). It replaces run 44042221966 at `23d4745`: the app's code is the
-same, and only the macOS library set differs, now built with VideoToolbox
-straight to the picture (`1e9905e`). If a later run replaces it,
+2027-02-15; every job passed, the macOS bundle on its third attempt, after
+Apple's timestamp service failed once and GitHub had no Mac runner once).
+It replaces run 44087348857 at `74df55a`: the only product change is Slice
+N1 below (Vela's window offered on NVIDIA's driver, Linux only); that run
+had replaced 44042221966 at `23d4745` for the macOS set's VideoToolbox
+build (`1e9905e`). If a later run replaces it,
 `.agents/state.md` names it. mpv's own window stays the
 default everywhere; Vela's window is the experimental choice: Settings →
 Player → Video player → "Vela's window (experimental)", then restart Vela.
@@ -2693,7 +2696,7 @@ installer and the macOS app).
 - Lacks: nothing the other platforms have.
 - Proven by machine: the release run signs and notarizes the app with the
   library inside and plays the library from the finished DMG on Apple
-  Silicon and under Rosetta (run 44087348857, the builds); probe M2
+  Silicon and under Rosetta (run 44098988278, the builds); probe M2
   played twice in Vela's window on a
   hosted Mac, the test pattern on screen and the clock advancing (Apple's
   software renderer, with mpv's fast profile; runs 43990824184 to

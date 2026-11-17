@@ -86,8 +86,11 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   - THE OWNER'S CHECKS: `.agents/plans/embedded-player.md`, "For the
     owner: each platform, what it has, what to check (2026-11-17)": what
     each platform has and lacks, what machines proved, what to look at, in
-    order. Builds: release run by hand 44087348857 at `74df55a` (every
-    job passed; it carries pl-1 to pl-26, every product repair of the
+    order. Builds: release run by hand 44098988278 at `daa182c` (every
+    job passed, the macOS bundle on its third attempt: Apple's timestamp
+    service failed once, GitHub had no Mac runner once; it adds Slice N1,
+    Vela's window offered on NVIDIA, to run 44087348857 at `74df55a`,
+    which carries pl-1 to pl-26, every product repair of the
     release's test pass: the clean-end report order, `build.rs`, the
     Windows set's revocation soft-fail, the marker script's paused
     button, the boot keeping Playlists; and the macOS set's VideoToolbox
