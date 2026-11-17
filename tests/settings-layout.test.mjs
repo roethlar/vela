@@ -71,6 +71,13 @@ test('an InfoTip adds no text to its heading and is labelled for assistive techn
   assert.match(infoTip, /\{#if open\}/, 'the explanation is shown only when asked for');
 });
 
+test('an InfoTip renders the explanation it is given, when open', () => {
+  // st-7: the guard above passed with the explanation never rendered.
+  const shown = infoTip.match(/\{#if open\}([\s\S]*?)\{\/if\}/);
+  assert.ok(shown, 'an open branch');
+  assert.match(shown[1], /\{@render children\(\)\}/, 'the open branch renders the explanation');
+});
+
 test("an InfoTip's explanation stays inside its heading's width", () => {
   // st-2: a fixed-width popup beside a long heading ran past the panel's edge.
   const pop = infoTip.match(/\.infopop \{([\s\S]*?)\}/)[1];
