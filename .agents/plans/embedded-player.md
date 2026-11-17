@@ -2612,10 +2612,13 @@ artifact keeps the probe's logs and screenshots.
 
 Written once, at the end of the amendment's work, as the amendment asks.
 The builds are the artifacts of the release workflow run by hand at
-`23d4745`, run 44042221966 (`gh run download 44042221966 --repo
+`74df55a`, run 44087348857 (`gh run download 44087348857 --repo
 roethlar/vela`: `vela-macos` the DMG, `vela-windows` the NSIS installer and
-the MSI, `vela-linux` the AppImage, deb and rpm, `vela-arch`); if a later
-run replaces it, `.agents/state.md` names it. mpv's own window stays the
+the MSI, `vela-linux` the AppImage, deb and rpm, `vela-arch`; kept until
+2027-02-15). It replaces run 44042221966 at `23d4745`: the app's code is the
+same, and only the macOS library set differs, now built with VideoToolbox
+straight to the picture (`1e9905e`). If a later run replaces it,
+`.agents/state.md` names it. mpv's own window stays the
 default everywhere; Vela's window is the experimental choice: Settings →
 Player → Video player → "Vela's window (experimental)", then restart Vela.
 
@@ -2634,7 +2637,7 @@ installer and the macOS app).
   in mpv's own window and Settings says why); whether that stays the one
   approved difference is asked of you in `.agents/state.md`.
 - Proven by machine: both end-to-end suites in full at every product
-  commit (48 of 48, 51 of 51, parity PASS), last at `23d4745`, the
+  commit (48 of 48, 51 of 51, parity PASS), last at `74df55a`, the
   builds' commit. Intermittent failures in the embedded suite, all in
   `.agents/state.md`, Blockers: `markers` twice (cause not found; not
   seen since `019c08b`), and `watchposition` and `pagefail` now and then
@@ -2657,7 +2660,8 @@ installer and the macOS app).
   WARP, the software adapter; runs 43987838828 to 44018869179); the
   end-to-end suite in full on a hosted Windows runner in both players:
   external 46 of 46 and embedded 50 of 50, parity verdict PASS (run
-  44040455337 at `aa8c0b0`). Skipped there besides the other player's
+  44040455337 at `aa8c0b0`, and again in run 44087343362 at `74df55a`,
+  the builds' commit). Skipped there besides the other player's
   scenarios: `playerfallback` (Linux's X11 notice, which Windows has no use
   for) and `sourcepolicy` (the runner's IPv6-only sockets cannot reach its
   distant copy; its row is shown there by `multiplex` and `mergedview`).
@@ -2685,7 +2689,8 @@ installer and the macOS app).
 - Lacks: nothing the other platforms have.
 - Proven by machine: the release run signs and notarizes the app with the
   library inside and plays the library from the finished DMG on Apple
-  Silicon and under Rosetta; probe M2 played twice in Vela's window on a
+  Silicon and under Rosetta (run 44087348857, the builds); probe M2
+  played twice in Vela's window on a
   hosted Mac, the test pattern on screen and the clock advancing (Apple's
   software renderer, with mpv's fast profile; runs 43990824184 to
   44018857651), and at `1e9905e` decoded with VideoToolbox straight to the

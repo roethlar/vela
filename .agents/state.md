@@ -20,8 +20,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     - X11: NOT A GAP. Listing it was the working agent's error, against
       the plan's own non-goals, the README and the reason Vela exists (see
       `.agents/repo-guidance.md`, Mission Detail). The overlay mode built
-      for it (`671cba9`, `4b91540`, `9303cee`, `d41a926`) is removed in
-      the commit that records this.
+      for it (`671cba9`, `4b91540`, `9303cee`, `d41a926`) is removed
+      (`74df55a`).
     - macOS, VideoToolbox straight to the picture: done (`1e9905e`; probe
       M2's run 44061797549 decoded that way on a hosted Mac, the plan's
       Probe log).
@@ -32,6 +32,14 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
       videos play in mpv's own window, and Settings says why. Question:
       approve that as a difference? Anything else would be a path without
       HDR, which is out of scope.
+  - OWNER QUESTION, asked 2026-11-17: Linux's end-to-end runs still use
+    Xvfb, an X11 display. The external suite runs there
+    (`tests/e2e/run.mjs`; the venue, `.agents/machines.md`), and
+    `playerfallback` relies on it to see the X11 refusal notice; only the
+    embedded suite runs under a headless Wayland compositor (weston).
+    Under "nothing that does not support HDR should be involved in any of
+    this", should the external suite move to weston too? Nothing changes
+    until the owner answers.
   - Landed: the macOS app declares why it reaches the local network
     (`d6a8033`; the notarized app of a release run carries the sentence);
     the player window finds its remembered screen on a Mac, Retina
@@ -72,23 +80,29 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   - THE OWNER'S CHECKS: `.agents/plans/embedded-player.md`, "For the
     owner: each platform, what it has, what to check (2026-11-17)": what
     each platform has and lacks, what machines proved, what to look at, in
-    order. Builds: release run by hand 44042221966 at `23d4745` (every
-    job passed; it carries pl-1 to pl-26 and every product repair of the
+    order. Builds: release run by hand 44087348857 at `74df55a` (every
+    job passed; it carries pl-1 to pl-26, every product repair of the
     release's test pass: the clean-end report order, `build.rs`, the
     Windows set's revocation soft-fail, the marker script's paused
-    button, the boot keeping Playlists); later commits are tests and
-    records only, unless a later entry here says otherwise. The repaired
+    button, the boot keeping Playlists; and the macOS set's VideoToolbox
+    build, `1e9905e`, the only product difference from the earlier run
+    44042221966 at `23d4745`, whose app code is the same); later commits
+    are tests and records only, unless a later entry here says
+    otherwise. The repaired
     marker script was checked inside its NSIS installer (next to
     `vela.exe`) and DMG (`Vela.app/Contents/Resources`). Probes M2
     (44018857651) and W2 (44018869179) played twice in Vela's window at
     `dcb0d2d`; the product changes since touch neither (the set's TLS on
-    Windows, a mpv script, the page's boot), and the Windows suite in
-    full (below) plays in Vela's window at `aa8c0b0`.
+    Windows, a mpv script, the page's boot) but the macOS set's
+    VideoToolbox build, which M2 itself proved (44061797549 at
+    `1e9905e`), and the Windows suite in full (below) plays in Vela's
+    window at `aa8c0b0` and `74df55a`.
   - Linux unchanged through all of it: both end-to-end suites in full at
     `6b206ec`, `623ec17`, `c49be2a`, `49f2c3c`, `cf23d90`, `959f437`,
-    `3061b52`, `0b2099a`, `2bc6e3c`, `c3ea91d`, `dc3c9e8` and `23d4745`
-    (48 of 48, 51 of 51, parity PASS; `23d4745` is the final builds'
-    commit, run on a quiet machine); at `7f1db1f` the embedded suite lost
+    `3061b52`, `0b2099a`, `2bc6e3c`, `c3ea91d`, `dc3c9e8`, `23d4745` and
+    `74df55a` (48 of 48, 51 of 51, parity PASS; `74df55a` is the final
+    builds' commit, run in a clean worktree on a quiet machine); at
+    `7f1db1f` the embedded suite lost
     `completionhub` once, at `f2dcbc3` and `019c08b` `markers` once each,
     and at `0357eec` `watchposition` twice on a loaded machine (all in
     Blockers).
@@ -147,7 +161,11 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     of 50, parity verdict PASS. Codex hunts six and eight were clean;
     seven found tp-10 to tp-12, repaired. RELEASE_NOTES.md describes the
     embedded player on all three platforms and the fixes. Release run
-    44042221966 at `23d4745` passed: the builds above.
+    44042221966 at `23d4745` passed. At `74df55a` (overlay mode removed,
+    the macOS set built with VideoToolbox) the Windows suite passed both
+    players in full again (44087343362, not dirty: external 46, embedded
+    50, parity PASS), and release run 44087348857 passed every job: the
+    builds above.
   - Type-checking Windows and macOS Rust from Linux:
     `scripts/check-other-platforms.sh` (repo-guidance, Verification).
 - VELA 1.0.66 IS READY TO BE RELEASED, AS FAR AS THE AGENT CAN TAKE IT
