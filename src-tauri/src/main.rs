@@ -3,8 +3,8 @@
 
 fn main() {
     // First thing, before anything else exists: decide how this run creates
-    // its window. It is "exactly as before" unless the user has chosen the
-    // embedded player and nothing known rules it out.
+    // its window. It is ready for Vela's window, whichever player is chosen,
+    // unless something known rules that out (`player/embedded/startup.rs`).
     #[cfg_attr(not(target_os = "linux"), allow(unused_variables))]
     let embedded_window = vela_lib::prepare_startup();
 

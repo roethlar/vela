@@ -9,8 +9,8 @@
 //! changed afterwards.
 //!
 //! Windows and macOS also need a transparent main window. Its WebView2 and mpv child
-//! need none of those Linux renderer/driver restrictions; only the saved
-//! choice and the recovery marker determine its window mode.
+//! need none of those Linux renderer/driver restrictions; only the recovery
+//! marker determines its window mode.
 //!
 //! So there are two ways to start. **Embedded window mode**: a transparent
 //! window with the renderer on, ready for Vela's window. Every start is this,
@@ -191,7 +191,9 @@ fn player_setting_in(settings_file: &str) -> Option<String> {
 const SETTINGS_READ_LIMIT: u64 = 8 * 1024 * 1024;
 
 /// The text of the settings file, when it is an ordinary file of ordinary
-/// size. Anything else is "no text", which makes this start today's.
+/// size. Anything else is "no text". The window mode does not depend on it;
+/// it only decides whether a start that cannot be ready for Vela's window
+/// says so (to someone who chose that window).
 ///
 /// This read happens on EVERY start on Linux, before the window exists and
 /// before the settings loader has had its say, so it must not be able to
