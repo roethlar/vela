@@ -1493,8 +1493,9 @@ test('macOS controller actually runs both workers and fails for either architect
   }
 });
 
-test("build.rs wires the mpv resource copy to Tauri's mapping", () => {
-  // Keep build.rs wired to the helper and the Tauri resource mapping.
+test("build.rs wires the tested mpv resource copy to Tauri's mapping", () => {
+  // This checks wiring and the mapping. The helper's Rust unit test checks
+  // the filesystem effect for both Cargo layouts and a target triple.
   const conf = JSON.parse(fs.readFileSync(path.join(repoRoot, "src-tauri/tauri.conf.json"), "utf8"));
   assert.deepEqual(conf.bundle.resources, { "resources/mpv-scripts/": "mpv-scripts/" },
     "build.rs copies exactly this mapping; change the two together");
@@ -1505,4 +1506,6 @@ test("build.rs wires the mpv resource copy to Tauri's mapping", () => {
   assert.match(build, /let out_dir = std::path::PathBuf::from\(std::env::var_os\("OUT_DIR"\)/);
   assert.match(support, /let target = profile_dir\.join\("mpv-scripts"\);/);
   assert.match(build, /println!\("cargo:rerun-if-changed=resources\/mpv-scripts"\);/);
+  const lib = fs.readFileSync(path.join(repoRoot, "src-tauri/src/lib.rs"), "utf8");
+  assert.match(lib, /#\[cfg\(test\)\]\s*#\[path = "\.\.\/build_support\.rs"\]\s*mod build_support;/);
 });

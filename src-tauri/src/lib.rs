@@ -1,5 +1,8 @@
 mod artwork;
 mod automatic;
+#[cfg(test)]
+#[path = "../build_support.rs"]
+mod build_support;
 mod commands;
 mod config;
 mod connections;
