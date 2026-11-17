@@ -56,15 +56,20 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   - THE OWNER'S CHECKS: `.agents/plans/embedded-player.md`, "For the
     owner: each platform, what it has, what to check (2026-11-17)": what
     each platform has and lacks, what machines proved, what to look at, in
-    order. Builds: release run by hand 44000903570 at `068bf91` (every job
-    passed; it carries pl-1 to pl-22). Later work (pl-23 to pl-26, the
-    release's test pass below) came after it; a release run at a head that
-    carries it replaces it and is named here.
+    order. Builds: release run by hand 44018388540 at `019c08b` (every job
+    passed; it carries pl-1 to pl-26 and the release's test pass's product
+    repairs: the clean-end report order and `build.rs`); later commits are
+    tests and records only, unless a later entry here says otherwise. The
+    mpv scripts were checked inside the previous run's NSIS installer
+    (next to `vela.exe`) and DMG (`Vela.app/Contents/Resources`). Probes
+    M2 (44018857651) and W2 (44018869179) played twice in Vela's window at
+    that product code.
   - Linux unchanged through all of it: both end-to-end suites in full at
     `6b206ec`, `623ec17`, `c49be2a`, `49f2c3c`, `cf23d90`, `959f437`,
-    `3061b52`, `0b2099a` and `2bc6e3c` (48 of 48, 51 of 51, parity PASS);
-    at `7f1db1f` the embedded suite lost `completionhub` once, and at
-    `f2dcbc3` `markers` once (both in Blockers).
+    `3061b52`, `0b2099a`, `2bc6e3c` and `c3ea91d` (48 of 48, 51 of 51,
+    parity PASS); at `7f1db1f` the embedded suite lost `completionhub`
+    once, and at `f2dcbc3` and `019c08b` `markers` once each (both in
+    Blockers).
   - THE RELEASE'S TEST PASS (2026-11-17; the decision of 2026-11-16
     reached the 2026-11-14 rule's condition). Done so far:
     `completionhub`'s race repaired (`2ab8ac5`, `c3ea91d`; the scenario
@@ -82,9 +87,16 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     build-dir layout a debug or --no-bundle build had no mpv scripts next
     to the binary, so markers and autocrop were missing (on every
     platform with that Cargo; installed bundles unaffected), repaired in
-    `build.rs` (`e87ffe2`). The second full run (44013741142 at `e87ffe2`)
-    shows what is left: the plan's Probe log and the run's results name
-    each remaining failure as it is diagnosed.
+    `build.rs` (`e87ffe2`). The second full run (44013741142 at `e87ffe2`,
+    clean: external 39 passed, embedded 42) failed only scenarios whose
+    repairs landed after it (`73666ac` the Plex test CA, `f177a85`,
+    `1b83109`, `7687583`, `2546470` timing on the slower runner,
+    `019c08b` sourcepolicy skipped on Windows; the plan's Probe log). The
+    third full run, at `019c08b`, is 44018219446. A second codex hunt
+    found tp-4 to tp-7 (build.rs under a separate Cargo build directory,
+    the test CA after an interrupted run, two weak guards), in repair by
+    codex (`cxfix8`). RELEASE_NOTES.md now describes the embedded player
+    on all three platforms and the Continue Watching fix (`66a6355`).
   - Type-checking Windows and macOS Rust from Linux:
     `scripts/check-other-platforms.sh` (repo-guidance, Verification).
 - VELA 1.0.66 IS READY TO BE RELEASED, AS FAR AS THE AGENT CAN TAKE IT
@@ -449,12 +461,19 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     tracker's end). The scenario alone passed 40 of 40 in the embedded
     player at `f2dcbc3`. Remove this entry once the full runs after
     `c3ea91d` show no `completionhub` failure.
-- E2E `markers` failed once in the embedded player, in the full run at
-  `f2dcbc3` (50 of 51): "timed out waiting for the Stopped check-in" 15 s
-  after the second leg's quit. Alone it then passed 10 of 10 on the same
-  build. `/Stopped` is posted before the end notify, so the clean-end
-  report change of that build cannot delay it. Not diagnosed; watch the
-  next full runs, and keep a failing run's artifacts.
+- E2E `markers` fails now and then in the embedded player, only in full
+  runs: at `f2dcbc3` (second leg) and `019c08b` (first leg), "timed out
+  waiting for the Stopped check-in" 15 s after the scenario's IPC `quit`;
+  it passed in the full run at `c3ea91d` between them, 10 of 10 alone and
+  in repeated runs of it after `markerpayload`. The clip is 30 s, so the
+  quit is an ordinary stop: the clean-end report change of `2ab8ac5` is
+  not on its path. The tracker posts `/Stopped` once its position reader
+  sees the player end (`playback.rs`, `start_tracking_jellyfin`); a
+  libmpv-initiated shutdown that is slow to close the IPC connection
+  would delay it. A diagnostic full embedded run (a worktree
+  `diag-markers` at `019c08b` with mpv's verbose log for the scenario's
+  plays and the time from quit to `/Stopped`; not committed) looks for
+  it.
   - Until then: an embedded run that fails the verdict on `completionhub`
     alone is this race until shown otherwise; run the scenario again by
     itself before reading it as a regression.
