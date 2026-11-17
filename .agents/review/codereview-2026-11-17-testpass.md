@@ -7,7 +7,8 @@ candidates, all admitted (one MEDIUM, two LOW), all repaired. The second,
 over `f2dcbc3..019c08b`: **findings**, four candidates, all admitted (two
 MEDIUM, two LOW), all repaired (codex coding task `cxfix8`, closed by the
 working agent's review). The third, over `019c08b..dc3c9e8`: one LOW
-finding (tp-8), repaired.
+finding (tp-8), repaired. The fourth, over tp-8's repair
+(`dc3c9e8..6f92baa`): one LOW finding (tp-9), repaired.
 
 ## Dispatch record
 
@@ -32,7 +33,8 @@ finding (tp-8), repaired.
 | tp-5 | MEDIUM   | An interrupted Windows run can leave its scenario's test CA trusted | `[x]` | `f29d77c` |
 | tp-6 | LOW      | build.rs's guard passes with the copy taken out | `[x]` | `d1cc1b3` |
 | tp-7 | LOW      | settingValue accepts an expected default before the setting has loaded | `[x]` | `d48bc08` |
-| tp-8 | LOW      | The click retry's guard never runs the script that picks the element | `[x]` | this commit |
+| tp-8 | LOW      | The click retry's guard never runs the script that picks the element | `[x]` | `6f92baa` |
+| tp-9 | LOW      | The click retry's guard never runs the script's not-found path | `[x]` | this commit |
 
 ### tp-1
 
@@ -159,3 +161,21 @@ as WebDriver would, against a fake `elementsFromPoint` with an overlay over
 the button and a scrolled window, and checks that only the button scrolls;
 seen failing with the first element at the point taken and with the
 window's scroll ignored.
+
+## The fourth hunt: tp-8's repair
+
+Over `dc3c9e8..6f92baa`. **findings**: one, admitted.
+
+### tp-9 (LOW)
+
+Reviewer, verbatim, evidence: "tests/e2e-harness.test.mjs:845 always
+supplies a matching button, while :853 supplies a canned false response.
+Changing tests/e2e/driver.mjs:161 to `if (!found) return true;`, or
+deleting that check, leaves all 64 harness tests passing." Predicted
+failure: "When no matching tag exists at the recorded point, the guard
+accepts regressions that retry without locating or scrolling the target."
+
+Admitted. Repair (the working agent's): the test also runs the script
+against an empty list and an overlay-only list, expecting false and nothing
+scrolled; seen failing with the not-found result turned to true and with
+the check deleted.

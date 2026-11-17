@@ -848,6 +848,14 @@ test('a click a fixed overlay intercepts is retried once with the element centre
     const script = new Function('document', 'window', 'args', `return (function () {${retried.calls[3].body.script}}).apply(null, args);`);
     assert.equal(script(fakeDocument, { scrollX: 10, scrollY: 30 }, retried.calls[3].body.args), true);
     assert.deepEqual(scrolled, ['button'], 'only the element with the tag scrolls');
+    // Nothing with that tag at the point, or nothing at all: it says so and
+    // scrolls nothing, so the click is not retried (tp-9).
+    for (const found of [[], [element('footer'), element('div')]]) {
+      scrolled.length = 0;
+      const nothing = { elementsFromPoint: () => found };
+      assert.equal(script(nothing, { scrollX: 0, scrollY: 0 }, retried.calls[3].body.args), false);
+      assert.deepEqual(scrolled, []);
+    }
     const stillCovered = await run([intercepted, rect, [200, 'BUTTON'], [200, true], intercepted]);
     assert.equal(stillCovered.error?.code, 'element click intercepted', 'a second interception fails the click');
     const notFound = await run([intercepted, rect, [200, 'BUTTON'], [200, false]]);
