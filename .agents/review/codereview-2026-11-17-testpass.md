@@ -8,7 +8,9 @@ over `f2dcbc3..019c08b`: **findings**, four candidates, all admitted (two
 MEDIUM, two LOW), all repaired (codex coding task `cxfix8`, closed by the
 working agent's review). The third, over `019c08b..dc3c9e8`: one LOW
 finding (tp-8), repaired. The fourth, over tp-8's repair
-(`dc3c9e8..6f92baa`): one LOW finding (tp-9), repaired.
+(`dc3c9e8..6f92baa`): one LOW finding (tp-9), repaired. A fifth, over
+tp-9's repair (`6f92baa..17893e6`), was clean: every finding of the pass so
+far, tp-1 to tp-9, is closed.
 
 ## Dispatch record
 
@@ -34,7 +36,7 @@ finding (tp-8), repaired. The fourth, over tp-8's repair
 | tp-6 | LOW      | build.rs's guard passes with the copy taken out | `[x]` | `d1cc1b3` |
 | tp-7 | LOW      | settingValue accepts an expected default before the setting has loaded | `[x]` | `d48bc08` |
 | tp-8 | LOW      | The click retry's guard never runs the script that picks the element | `[x]` | `6f92baa` |
-| tp-9 | LOW      | The click retry's guard never runs the script's not-found path | `[x]` | this commit |
+| tp-9 | LOW      | The click retry's guard never runs the script's not-found path | `[x]` | `17893e6` |
 
 ### tp-1
 
