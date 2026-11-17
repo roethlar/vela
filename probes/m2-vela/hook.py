@@ -216,6 +216,16 @@ if "nofmt" in variants:
         });""",
 """        let _ = (float, unsafe { (kCAContentsFormatRGBA16Float, kCAContentsFormatRGBA8Uint) });
         eprintln!("probe-variant: no contents format");""")])
+if "red" in variants:
+    # Clear the layer's framebuffer to solid red after every draw: red on
+    # screen means Core Animation presents what Vela draws (so a black
+    # picture would be mpv's output); black means it does not.
+    patch("src-tauri/src/player/embedded/macos_gl.rs", [
+("""        if draws_black(held_at_start, held) {""",
+"""        if draws_black(held_at_start, held) || true {"""),
+("""                (self.gl.clear_color)(0.0, 0.0, 0.0, 1.0);""",
+"""                (self.gl.clear_color)(1.0, 0.0, 0.0, 1.0);"""),
+])
 if "nocs" in variants:
     patch("src-tauri/src/player/embedded/macos_gl.rs", [(
 """        self.setColorspace(Some(&space));
