@@ -73,7 +73,7 @@ export default {
     const play = await driver.find('css selector', '.detail button.playwide');
     await driver.click(play);
 
-    // mpv side: the loaded path is the mock stream; seek to 6s; let Vela's
+    // mpv side: the loaded path is the mock stream; seek to 4s; let Vela's
     // progress poll observe it; quit.
     const socketPath = await waitForNewMpvSocket(socketsBefore).catch(async (err) => {
       const text = await driver.exec(`return document.body.innerText.slice(0, 400)`).catch(() => '?');
@@ -125,8 +125,11 @@ export default {
       // Original quality, no notice or health sampler.
       // Embedded adds player::report::spawn_reporter for the view's state.
       await velaConnected(socketPath, runPlayer === 'embedded' ? 4 : 3);
-      await mpv.setProp('time-pos', 6);
-      // Vela polls the same socket for progress; give it a beat to observe ≥6s.
+      // 4 s, not later: the stop below is a few WebDriver calls in the
+      // embedded player, which a slow machine (the hosted Windows runner)
+      // takes a second or more over while the clip plays on.
+      await mpv.setProp('time-pos', 4);
+      // Vela polls the same socket for progress; give it a beat to observe ≥4s.
       await new Promise((r) => setTimeout(r, 1500));
       // The user stops the play: mpv's quit in the external player, the
       // player view's Close control in the embedded one (stopPlayAsUser).
@@ -153,7 +156,8 @@ export default {
     }, 'the recents position stamp after mpv exit');
     assert.equal(recent.item.title, 'Mock Movie');
     const offset = recent.item.viewOffsetMs;
-    // Upper bound 8000: seek 6s + ≤1.5s observed playback + margin. A
+    // Upper bound 8000: seek 4s + 1.5s observed playback + the stop's own
+    // time, with margin. A
     // natural-EOF stamp (~10s) must NOT pass — that's the eh-7 failure mode.
     assert.ok(
       offset >= 3000 && offset <= 8000,

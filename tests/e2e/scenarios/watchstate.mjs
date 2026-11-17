@@ -55,7 +55,7 @@ export default {
     assert.ok(!labelBefore.includes('% watched'), 'card starts with no progress');
 
     // Play through the mock's HTTP stream (card → info page → Play, per the
-    // nav flip); seek to 6s; quit.
+    // nav flip); seek to 4s; quit.
     const before = mpvSocketSnapshot();
     const card = await driver.find('css selector', 'button.poster[aria-label^="Mock Movie"]');
     await driver.click(card);
@@ -81,8 +81,11 @@ export default {
       // Original quality, no notice or health sampler.
       // Embedded adds player::report::spawn_reporter for the view's state.
       await velaConnected(socketPath, runPlayer === 'embedded' ? 4 : 3);
-      await mpv.setProp('time-pos', 6);
-      await new Promise((r) => setTimeout(r, 1500)); // let the tracker observe ≥6s
+      // 4 s, not later: the stop below is a few WebDriver calls in the
+      // embedded player, which a slow machine (the hosted Windows runner)
+      // takes a second or more over while the clip plays on.
+      await mpv.setProp('time-pos', 4);
+      await new Promise((r) => setTimeout(r, 1500)); // let the tracker observe ≥4s
       // The user stops the play: mpv's quit in the external player, the
       // player view's Close in the embedded one (stopPlayAsUser), so the
       // check-ins below follow the stop each player's user really makes.
@@ -92,7 +95,7 @@ export default {
     }
 
     // Server side: Start and Stopped check-ins arrived, Stopped carries a
-    // mid-clip position (ticks; 10s clip ⇒ 6s ≈ 60_000_000).
+    // mid-clip position (ticks; 10s clip ⇒ about 5.5s ≈ 55_000_000).
     await pollUntil(
       () => mock.state.checkins.some((c) => c.endpoint === '/Stopped'),
       'the Stopped check-in',
