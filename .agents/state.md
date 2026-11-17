@@ -513,8 +513,10 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - The Windows end-to-end suite did not pass at `9d44c5e` (run 44101184219),
   failing different scenarios on each of two attempts. Attempt 1: external
   in full, embedded 48 of 50 (`curation`, `resume`: "mpv: no reply to
-  get_property"; the failure screenshot shows the play already watched;
-  ASSUMPTION, unproven: on the slow runner `playAndQuit`'s wait for Vela's
+  get_property"; both failure screenshots show the first play run to its
+  end: `curation`'s card marked watched, `resume`'s Home empty, with no
+  title to resume, where a stop at 6 s leaves one; ASSUMPTION, supported by
+  those, not by timings (the run records none): on the slow runner `playAndQuit`'s wait for Vela's
   connections outlasted the 10-second clip, and the embedded player closed
   its pipe before the harness's `time-pos` question, helpers.mjs:607).
   Attempt 2: embedded in full, external 44 of 46 (`continuetv`: a WebDriver
