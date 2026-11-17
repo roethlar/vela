@@ -110,7 +110,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: .libmpv/out/libmpv-windows-x86_64
-          key: libmpv-windows-x86_64-${{ hashFiles('scripts/build-libmpv-windows.sh', 'packaging/libmpv/versions.txt', 'packaging/libmpv/Containerfile.windows', 'packaging/libmpv/windows-license-notes.txt', 'packaging/libmpv/windows-pe.py') }}
+          key: libmpv-windows-x86_64-${{ hashFiles('scripts/build-libmpv-windows.sh', 'packaging/libmpv/versions.txt', 'packaging/libmpv/Containerfile.windows', 'packaging/libmpv/windows-license-notes.txt', 'packaging/libmpv/windows-pe.py', 'packaging/libmpv/windows/**') }}
       - name: Build the Windows set
         if: steps.cache.outputs.cache-hit != 'true'
         run: bash scripts/build-libmpv-windows.sh --container

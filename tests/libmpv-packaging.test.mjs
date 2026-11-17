@@ -221,6 +221,21 @@ test('the Windows overlay carries the whole set beside Vela.exe with the recorde
   assert.equal(Object.prototype.toString.call(tauriConf.bundle.resources), '[object Object]', 'merging the overlay preserves the base mpv scripts');
 });
 
+test('Windows CI and release caches include the Schannel patch (green and red)', () => {
+  const guard = (workflow) => {
+    const key = workflow.match(/key: (libmpv-windows-x86_64-\$\{\{ hashFiles\([^)]*\) \}\})/)?.[1];
+    assert.ok(key?.includes("'packaging/libmpv/windows/**'"), 'Windows cache must hash the Schannel patch');
+    return key;
+  };
+  const keys = ['.github/workflows/ci.yml', '.github/workflows/release.yml'].map((file) => {
+    const workflow = read(file);
+    const key = guard(workflow);
+    assert.throws(() => guard(workflow.replace(", 'packaging/libmpv/windows/**'", '')), /must hash the Schannel patch/);
+    return key;
+  });
+  assert.equal(keys[0], keys[1], 'release uses the same patched set as CI');
+});
+
 test('the local Windows wrapper builds both installers with the overlay and checks before success', () => {
   const script = code(read('scripts/build-windows.ps1'));
   has(script, "$set = '.libmpv/out/libmpv-windows-x86_64'", 'local build uses the overlay input');

@@ -158,6 +158,30 @@ exercise D3D11 drawing, HDR, hardware decoding or HTTPS. The Windows host
 loads this set from the installed app; the release workflow packages it into
 both installers (see "Windows installers with the set" below).
 
+The Windows recipe applies `packaging/libmpv/windows/ffmpeg-schannel-revocation.patch`
+after verifying and extracting the pinned FFmpeg archive, and fails if the
+patch cannot apply. It adds only `SCH_CRED_IGNORE_NO_REVOCATION_CHECK` and
+`SCH_CRED_IGNORE_REVOCATION_OFFLINE` to Schannel's verifying branch: chain,
+host-name and revocation checks remain on, but unavailable revocation
+information no longer prevents playback. The non-verifying branch is
+unchanged. Like the macOS mpv build patch, it ships under `licenses/` (in
+`ffmpeg/`), with a required MANIFEST `patch` record and file hash; it cannot
+stand in for FFmpeg's licence texts. Both Windows CI/release cache keys hash
+the patch. Preserve it with the build recipe and pinned sources, and
+re-check its scope and application whenever FFmpeg is bumped.
+
+The same pinned FFmpeg source uses GnuTLS on Linux (`--enable-gnutls`):
+`libavformat/tls_gnutls.c` checks the peer chain with
+`gnutls_certificate_verify_peers2` and the host with
+`gnutls_x509_crt_check_hostname`, without requiring a revocation lookup or
+positive revocation response. macOS uses SecureTransport
+(`--enable-securetransport`): `libavformat/tls_securetransport.c` sets the
+peer domain and uses the normal system trust evaluation (or `SecTrustEvaluate`
+with a supplied CA), without adding a mandatory revocation-response policy.
+Neither has Schannel's hard failure for missing revocation information, so
+neither needs this patch. This is a source/configuration finding, not a
+runtime HTTPS test of those platforms; system trust policy still applies.
+
 For macOS 11+, run `bash packaging/libmpv/macos/prepare-tools.sh`, then
 `bash scripts/build-libmpv-macos.sh` on Apple Silicon. The same Linux pins
 produce `.libmpv/out/libmpv-macos-universal/`: separate arm64/x86_64 dylibs

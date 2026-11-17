@@ -821,6 +821,7 @@ requiredTokens('container', container, [
   'FROM docker.io/library/debian:trixie-slim', 'gcc-mingw-w64-x86-64-posix',
   'g++-mingw-w64-x86-64-posix', 'mingw-w64-x86-64-dev', 'binutils-mingw-w64-x86-64',
   'pkg-config nasm ninja-build cmake meson',
+  'curl ca-certificates patch xz-utils file',
 ]);
 const configuration = {
   zlib: ['-DZLIB_BUILD_SHARED=OFF', '-DZLIB_BUILD_STATIC=ON', '-DZLIB_BUILD_TESTING=OFF', '"$PREFIX/lib/libzs.a" "$PREFIX/lib/libz.a"'],
@@ -848,6 +849,8 @@ const configuration = {
     'spirv-cross-c-shared.pc', '$(pkg-config --modversion spirv-cross-c)',
     '-lspirv-cross-c -lspirv-cross-hlsl -lspirv-cross-glsl -lspirv-cross-core'],
   ffmpeg: ['--target-os=mingw32 --arch=x86_64 --enable-cross-compile', '--cc="$CC" --cxx="$CXX"',
+    'patch --batch --forward --fuzz=0 -d "$src" -p1 < "$recipe/windows/ffmpeg-schannel-revocation.patch"',
+    '|| die "could not apply FFmpeg\'s Schannel revocation patch"',
     '--enable-shared --disable-static', '--disable-autodetect', '--disable-gpl --disable-nonfree --disable-version3',
     '--enable-zlib --enable-iconv --enable-schannel --enable-libdav1d', '--enable-d3d11va --enable-dxva2',
     '--enable-w32threads --disable-pthreads', '--disable-indevs --disable-outdevs --enable-indev=lavfi',
@@ -870,8 +873,51 @@ requiredTokens('collector', body(script, 'collect'), [
   "find . -type f ! -name MANIFEST -printf '%P\\n'", '"$(sha256sum "$f"', '"$(stat -c %s "$f")"',
   '"licence $name licenses/$name/$f"', '"$recipe/windows-license-notes.txt"',
   'lic spirv-cross LICENSE spirv.h spirv.hpp GLSL.std.450.h',
+  'install -m644 "$recipe/windows/ffmpeg-schannel-revocation.patch" "$OUT/licenses/ffmpeg/"',
+  '"patch ffmpeg licenses/ffmpeg/ffmpeg-schannel-revocation.patch"',
 ]);
 requiredTokens('licence notes', notes, ['LGPL-3.0-or-later', 'Apache-2.0', 'Runtime Library Exception', 'modified libiconv']);
+
+test('Windows Schannel patch changes only the two revocation availability flags when verifying (green and red)', () => {
+  const patch = read('packaging/libmpv/windows/ffmpeg-schannel-revocation.patch');
+  const guard = (candidate) => {
+    assert.deepEqual([...candidate.matchAll(/^\+\+\+ b\/(.+)$/gm)].map((m) => m[1]),
+      ['libavformat/tls_schannel.c'], 'only the Schannel source');
+    assert.equal([...candidate.matchAll(/^@@ /gm)].length, 1, 'only one hunk');
+    const hunk = candidate.slice(candidate.indexOf('\n@@ ')).split('\n').slice(2).filter(Boolean);
+    assert.deepEqual(hunk.filter((line) => line.startsWith('-')).map((line) => line.trim()),
+      ['-                                    SCH_CRED_REVOCATION_CHECK_CHAIN;'], 'only the old chain flag line');
+    assert.deepEqual(hunk.filter((line) => line.startsWith('+')).map((line) => line.slice(1).trim()), [
+      'SCH_CRED_REVOCATION_CHECK_CHAIN |',
+      'SCH_CRED_IGNORE_NO_REVOCATION_CHECK |',
+      'SCH_CRED_IGNORE_REVOCATION_OFFLINE;',
+    ], 'only two availability flags added');
+    const after = hunk.filter((line) => !line.startsWith('-')).map((line) => line.slice(1)).join('\n');
+    assert.match(after, /if \(s->verify\)\s+schannel_cred\.dwFlags = SCH_CRED_AUTO_CRED_VALIDATION \|\s+SCH_CRED_REVOCATION_CHECK_CHAIN \|\s+SCH_CRED_IGNORE_NO_REVOCATION_CHECK \|\s+SCH_CRED_IGNORE_REVOCATION_OFFLINE;\s+else\s+schannel_cred\.dwFlags = SCH_CRED_MANUAL_CRED_VALIDATION \|/,
+      'flags belong only to the verifying branch; automatic validation stays on');
+  };
+  guard(patch);
+  for (const token of ['SCH_CRED_IGNORE_NO_REVOCATION_CHECK', 'SCH_CRED_IGNORE_REVOCATION_OFFLINE',
+    'SCH_CRED_REVOCATION_CHECK_CHAIN', 'SCH_CRED_AUTO_CRED_VALIDATION', 'if (s->verify)']) {
+    assert.throws(() => guard(patch.replace(token, 'REMOVED')), /flag|validation/);
+  }
+  assert.throws(() => guard(patch + '\n--- a/other.c\n+++ b/other.c\n'), /only the Schannel source/);
+});
+
+test('Windows applies the Schannel patch after verified unpack and before configuring FFmpeg (green and red)', () => {
+  const guard = (candidate) => {
+    const ffmpeg = body(candidate, 'build_ffmpeg');
+    const unpack = ffmpeg.indexOf('src="$(unpack ffmpeg)"');
+    const apply = ffmpeg.indexOf('patch --batch --forward --fuzz=0');
+    const configure = ffmpeg.indexOf('./configure ');
+    assert.ok(unpack >= 0 && unpack < apply && apply < configure, 'unpack, patch, configure order');
+  };
+  guard(script);
+  for (const token of ['src="$(unpack ffmpeg)"', 'patch --batch --forward --fuzz=0', './configure ']) {
+    const ffmpeg = body(script, 'build_ffmpeg');
+    assert.throws(() => guard(script.replace(ffmpeg, ffmpeg.replace(token, 'REMOVED'))), /order/);
+  }
+});
 
 test('Windows source graph uses every pin, exclusively, with licences (green and red)', () => {
   // The macOS set's own build inputs (role build-macos) are not Windows'.
@@ -931,6 +977,7 @@ requiredTokens('CI cross build', buildJob, [
   "key: libmpv-windows-x86_64-${{ hashFiles(", "'scripts/build-libmpv-windows.sh'",
   "'packaging/libmpv/versions.txt'", "'packaging/libmpv/Containerfile.windows'",
   "'packaging/libmpv/windows-license-notes.txt'", "'packaging/libmpv/windows-pe.py'", "if: steps.cache.outputs.cache-hit != 'true'",
+  "'packaging/libmpv/windows/**'",
   'run: bash scripts/build-libmpv-windows.sh --container',
   'run: python3 -B packaging/libmpv/check-libmpv-windows.py .libmpv/out/libmpv-windows-x86_64 --manifest-only',
   'uses: actions/upload-artifact@v7', 'name: libmpv-windows-x86_64', 'if-no-files-found: error',
@@ -997,10 +1044,15 @@ function fixture(t) {
   const dir = path.join(tmp, 'set');
   const pinfile = path.join(tmp, 'versions.txt');
   fs.mkdirSync(dir);
-  fs.writeFileSync(pinfile, 'mpv 0.42.0 ship\nshaderc 2026.4 build\n');
+  const ffmpegVersion = pins.find(([name]) => name === 'ffmpeg')[1];
+  fs.writeFileSync(pinfile, `mpv 0.42.0 ship\nshaderc 2026.4 build\nffmpeg ${ffmpegVersion} ship\n`);
   const data = { 'libmpv-2.dll': 'test DLL', 'avcodec-63.dll': 'dependency',
+    'licenses/ffmpeg/COPYING.LGPLv2.1': 'LGPL',
+    'licenses/ffmpeg/ffmpeg-schannel-revocation.patch': read('packaging/libmpv/windows/ffmpeg-schannel-revocation.patch'),
     'licenses/mpv/LICENSE': 'LGPL', 'licenses/shaderc/LICENSE': 'Apache' };
   const lines = ['arch x86_64', 'platform windows', 'component mpv 0.42.0', 'component shaderc 2026.4',
+    `component ffmpeg ${ffmpegVersion}`, 'licence ffmpeg licenses/ffmpeg/COPYING.LGPLv2.1',
+    'patch ffmpeg licenses/ffmpeg/ffmpeg-schannel-revocation.patch',
     'licence mpv licenses/mpv/LICENSE', 'licence shaderc licenses/shaderc/LICENSE'];
   for (const [name, text] of Object.entries(data)) {
     fs.mkdirSync(path.dirname(path.join(dir, name)), { recursive: true });
@@ -1015,7 +1067,30 @@ function fixture(t) {
 }
 
 test('Windows manifest check fails for each broken rule before loading', async (t) => {
+  const patchPath = 'licenses/ffmpeg/ffmpeg-schannel-revocation.patch';
+  const patchRole = `patch ffmpeg ${patchPath}\n`;
   const changes = [
+    ['missing Schannel patch', (f) => fs.unlinkSync(path.join(f.dir, patchPath)), /missing: licenses\/ffmpeg\/ffmpeg-schannel-revocation.patch/],
+    ['changed Schannel patch', (f) => fs.appendFileSync(path.join(f.dir, patchPath), 'x'), /modified: licenses\/ffmpeg/],
+    ['same-size changed Schannel patch', (f) => {
+      const file = path.join(f.dir, patchPath);
+      fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace('Vela:', 'vela:'));
+    }, /modified: licenses\/ffmpeg/],
+    ['Schannel patch not recorded', (f) => fs.writeFileSync(f.manifestPath, f.manifest.replace(patchRole, '')), /omits the FFmpeg Schannel revocation patch/],
+    ['Schannel patch file not listed', (f) => {
+      fs.unlinkSync(path.join(f.dir, patchPath));
+      fs.writeFileSync(f.manifestPath, f.manifest.replace(/^file .* licenses\/ffmpeg\/ffmpeg-schannel-revocation.patch\n/m, ''));
+    }, /invalid licence\/patch record/],
+    ['Schannel patch entirely omitted', (f) => {
+      fs.unlinkSync(path.join(f.dir, patchPath));
+      fs.writeFileSync(f.manifestPath, f.manifest.replace(patchRole, '').replace(/^file .* licenses\/ffmpeg\/ffmpeg-schannel-revocation.patch\n/m, ''));
+    }, /omits the FFmpeg Schannel revocation patch/],
+    ['empty Schannel patch', (f) => {
+      fs.writeFileSync(path.join(f.dir, patchPath), '');
+      fs.writeFileSync(f.manifestPath, f.manifest.replace(/file [a-f0-9]{64} \d+ (licenses\/ffmpeg\/ffmpeg-schannel-revocation.patch)/,
+        `file ${createHash('sha256').update('').digest('hex')} 0 $1`));
+    }, /invalid licence\/patch record/],
+    ['Schannel patch is not a licence', (f) => fs.writeFileSync(f.manifestPath, f.manifest.replace('licence ffmpeg licenses/ffmpeg/COPYING.LGPLv2.1', `licence ffmpeg ${patchPath}`)), /no licence text listed for component: ffmpeg/],
     ['missing DLL', (f) => fs.unlinkSync(path.join(f.dir, 'avcodec-63.dll')), /missing/],
     ['changed DLL', (f) => fs.appendFileSync(path.join(f.dir, 'libmpv-2.dll'), 'x'), /modified/],
     ['same-size changed DLL', (f) => fs.writeFileSync(path.join(f.dir, 'libmpv-2.dll'), 'bad! DLL'), /modified/],

@@ -86,6 +86,9 @@ Vela's own window on Linux (with Wayland), Windows and macOS.
 
 ## Fixes
 
+- On Windows, Vela's window now plays from an HTTPS server whose certificate
+  comes from an authority Windows trusts even when its revocation cannot be
+  checked, as browsers do. Certificate chain and host-name checks stay on.
 - When a video plays to its end, Home no longer shows it in Continue
   Watching for a moment while the server records it as played. Vela now
   records the finished play before Home looks again.

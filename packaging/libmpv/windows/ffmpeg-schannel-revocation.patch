@@ -1,0 +1,20 @@
+Vela: allow unavailable revocation information when Schannel verifies TLS.
+
+Keep automatic certificate chain and host-name validation and chain revocation
+checking. Soft-fail only missing revocation information or an offline revocation
+service, so a server trusted by Windows also works on a private/offline network.
+The non-verifying branch is unchanged. Re-check this hunk when bumping FFmpeg.
+
+--- a/libavformat/tls_schannel.c
++++ b/libavformat/tls_schannel.c
+@@ -1154,7 +1154,9 @@
+     } else {
+         if (s->verify)
+             schannel_cred.dwFlags = SCH_CRED_AUTO_CRED_VALIDATION |
+-                                    SCH_CRED_REVOCATION_CHECK_CHAIN;
++                                    SCH_CRED_REVOCATION_CHECK_CHAIN |
++                                    SCH_CRED_IGNORE_NO_REVOCATION_CHECK |
++                                    SCH_CRED_IGNORE_REVOCATION_OFFLINE;
+         else
+             schannel_cred.dwFlags = SCH_CRED_MANUAL_CRED_VALIDATION |
+                                     SCH_CRED_IGNORE_NO_REVOCATION_CHECK |

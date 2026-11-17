@@ -8,5 +8,5 @@ RUN apt-get update \
       binutils-mingw-w64-x86-64 mingw-w64-x86-64-dev \
       pkg-config nasm ninja-build cmake meson \
       python3 python3-jinja2 python3-markupsafe \
-      curl ca-certificates xz-utils file \
+      curl ca-certificates patch xz-utils file \
  && rm -rf /var/lib/apt/lists/*

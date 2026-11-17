@@ -2,7 +2,7 @@
 """Check the Windows x86_64 set: python check-libmpv-windows.py SET_DIRECTORY.
 
 Before loading code, check every MANIFEST file, hash, size, component version
-and licence against the directory and versions.txt. Then load by absolute
+and licence/patch against the directory and versions.txt. Then load by absolute
 path with a restricted DLL search, report the client API, play the synthetic
 lavfi source to EOF through null outputs, and inspect loaded module paths.
 This is a headless load/play check, not a D3D11, HDR, hardware decode or HTTPS
@@ -41,7 +41,7 @@ def safe_name(name):
 
 
 def read_manifest(directory):
-    files, components, licences = {}, {}, []
+    files, components, licences, patches = {}, {}, [], []
     arch = platform = None
     for number, line in enumerate((Path(directory) / "MANIFEST").read_text(encoding="utf-8").splitlines(), 1):
         if not line or line.startswith("#"):
@@ -61,8 +61,8 @@ def read_manifest(directory):
             if parts[1] in components:
                 raise ValueError(f"duplicate component: {parts[1]}")
             components[parts[1]] = parts[2]
-        elif kind == "licence" and len(parts) == 3:
-            licences.append((parts[1], parts[2]))
+        elif kind in {"licence", "patch"} and len(parts) == 3:
+            (licences if kind == "licence" else patches).append((parts[1], parts[2]))
         elif kind == "arch" and len(parts) == 2 and arch is None:
             arch = parts[1]
         elif kind == "platform" and len(parts) == 2 and platform is None:
@@ -78,14 +78,16 @@ def read_manifest(directory):
     for name, _, _ in files.values():
         if name.lower().endswith(".dll") and "/" in name:
             raise ValueError(f"DLL outside the set root: {name}")
-    for component, name in licences:
+    for component, name in licences + patches:
         if (component not in components or name.casefold() not in files
                 or not name.startswith(f"licenses/{component}/")
                 or files[name.casefold()][2] == 0):
-            raise ValueError(f"invalid licence record: {component} {name}")
+            raise ValueError(f"invalid licence/patch record: {component} {name}")
     for component in components:
-        if not any(c == component for c, _ in licences):
+        if not any(c == component and not name.lower().endswith(".patch") for c, name in licences):
             raise ValueError(f"no licence text listed for component: {component}")
+    if ("ffmpeg", "licenses/ffmpeg/ffmpeg-schannel-revocation.patch") not in patches:
+        raise ValueError("MANIFEST omits the FFmpeg Schannel revocation patch")
     return files, components
 
 
@@ -319,7 +321,7 @@ def main():
         print("skip load: manifest check failed")
         return 1
     if args.manifest_only:
-        print("ok: MANIFEST files, hashes, licences and pinned versions")
+        print("ok: MANIFEST files, hashes, licences, patch and pinned versions")
         return 0
     if sys.platform != "win32" or ctypes.sizeof(ctypes.c_void_p) != 8:
         print("check requires 64-bit Python on Windows", file=sys.stderr)

@@ -283,6 +283,9 @@ EOF
 
 build_ffmpeg() {
   local src; src="$(unpack ffmpeg)"
+  # unpack verifies the pinned archive before this Windows-only TLS change.
+  patch --batch --forward --fuzz=0 -d "$src" -p1 < "$recipe/windows/ffmpeg-schannel-revocation.patch" \
+    || die "could not apply FFmpeg's Schannel revocation patch"
   (
     cd "$src"
     # FFmpeg's configure starts from CFLAGS/LDFLAGS in the environment and
@@ -417,6 +420,8 @@ collect() {
   sed -n '/^\* Copyright (C)/,/^\*\*\*\*\*/p' "$WORK/src/lua/src/lua.h" > "$OUT/licenses/lua/LICENSE"
   [ -s "$OUT/licenses/lua/LICENSE" ] || die "could not extract Lua's licence text"
   roles="$roles"$'\n'"licence lua licenses/lua/LICENSE"
+  install -m644 "$recipe/windows/ffmpeg-schannel-revocation.patch" "$OUT/licenses/ffmpeg/"
+  roles="$roles"$'\n'"patch ffmpeg licenses/ffmpeg/ffmpeg-schannel-revocation.patch"
   install -m644 "$recipe/windows-license-notes.txt" "$OUT/licenses/NOTES.txt"
   # Runtime objects are linked statically. Carry the distribution's full
   # compiler/runtime notices (including GCC's Runtime Library Exception).

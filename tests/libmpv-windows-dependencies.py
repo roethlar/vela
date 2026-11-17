@@ -1,13 +1,16 @@
 """Portable PE fixtures and runtime audit tests; no Windows code is executed."""
 import contextlib
 import ctypes
+import hashlib
 import importlib.util
 import io
 import os
 from pathlib import Path
+import re
 import shutil
 import struct
 import subprocess
+import tarfile
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -25,6 +28,106 @@ def load(name, path):
 
 pe = load("windows_pe", "packaging/libmpv/windows-pe.py")
 check = load("windows_check", "packaging/libmpv/check-libmpv-windows.py")
+
+
+# The client branches in the pinned FFmpeg tls_schannel.c, before Vela's patch.
+# Keep this independent of the patch so changing its scope cannot change the
+# expected result. A real pinned-archive application is also checked on bumps.
+SCHANNEL_SOURCE = """    } else {
+        if (s->verify)
+            schannel_cred.dwFlags = SCH_CRED_AUTO_CRED_VALIDATION |
+                                    SCH_CRED_REVOCATION_CHECK_CHAIN;
+        else
+            schannel_cred.dwFlags = SCH_CRED_MANUAL_CRED_VALIDATION |
+                                    SCH_CRED_IGNORE_NO_REVOCATION_CHECK |
+                                    SCH_CRED_IGNORE_REVOCATION_OFFLINE;
+
+#if CONFIG_DTLS_PROTOCOL
+"""
+
+
+@unittest.skipUnless(os.name != "nt" and shutil.which("bash") and shutil.which("patch"),
+                     "Linux build shell and patch")
+class FFmpegPatchTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="vela Schannel patch ")
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.recipe = self.root / "recipe"
+        (self.recipe / "windows").mkdir(parents=True)
+        self.patch = self.recipe / "windows/ffmpeg-schannel-revocation.patch"
+        shutil.copyfile(REPO / "packaging/libmpv/windows/ffmpeg-schannel-revocation.patch", self.patch)
+        source = self.root / "source"
+        (source / "libavformat").mkdir(parents=True)
+        (source / "libavformat/tls_schannel.c").write_text(SCHANNEL_SOURCE)
+        # Configure and make are the compiler boundary; everything before them
+        # (fetch, checksum, unpack, patch) is the actual recipe, offline.
+        configure = source / "configure"
+        configure.write_text("#!/bin/sh\nprintf 'configure reached\\n'\ncat > config.h <<'EOF'\n"
+                             '#define FFMPEG_LICENSE "LGPL version 2.1 or later"\n' +
+                             "".join(f"#define CONFIG_{f} 1\n" for f in
+                                     ("ZLIB", "ICONV", "SCHANNEL", "LIBDAV1D", "D3D11VA", "DXVA2")) +
+                             "EOF\nprintf '#define CONFIG_LAVFI_INDEV 1\\n' > config_components.h\n")
+        configure.chmod(0o755)
+        (self.root / "src").mkdir()
+        self.archive = self.root / "src/ffmpeg-test.tar.xz"
+        with tarfile.open(self.archive, "w:xz") as archive:
+            archive.add(source, arcname="ffmpeg-test")
+        digest = hashlib.sha256(self.archive.read_bytes()).hexdigest()
+        (self.recipe / "versions.txt").write_text(
+            f"ffmpeg test ship {digest} https://unused.invalid/ffmpeg-test.tar.xz\n")
+        definitions = (REPO / "scripts/build-libmpv-windows.sh").read_text().split(
+            "# Reject unknown steps before touching any output")[0]
+        self.harness = self.root / "build.sh"
+        self.harness.write_text(definitions + r'''
+recipe="$1"
+VERSIONS="$recipe/versions.txt"
+SRC_DIR="$2/src"
+WORK="$2/work"
+PREFIX="$WORK/prefix"
+mkdir -p "$WORK/src"
+static_winpthread() { :; }
+make() { :; }
+curl() { echo 'unexpected download' >&2; return 99; }
+build_ffmpeg
+''')
+
+    def run_build(self):
+        return subprocess.run(["bash", str(self.harness), str(self.recipe), str(self.root)],
+                              capture_output=True, text=True, cwd=REPO, timeout=15)
+
+    def test_build_applies_only_the_two_verifying_flags(self):
+        run = self.run_build()
+        self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+        self.assertIn("configure reached", run.stdout)
+        expected = SCHANNEL_SOURCE.replace(
+            "SCH_CRED_REVOCATION_CHECK_CHAIN;",
+            "SCH_CRED_REVOCATION_CHECK_CHAIN |\n"
+            "                                    SCH_CRED_IGNORE_NO_REVOCATION_CHECK |\n"
+            "                                    SCH_CRED_IGNORE_REVOCATION_OFFLINE;")
+        self.assertEqual((self.root / "work/src/ffmpeg/libavformat/tls_schannel.c").read_text(), expected)
+
+    def test_checksum_failure_precedes_unpack_and_patch(self):
+        self.archive.write_bytes(self.archive.read_bytes() + b"corrupt")
+        run = self.run_build()
+        self.assertNotEqual(run.returncode, 0, run.stdout + run.stderr)
+        self.assertIn("checksum mismatch", run.stderr)
+        self.assertNotIn("configure reached", run.stdout)
+        self.assertFalse((self.root / "work/src/ffmpeg").exists())
+
+    def test_missing_patch_stops_before_configure(self):
+        self.patch.unlink()
+        run = self.run_build()
+        self.assertNotEqual(run.returncode, 0, run.stdout + run.stderr)
+        self.assertIn("could not apply FFmpeg's Schannel revocation patch", run.stderr)
+        self.assertNotIn("configure reached", run.stdout)
+
+    def test_rejected_patch_stops_before_configure(self):
+        self.patch.write_text(self.patch.read_text().replace("SCH_CRED_AUTO_CRED_VALIDATION", "NOT_IN_UPSTREAM"))
+        run = self.run_build()
+        self.assertNotEqual(run.returncode, 0, run.stdout + run.stderr)
+        self.assertIn("could not apply FFmpeg's Schannel revocation patch", run.stderr)
+        self.assertNotIn("configure reached", run.stdout)
 
 
 def fixture(imports=(), delay=(), forwarders=(), legacy_delay=False):
@@ -311,6 +414,40 @@ class BuildClosureTests(unittest.TestCase):
         run = self.shell("check_closure")
         self.assertEqual(run.returncode, 1, run.stdout + run.stderr)
         self.assertIn("cannot read dependencies:", run.stderr)
+
+    @unittest.skipUnless(shutil.which("objdump") and shutil.which("strip"), "binutils")
+    def test_collector_ships_and_records_schannel_patch(self):
+        prefix = self.root / "prefix"
+        (prefix / "bin").mkdir(parents=True)
+        (prefix / "lib").mkdir()
+        (prefix / "bin/libmpv-2.dll").write_bytes(fixture())
+        (self.root / "target-objdump").symlink_to(shutil.which("objdump"))
+        work = self.root / "work"
+        # Supply source notices at the actual collector's input paths. Only
+        # toolchain notices (absolute distribution paths) are stubbed below.
+        for component, names in re.findall(r"^  lic ([\w-]+) (.+)$", self.definitions, re.M):
+            for name in names.split():
+                target = work / "src" / component / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(f"{component} licence text\n")
+        lua = work / "src/lua/src/lua.h"
+        lua.parent.mkdir(parents=True)
+        lua.write_text("* Copyright (C) Lua\n*****\n")
+        run = self.shell(r'''
+PREFIX="${OUT%/*}/prefix"
+WORK="${OUT%/*}/work"
+VERSIONS="$recipe/versions.txt"
+TARGET="${OUT%/*}/target"
+STRIP=strip
+cp() { printf 'toolchain notice\n' > "$2"; }
+collect
+''')
+        self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+        shipped = "licenses/ffmpeg/ffmpeg-schannel-revocation.patch"
+        self.assertEqual((self.out / shipped).read_bytes(),
+                         (REPO / "packaging/libmpv/windows/ffmpeg-schannel-revocation.patch").read_bytes())
+        self.assertIn(f"patch ffmpeg {shipped}\n", (self.out / "MANIFEST").read_text())
+        self.assertEqual(check.check_manifest(self.out, REPO / "packaging/libmpv/versions.txt"), [])
 
     @unittest.skipUnless(shutil.which("objdump") and shutil.which("strip"), "binutils")
     def test_collector_follows_each_dependency_kind(self):

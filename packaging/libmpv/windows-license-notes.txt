@@ -35,10 +35,19 @@ Corresponding source and rebuilding:
 The official source archive URLs and SHA-256 values are in versions.txt.
 scripts/build-libmpv-windows.sh and packaging/libmpv/Containerfile.windows
 are the complete build instructions, including the static support archives
-and the two pkg-config adapters; no upstream source patch is applied. Keep
-these inputs available with a distribution to permit rebuilding/relinking
-the LGPL DLLs, including with modified libiconv. Vela loads the DLLs rather
-than statically linking the LGPL work into its executable.
+and the two pkg-config adapters. The Windows-only patch
+windows/ffmpeg-schannel-revocation.patch is applied after the source archive
+passes its checksum; a missing or rejected patch fails the build. In FFmpeg's
+Schannel verifying branch it adds SCH_CRED_IGNORE_NO_REVOCATION_CHECK and
+SCH_CRED_IGNORE_REVOCATION_OFFLINE. Automatic chain and host-name checks and
+SCH_CRED_REVOCATION_CHECK_CHAIN remain enabled; known revocation still fails,
+but missing or unreachable revocation information does not. The non-verifying
+branch is unchanged. The patch is shipped as
+licenses/ffmpeg/ffmpeg-schannel-revocation.patch, named by a MANIFEST patch
+record and hashed like every file. It is not a substitute for a licence text.
+Keep these inputs and the patch available with a distribution to permit
+rebuilding/relinking the LGPL DLLs, including with modified libiconv. Vela
+loads the DLLs rather than statically linking the LGPL work into its executable.
 
 Pin selection, recorded 2026-11-16 (versions/hashes are canonical only in
 versions.txt): shaderc's September release and glslang's September release

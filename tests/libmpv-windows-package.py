@@ -35,6 +35,10 @@ class WindowsPackageTests(unittest.TestCase):
             target.parent.mkdir(parents=True)
             target.write_text(f"{name} licence text", encoding="utf-8")
             lines += [f"component {name} {version}", f"licence {name} {licence}"]
+        build_patch = "licenses/ffmpeg/ffmpeg-schannel-revocation.patch"
+        shutil.copyfile(REPO / "packaging/libmpv/windows/ffmpeg-schannel-revocation.patch",
+                        self.reference / build_patch)
+        lines.append(f"patch ffmpeg {build_patch}")
         for file in sorted(self.reference.rglob("*")):
             if file.is_file():
                 content = file.read_bytes()
@@ -73,6 +77,20 @@ class WindowsPackageTests(unittest.TestCase):
         (self.shipped / "licenses/mpv/COPYING").unlink()
         with self.assertRaisesRegex(check.PackageError, "missing: licenses/mpv/COPYING"):
             check.verify_tree(self.payload, self.manifest)
+
+    def test_missing_schannel_patch(self):
+        (self.shipped / "licenses/ffmpeg/ffmpeg-schannel-revocation.patch").unlink()
+        with self.assertRaisesRegex(check.PackageError, "missing: licenses/ffmpeg/ffmpeg-schannel"):
+            check.verify_tree(self.payload, self.manifest)
+
+    def test_schannel_patch_cannot_be_omitted_from_reference_and_package(self):
+        path = "licenses/ffmpeg/ffmpeg-schannel-revocation.patch"
+        manifest = b"\n".join(line for line in self.manifest.splitlines()
+                              if not line.endswith(path.encode())) + b"\n"
+        (self.shipped / path).unlink()
+        (self.shipped / "MANIFEST").write_bytes(manifest)
+        with self.assertRaisesRegex(check.PackageError, "omits the FFmpeg Schannel revocation patch"):
+            check.verify_tree(self.payload, manifest)
 
     def test_extra_file(self):
         (self.shipped / "unexpected.dll").write_bytes(b"extra")
