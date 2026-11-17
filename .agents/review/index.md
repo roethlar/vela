@@ -1163,7 +1163,8 @@ Record: `codereview-2026-11-17-testpass.md`. One hunt so far, over
 the Windows suite's DevTools port, `94662e3`; pl-9's test): three
 candidates, three admitted (1 MEDIUM, 2 LOW), repaired (`c3ea91d`,
 `834a82a`). A second, over `f2dcbc3..019c08b`: four admitted (tp-4 to
-tp-7: 2 MEDIUM, 2 LOW), in repair (codex, `cxfix8`).
+tp-7: 2 MEDIUM, 2 LOW), repaired (`1342e6a`, `f29d77c`, `d1cc1b3`,
+`d48bc08`).
 
 ## 2026-11-16 — the embedded player on Windows and macOS (codereview codex)
 

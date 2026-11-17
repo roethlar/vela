@@ -5,7 +5,8 @@ Outcome: codereview codex hunts over the work of the release's test pass
 superseded"). The first, over `35d6757..f2dcbc3`: **findings**, three
 candidates, all admitted (one MEDIUM, two LOW), all repaired. The second,
 over `f2dcbc3..019c08b`: **findings**, four candidates, all admitted (two
-MEDIUM, two LOW), being repaired (codex coding task `cxfix8`).
+MEDIUM, two LOW), all repaired (codex coding task `cxfix8`, closed by the
+working agent's review).
 
 ## Dispatch record
 
@@ -26,10 +27,10 @@ MEDIUM, two LOW), being repaired (codex coding task `cxfix8`).
 | tp-1 | MEDIUM   | A clean end whose EOF is seen after the tracker's end gets three reports | `[x]` | `c3ea91d` |
 | tp-2 | LOW      | A deferred first report is lost if 64 later ends overflow the join queue | `[x]` | `c3ea91d` |
 | tp-3 | LOW      | The runner's report of a changed worktree can crash it before it saves results | `[x]` | `834a82a` |
-| tp-4 | MEDIUM   | build.rs misses a Cargo build directory set apart from the target directory | in repair (`cxfix8`) | |
-| tp-5 | MEDIUM   | An interrupted Windows run can leave its scenario's test CA trusted | in repair (`cxfix8`) | |
-| tp-6 | LOW      | build.rs's guard passes with the copy taken out | in repair (`cxfix8`) | |
-| tp-7 | LOW      | settingValue accepts an expected default before the setting has loaded | in repair (`cxfix8`) | |
+| tp-4 | MEDIUM   | build.rs misses a Cargo build directory set apart from the target directory | `[x]` | `1342e6a` |
+| tp-5 | MEDIUM   | An interrupted Windows run can leave its scenario's test CA trusted | `[x]` | `f29d77c` |
+| tp-6 | LOW      | build.rs's guard passes with the copy taken out | `[x]` | `d1cc1b3` |
+| tp-7 | LOW      | settingValue accepts an expected default before the setting has loaded | `[x]` | `d48bc08` |
 
 ### tp-1
 
@@ -124,3 +125,14 @@ equality without observing load completion. continuetv.mjs:242 expects
 initial values in src/lib/Settings.svelte:173-175. A probe returning the
 initial default followed by an incorrect loaded value made settingValue
 return after its first read."
+
+Repairs (codex's, `cxfix8`, closed by the working agent's review, which
+red-proofed tp-6's copy and tp-7's busy check again): tp-4 `1342e6a` (the
+copy moves to `src-tauri/build_support.rs`; the end-to-end runner puts the
+scripts beside the executable Cargo reported, whatever the layout; a build
+script cannot see a build directory set only in a Cargo config file, and
+says so), tp-5 `f29d77c` (the CA's removal lives in the cleanup that normal
+teardown and the signal handler share), tp-6 `d1cc1b3` (a Rust unit test
+copies into temporary trees in both layouts and checks every file), tp-7
+`d48bc08` (each loaded Settings control carries `aria-busy` until its value
+is known, and `settingValue` waits for that).
