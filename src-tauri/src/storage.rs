@@ -415,23 +415,34 @@ where
     Ok(output)
 }
 
+#[cfg(any(windows, test))]
+mod windows_acl;
+
 #[cfg(windows)]
 mod windows_private {
+    use super::windows_acl::{self, Ace};
     use std::ffi::c_void;
     use std::io;
+    use std::mem::{offset_of, size_of};
     use std::os::windows::ffi::OsStrExt;
     use std::path::Path;
-    use windows::core::{PCWSTR, PWSTR};
-    use windows::Win32::Foundation::{CloseHandle, LocalFree, HANDLE, HLOCAL};
+    use windows::core::{BOOL, PCWSTR, PWSTR};
+    use windows::Win32::Foundation::{
+        CloseHandle, LocalFree, ERROR_INSUFFICIENT_BUFFER, HANDLE, HLOCAL,
+    };
     use windows::Win32::Security::Authorization::{
-        ConvertSecurityDescriptorToStringSecurityDescriptorW, ConvertSidToStringSidW,
-        ConvertStringSecurityDescriptorToSecurityDescriptorW, GetNamedSecurityInfoW,
-        SDDL_REVISION_1, SE_FILE_OBJECT,
+        ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
+        GetNamedSecurityInfoW, SDDL_REVISION_1, SE_FILE_OBJECT,
     };
     use windows::Win32::Security::{
-        GetTokenInformation, SetFileSecurityW, TokenUser, DACL_SECURITY_INFORMATION,
-        PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, TOKEN_QUERY, TOKEN_USER,
+        AclSizeInformation, CreateWellKnownSid, EqualSid, GetAce, GetAclInformation,
+        GetSecurityDescriptorControl, GetSecurityDescriptorDacl, GetTokenInformation, IsValidAcl,
+        IsValidSid, SetFileSecurityW, TokenUser, WinBuiltinAdministratorsSid, WinLocalSystemSid,
+        ACCESS_ALLOWED_ACE, ACE_HEADER, ACL_SIZE_INFORMATION, DACL_SECURITY_INFORMATION,
+        PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SECURITY_MAX_SID_SIZE,
+        SE_DACL_PROTECTED, SID, TOKEN_QUERY, TOKEN_USER, WELL_KNOWN_SID_TYPE,
     };
+    use windows::Win32::System::SystemServices::ACCESS_ALLOWED_ACE_TYPE;
     use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
     struct OwnedHandle(HANDLE);
@@ -444,6 +455,25 @@ mod windows_private {
         }
     }
 
+    struct OwnedDescriptor(PSECURITY_DESCRIPTOR);
+
+    impl Drop for OwnedDescriptor {
+        fn drop(&mut self) {
+            // SAFETY: the security descriptor API returned this LocalAlloc buffer.
+            unsafe { LocalFree(Some(HLOCAL((self.0).0))) };
+        }
+    }
+
+    struct TokenUserInfo(Vec<usize>);
+
+    impl TokenUserInfo {
+        fn sid(&self) -> PSID {
+            // SAFETY: current_user_token initialized this aligned TOKEN_USER
+            // buffer; the SID it points to lives in the same owned allocation.
+            unsafe { (*self.0.as_ptr().cast::<TOKEN_USER>()).User.Sid }
+        }
+    }
+
     fn io_error(context: &'static str, error: impl std::fmt::Display) -> io::Error {
         io::Error::new(
             io::ErrorKind::PermissionDenied,
@@ -451,7 +481,7 @@ mod windows_private {
         )
     }
 
-    fn current_user_sid() -> io::Result<String> {
+    fn current_user_token() -> io::Result<TokenUserInfo> {
         let mut token = HANDLE::default();
         // SAFETY: the current-process pseudo-handle is always valid; `token`
         // points to writable storage for the returned owned handle.
@@ -460,16 +490,30 @@ mod windows_private {
         let token = OwnedHandle(token);
 
         let mut byte_len = 0;
-        // The sizing call is expected to report insufficient buffer. A
-        // nonzero returned size is the only result used from it.
-        let _ = unsafe { GetTokenInformation(token.0, TokenUser, None, 0, &mut byte_len) };
-        if byte_len == 0 {
+        // SAFETY: this documented sizing call writes only the required size.
+        // Only the expected insufficient-buffer result permits a second call.
+        match unsafe { GetTokenInformation(token.0, TokenUser, None, 0, &mut byte_len) } {
+            Err(error) if error.code() == ERROR_INSUFFICIENT_BUFFER.to_hresult() => {}
+            Err(error) => {
+                return Err(io_error(
+                    "could not size the current Windows user identity",
+                    error,
+                ))
+            }
+            Ok(()) => {
+                return Err(io_error(
+                    "could not size the current Windows user identity",
+                    "unexpected sizing success",
+                ))
+            }
+        }
+        if (byte_len as usize) < size_of::<TOKEN_USER>() {
             return Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
                 "could not size the current Windows user identity",
             ));
         }
-        let word = std::mem::size_of::<usize>();
+        let word = size_of::<usize>();
         let mut info = vec![0usize; (byte_len as usize).div_ceil(word)];
         // SAFETY: `info` is aligned and has at least `byte_len` writable bytes.
         unsafe {
@@ -482,13 +526,23 @@ mod windows_private {
             )
         }
         .map_err(|error| io_error("could not read the current Windows user identity", error))?;
-        // SAFETY: a successful TokenUser query initializes a TOKEN_USER at
-        // the beginning of the aligned output buffer.
-        let user = unsafe { &*info.as_ptr().cast::<TOKEN_USER>() };
+        let info = TokenUserInfo(info);
+        // SAFETY: the successful token query returned this SID inside `info`.
+        if !unsafe { IsValidSid(info.sid()) }.as_bool() {
+            return Err(io_error(
+                "invalid current Windows user identity",
+                "invalid SID",
+            ));
+        }
+        Ok(info)
+    }
+
+    fn current_user_sid() -> io::Result<String> {
+        let user = current_user_token()?;
         let mut string_sid = PWSTR::null();
-        // SAFETY: the SID belongs to `info` for this call and `string_sid`
+        // SAFETY: the SID belongs to `user` for this call and `string_sid`
         // points to writable storage for the LocalAlloc result.
-        unsafe { ConvertSidToStringSidW(user.User.Sid, &mut string_sid) }.map_err(|error| {
+        unsafe { ConvertSidToStringSidW(user.sid(), &mut string_sid) }.map_err(|error| {
             io_error("could not encode the current Windows user identity", error)
         })?;
         // SAFETY: ConvertSidToStringSidW returned a NUL-terminated string.
@@ -501,7 +555,7 @@ mod windows_private {
         result
     }
 
-    fn read_dacl_sddl(path: &Path) -> io::Result<String> {
+    fn read_security_descriptor(path: &Path) -> io::Result<OwnedDescriptor> {
         let wide_path = path
             .as_os_str()
             .encode_wide()
@@ -525,33 +579,115 @@ mod windows_private {
         .ok()
         .map_err(|error| io_error("could not inspect Vela's private Windows ACL", error))?;
 
-        let mut text = PWSTR::null();
-        // SAFETY: `descriptor` is a valid security descriptor returned above
-        // and `text` points to writable storage for the LocalAlloc result.
-        let converted = unsafe {
-            ConvertSecurityDescriptorToStringSecurityDescriptorW(
-                descriptor,
-                SDDL_REVISION_1,
-                DACL_SECURITY_INFORMATION,
-                &mut text,
-                None,
-            )
-        };
-        let result = converted
-            .map_err(|error| io_error("could not verify Vela's private Windows ACL", error))
-            .and_then(|()| {
-                // SAFETY: the conversion returned a NUL-terminated string.
-                unsafe { text.to_string() }
-                    .map_err(|error| io_error("Windows returned an invalid ACL", error))
-            });
-        // SAFETY: both APIs allocate their outputs with LocalAlloc.
-        unsafe {
-            if !text.is_null() {
-                LocalFree(Some(HLOCAL(text.as_ptr().cast::<c_void>())));
-            }
-            LocalFree(Some(HLOCAL(descriptor.0)));
+        if descriptor.0.is_null() {
+            return Err(io_error(
+                "could not inspect Vela's private Windows ACL",
+                "NULL descriptor",
+            ));
         }
-        result
+        Ok(OwnedDescriptor(descriptor))
+    }
+
+    fn well_known_sid(
+        kind: WELL_KNOWN_SID_TYPE,
+    ) -> io::Result<[u32; SECURITY_MAX_SID_SIZE as usize / 4]> {
+        let mut sid = [0u32; SECURITY_MAX_SID_SIZE as usize / 4];
+        let mut size = SECURITY_MAX_SID_SIZE;
+        // SAFETY: the DWORD-aligned buffer has the maximum possible SID size.
+        unsafe { CreateWellKnownSid(kind, None, Some(PSID(sid.as_mut_ptr().cast())), &mut size) }
+            .map_err(|error| io_error("could not build a Windows trustee SID", error))?;
+        Ok(sid)
+    }
+
+    fn inspect_dacl(descriptor: &OwnedDescriptor, user: PSID) -> io::Result<(bool, Vec<Ace>)> {
+        let mut control = 0;
+        let mut revision = 0;
+        // SAFETY: the owned descriptor is live; both outputs are writable.
+        unsafe { GetSecurityDescriptorControl(descriptor.0, &mut control, &mut revision) }
+            .map_err(|error| io_error("could not read Windows ACL protection", error))?;
+        let mut present = BOOL::default();
+        let mut defaulted = BOOL::default();
+        let mut dacl = std::ptr::null_mut();
+        // SAFETY: the DACL returned here is borrowed from the live descriptor.
+        unsafe { GetSecurityDescriptorDacl(descriptor.0, &mut present, &mut dacl, &mut defaulted) }
+            .map_err(|error| io_error("could not read Windows DACL", error))?;
+        // Absent and NULL DACLs grant unrestricted access, unlike an empty ACL.
+        if !present.as_bool() || dacl.is_null() {
+            return Err(io_error(
+                "Vela's Windows storage ACL is not private",
+                "missing DACL",
+            ));
+        }
+        // SAFETY: the descriptor supplies a non-NULL ACL.
+        if !unsafe { IsValidAcl(dacl) }.as_bool() {
+            return Err(io_error("could not read Windows DACL", "invalid ACL"));
+        }
+        let mut size = ACL_SIZE_INFORMATION::default();
+        // SAFETY: `size` has the layout and size required by AclSizeInformation.
+        unsafe {
+            GetAclInformation(
+                dacl,
+                (&mut size as *mut ACL_SIZE_INFORMATION).cast(),
+                size_of::<ACL_SIZE_INFORMATION>() as u32,
+                AclSizeInformation,
+            )
+        }
+        .map_err(|error| io_error("could not count Windows ACEs", error))?;
+        let mut system = well_known_sid(WinLocalSystemSid)?;
+        let mut administrators = well_known_sid(WinBuiltinAdministratorsSid)?;
+        let system = PSID(system.as_mut_ptr().cast());
+        let administrators = PSID(administrators.as_mut_ptr().cast());
+        let mut aces = Vec::with_capacity(size.AceCount as usize);
+        for index in 0..size.AceCount {
+            let mut raw = std::ptr::null_mut();
+            // SAFETY: the validated DACL lives through this enumeration.
+            unsafe { GetAce(dacl, index, &mut raw) }
+                .map_err(|error| io_error("could not read Windows ACE", error))?;
+            if raw.is_null() {
+                return Err(io_error("could not read Windows ACE", "NULL ACE"));
+            }
+            // SAFETY: GetAce on this valid ACL returned an ACE with a header.
+            let header = unsafe { &*raw.cast::<ACE_HEADER>() };
+            if u32::from(header.AceType) != ACCESS_ALLOWED_ACE_TYPE {
+                // Do not read another ACE kind using ACCESS_ALLOWED_ACE's layout.
+                aces.push(Ace::default());
+                continue;
+            }
+            let sid_offset = offset_of!(ACCESS_ALLOWED_ACE, SidStart);
+            let sid_header = offset_of!(SID, SubAuthority);
+            if (header.AceSize as usize) < sid_offset + sid_header {
+                return Err(io_error(
+                    "could not read Windows ACE",
+                    "truncated SID header",
+                ));
+            }
+            // SAFETY: the bounded ACE contains the fixed SID header. Check its
+            // variable subauthorities fit before handing the SID to Win32.
+            let sid_bytes = unsafe { raw.cast::<u8>().add(sid_offset) };
+            let subauthorities = unsafe { *sid_bytes.add(1) } as usize;
+            if sid_offset + sid_header + subauthorities * size_of::<u32>() > header.AceSize as usize
+            {
+                return Err(io_error("could not read Windows ACE", "truncated SID"));
+            }
+            let sid = PSID(sid_bytes.cast());
+            // SAFETY: the entire SID fits in the live ACE allocation.
+            if !unsafe { IsValidSid(sid) }.as_bool() {
+                return Err(io_error("could not read Windows ACE", "invalid SID"));
+            }
+            // SAFETY: all four SIDs are valid and their backing buffers live
+            // through these calls. EqualSid is a predicate: its FALSE result
+            // means unequal, not a GetLastError failure (despite the binding's
+            // Result<()> signature). No SDDL spelling is involved.
+            aces.push(unsafe {
+                Ace {
+                    access_allowed: true,
+                    current_user: EqualSid(sid, user).is_ok(),
+                    system: EqualSid(sid, system).is_ok(),
+                    administrators: EqualSid(sid, administrators).is_ok(),
+                }
+            });
+        }
+        Ok((control & SE_DACL_PROTECTED.0 != 0, aces))
     }
 
     pub(super) fn harden(path: &Path, directory: bool) -> io::Result<()> {
@@ -604,26 +740,120 @@ mod windows_private {
     }
 
     pub(super) fn verify(path: &Path) -> io::Result<()> {
-        let sid = current_user_sid()?;
-        let actual = read_dacl_sddl(path)?;
-        let current_user_ace = format!(";;;{sid})");
-        let has_system = actual.contains(";;;SY)") || actual.contains(";;;S-1-5-18)");
-        let has_admins = actual.contains(";;;BA)") || actual.contains(";;;S-1-5-32-544)");
-        if !actual.starts_with("D:P")
-            || !actual.contains(&current_user_ace)
-            || !has_system
-            || !has_admins
-            || actual.contains(";;;WD)")
-            || actual.contains(";;;S-1-1-0)")
-            || actual.contains(";;;BU)")
-            || actual.contains(";;;S-1-5-32-545)")
-        {
+        let user = current_user_token()?;
+        let descriptor = read_security_descriptor(path)?;
+        let (protected, aces) = inspect_dacl(&descriptor, user.sid())?;
+        if !windows_acl::is_private(protected, &aces) {
             return Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
                 "Vela's Windows storage ACL is not private",
             ));
         }
         Ok(())
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        fn from_sddl(sddl: &str) -> OwnedDescriptor {
+            let wide = sddl
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect::<Vec<_>>();
+            let mut descriptor = PSECURITY_DESCRIPTOR::default();
+            // SAFETY: the input is NUL-terminated and the output is writable.
+            unsafe {
+                ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                    PCWSTR(wide.as_ptr()),
+                    SDDL_REVISION_1,
+                    &mut descriptor,
+                    None,
+                )
+            }
+            .unwrap();
+            OwnedDescriptor(descriptor)
+        }
+
+        fn first_allowed_sid(descriptor: &OwnedDescriptor) -> PSID {
+            let mut present = BOOL::default();
+            let mut defaulted = BOOL::default();
+            let mut dacl = std::ptr::null_mut();
+            let mut ace = std::ptr::null_mut();
+            // SAFETY: these fixtures start with a standard access-allowed ACE;
+            // its SID remains borrowed from `descriptor` for the test.
+            unsafe {
+                GetSecurityDescriptorDacl(descriptor.0, &mut present, &mut dacl, &mut defaulted)
+                    .unwrap();
+                GetAce(dacl, 0, &mut ace).unwrap();
+                PSID(
+                    ace.cast::<u8>()
+                        .add(offset_of!(ACCESS_ALLOWED_ACE, SidStart))
+                        .cast(),
+                )
+            }
+        }
+
+        #[test]
+        fn sddl_aliases_and_w2_numeric_sid_resolve_to_the_same_user_identity() {
+            for user_name in ["LA", "LG", "S-1-5-21-3289802278-1561746829-1498425070-500"] {
+                let descriptor = from_sddl(&format!(
+                    "D:P(A;OICI;FA;;;{user_name})(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)"
+                ));
+                let user = first_allowed_sid(&descriptor);
+                let mut text = PWSTR::null();
+                // SAFETY: `user` borrows the live fixture descriptor.
+                unsafe { ConvertSidToStringSidW(user, &mut text) }.unwrap();
+                // SAFETY: the successful conversion returned a LocalAlloc string.
+                let numeric = unsafe { text.to_string() }.unwrap();
+                unsafe { LocalFree(Some(HLOCAL(text.as_ptr().cast()))) };
+                let numeric_descriptor = from_sddl(&format!(
+                    "D:P(A;;FA;;;{numeric})(A;;FA;;;S-1-5-18)(A;;FA;;;S-1-5-32-544)"
+                ));
+                for fixture in [&descriptor, &numeric_descriptor] {
+                    let (protected, aces) = inspect_dacl(fixture, user).unwrap();
+                    assert!(aces[0].current_user, "{user_name} / {numeric}");
+                    assert!(windows_acl::is_private(protected, &aces));
+                }
+            }
+        }
+
+        #[test]
+        fn windows_reader_rejects_extra_sids_and_non_allow_ace_types() {
+            let base = "D:P(A;;FA;;;LA)(A;;FA;;;SY)(A;;FA;;;BA)";
+            let identity = from_sddl(base);
+            let user = first_allowed_sid(&identity);
+            for extra in [
+                "(A;;FA;;;WD)",
+                "(A;;FA;;;BU)",
+                "(A;;FA;;;AU)",
+                "(A;;FA;;;S-1-5-21-1-2-3-1001)",
+                "(D;;FA;;;SY)",
+                "(OA;;FA;00000000-0000-0000-0000-000000000001;;SY)",
+                "(AU;SA;FA;;;SY)",
+            ] {
+                let descriptor = from_sddl(&format!("{base}{extra}"));
+                let (protected, aces) = inspect_dacl(&descriptor, user).unwrap();
+                assert!(!windows_acl::is_private(protected, &aces), "{extra}");
+            }
+        }
+
+        #[test]
+        fn windows_reader_rejects_absent_null_and_empty_dacls() {
+            let identity = from_sddl("D:P(A;;FA;;;LA)");
+            let user = first_allowed_sid(&identity);
+            for sddl in ["O:SY", "D:NO_ACCESS_CONTROL", "D:P"] {
+                let descriptor = from_sddl(sddl);
+                let result = inspect_dacl(&descriptor, user);
+                assert!(
+                    result.is_err()
+                        || result.is_ok_and(|(protected, aces)| !windows_acl::is_private(
+                            protected, &aces
+                        )),
+                    "{sddl}"
+                );
+            }
+        }
     }
 }
 

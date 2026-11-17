@@ -138,8 +138,27 @@ patch("src-tauri/src/durable.rs", [(
     DurableFileStatus {""")])
 
 patch("src-tauri/src/storage.rs", [(
-"""        let actual = read_dacl_sddl(path)?;
-        let current_user_ace = format!(";;;{sid})");""",
-"""        let actual = read_dacl_sddl(path)?;
-        eprintln!("probe-acl: {} sid={sid} dacl={actual}", path.display());
-        let current_user_ace = format!(";;;{sid})");""")])
+"""        let descriptor = read_security_descriptor(path)?;
+        let (protected, aces) = inspect_dacl(&descriptor, user.sid())?;""",
+"""        let descriptor = read_security_descriptor(path)?;
+        {
+            use windows::Win32::Security::Authorization::ConvertSecurityDescriptorToStringSecurityDescriptorW;
+            let sid = current_user_sid()?;
+            let mut text = PWSTR::null();
+            // SAFETY: the descriptor is live and text receives a LocalAlloc string.
+            unsafe {
+                ConvertSecurityDescriptorToStringSecurityDescriptorW(
+                    descriptor.0,
+                    SDDL_REVISION_1,
+                    DACL_SECURITY_INFORMATION,
+                    &mut text,
+                    None,
+                )
+            }.map_err(|error| io_error("probe could not encode Windows ACL", error))?;
+            // SAFETY: the conversion returned a NUL-terminated LocalAlloc string.
+            let actual = unsafe { text.to_string() };
+            unsafe { LocalFree(Some(HLOCAL(text.as_ptr().cast::<c_void>()))) };
+            let actual = actual.map_err(|error| io_error("probe got invalid Windows ACL text", error))?;
+            eprintln!("probe-acl: {} sid={sid} dacl={actual}", path.display());
+        }
+        let (protected, aces) = inspect_dacl(&descriptor, user.sid())?;""")])
