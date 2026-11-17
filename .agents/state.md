@@ -39,11 +39,11 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
       Vela.app carries the set (`2181dcb`), proven by a release run by
       hand (43974146432: signed, notarized, the set played from inside the
       DMG's app on both architectures). Probe M2 (Vela's own embedded
-      player on a hosted Mac, `probes/m2-vela`) found the picture black:
-      nothing drove the layer's draws; `cf23d90` drove them through
-      `setNeedsDisplay`, which this host ignores for an asynchronous layer
-      (the plan's Probe log); the repair that follows mpv's own layer is in
-      progress (codex, `mdraw2`).
+      player on a hosted Mac, `probes/m2-vela`) found the picture black;
+      three repairs (`cf23d90`, `e3b4005`, `a45999c`: mpv's updates drive
+      `display()` on the main thread, which never waits inside a render)
+      and mpv's fast profile for the VM's software renderer, and the test
+      pattern plays in Vela's window (the plan's Probe log).
     - Windows: probe W2 (`probes/w2-vela`) found Vela refusing its own
       settings under the built-in Administrator account (the privacy check
       matched SDDL text, which names that account `LA`); repaired at

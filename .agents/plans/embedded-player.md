@@ -2404,6 +2404,24 @@ artifact keeps the probe's logs and screenshots.
   screenshots show the test pattern there; the clock advances; each play
   closes from the page. The first time Vela's Windows embedded code
   (`6b206ec` and its fixes) played video on Windows.
+- **2026-11-17, M2 after `a45999c`: the macOS picture shows.** Two more
+  causes after `cf23d90`, each found by M2's counters: Core Animation does
+  not draw an asynchronous CAOpenGLLayer on `setNeedsDisplay` (`e3b4005`:
+  as mpv's own layer, not asynchronous, `display()` and a flush on the
+  main thread, a declined frame rendered with skip), and the main thread
+  waited inside mpv's render for each frame's display time and on vblank
+  (`a45999c`: BLOCK_FOR_TARGET_TIME=0 with `video-timing-offset=0`
+  protected, swap interval 0). The hosted Mac's software renderer is also
+  too slow for mpv's default quality (probe M1 drew about once per
+  300 ms), so the probe now gives mpv `--profile=fast` as its own Advanced
+  option. Runs 43990824184, 43990834615, 43990845081 drew continuously (80
+  to 120 renders and more; mpv no longer reports rendering not called),
+  the test pattern shows inside Vela's window under Vela's controls, the
+  clock advances, each play closes. Two variants without the layer's
+  contents format, or its colour space and EDR flag, looked the same:
+  neither was at fault. The first time Vela's macOS embedded code played
+  video on a Mac. Not measured by any machine: a real Mac's GPU at mpv's
+  default settings, HDR.
 
 ### Design that follows (2026-11-16)
 
