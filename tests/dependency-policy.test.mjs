@@ -1493,17 +1493,16 @@ test('macOS controller actually runs both workers and fails for either architect
   }
 });
 
-test("build.rs copies the mpv scripts where a debug or --no-bundle build looks for them", () => {
-  // tauri-build 2.6 copies bundle.resources three levels above OUT_DIR, the
-  // profile directory only in Cargo's old build-dir layout; build.rs copies
-  // the scripts to the parent of OUT_DIR's `build` ancestor instead.
+test("build.rs wires the mpv resource copy to Tauri's mapping", () => {
+  // Keep build.rs wired to the helper and the Tauri resource mapping.
   const conf = JSON.parse(fs.readFileSync(path.join(repoRoot, "src-tauri/tauri.conf.json"), "utf8"));
   assert.deepEqual(conf.bundle.resources, { "resources/mpv-scripts/": "mpv-scripts/" },
     "build.rs copies exactly this mapping; change the two together");
   const build = fs.readFileSync(path.join(repoRoot, "src-tauri/build.rs"), "utf8");
-  assert.match(build, /tauri_build::build\(\);\s*copy_mpv_scripts_next_to_the_binary\(\);/);
-  assert.match(build, /\.ancestors\(\)\s*\.find\(\|path\| path\.file_name\(\) == Some\(std::ffi::OsStr::new\("build"\)\)\)\s*\.and_then\(Path::parent\)/);
-  assert.match(build, /let target = profile_dir\.join\("mpv-scripts"\);/);
-  assert.match(build, /std::fs::read_dir\("resources\/mpv-scripts"\)/);
+  const support = fs.readFileSync(path.join(repoRoot, "src-tauri/build_support.rs"), "utf8");
+  assert.match(build, /#\[path = "build_support\.rs"\]\s*mod build_support;/);
+  assert.match(build, /tauri_build::build\(\);[\s\S]*build_support::copy_mpv_scripts\(&out_dir, std::path::Path::new\("resources\/mpv-scripts"\)\)/);
+  assert.match(build, /let out_dir = std::path::PathBuf::from\(std::env::var_os\("OUT_DIR"\)/);
+  assert.match(support, /let target = profile_dir\.join\("mpv-scripts"\);/);
   assert.match(build, /println!\("cargo:rerun-if-changed=resources\/mpv-scripts"\);/);
 });

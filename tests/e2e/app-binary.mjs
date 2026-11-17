@@ -135,7 +135,44 @@ export async function locateAppBinary({ skipBuild, env, commands, echo = (line) 
     return locatedResult({ appBinary, built: false, appBinaryFrom: APP_BINARY_FROM.prediction, identity: appIdentity(appBinary) });
   }
   const appBinary = await buildAppBinary(commands, env, echo);
+  ensureMpvScripts(appBinary, commands.appManifest, echo);
   return locatedResult({ appBinary, built: true, appBinaryFrom: APP_BINARY_FROM.build, identity: appIdentity(appBinary) });
+}
+
+// OUT_DIR can belong to a separate intermediate tree. Only Cargo's report
+// tells us where this build's executable actually lives. Match Tauri's resource
+// mapping there, repairing missing or stale copies even when the build was fresh.
+function ensureMpvScripts(appBinary, appManifest, echo) {
+  const crate = path.dirname(appManifest);
+  const source = 'resources/mpv-scripts/';
+  const conf = JSON.parse(fs.readFileSync(path.join(crate, 'tauri.conf.json'), 'utf8'));
+  const mapped = conf.bundle?.resources?.[source];
+  if (typeof mapped !== 'string' || !mapped) throw new Error('tauri.conf.json has no mpv-scripts resource mapping');
+  // Resolve before joining: normalizing a symlink followed by `..` would
+  // otherwise put the scripts beside a different executable (pa-6).
+  const destination = path.join(fs.realpathSync.native(path.dirname(appBinary)), mapped);
+  let copied = 0;
+  function copyMissingOrDifferent(from, to) {
+    fs.mkdirSync(to, { recursive: true });
+    for (const entry of fs.readdirSync(from, { withFileTypes: true })) {
+      const input = path.join(from, entry.name);
+      const output = path.join(to, entry.name);
+      if (entry.isDirectory()) {
+        copyMissingOrDifferent(input, output);
+      } else if (entry.isFile()) {
+        const contents = fs.readFileSync(input);
+        try {
+          if (contents.equals(fs.readFileSync(output))) continue;
+        } catch (err) {
+          if (err.code !== 'ENOENT') throw err;
+        }
+        fs.copyFileSync(input, output);
+        copied += 1;
+      }
+    }
+  }
+  copyMissingOrDifferent(path.join(crate, source), destination);
+  if (copied) echo(`e2e: copied ${copied} missing or different mpv resource file(s) to ${destination}`);
 }
 
 // Which file a path names, and its state: device, inode, size and

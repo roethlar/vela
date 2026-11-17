@@ -192,9 +192,17 @@ test('Windows: workflow runs both suites independently and judges only two full 
 // A made-up project laid out as this one: <root>/src-tauri/Cargo.toml, a
 // binary `madeup` that prints NEW, and with `workspace` a second member,
 // `helper`, with a binary of its own.
+function resourceFixture(crate, mapped = 'mpv-scripts/') {
+  const source = path.join(crate, 'resources/mpv-scripts');
+  fs.mkdirSync(source, { recursive: true });
+  fs.writeFileSync(path.join(crate, 'tauri.conf.json'), JSON.stringify({ bundle: { resources: { 'resources/mpv-scripts/': mapped } } }));
+  return source;
+}
+
 function madeupProject(root, { workspace = false, cargoConfig } = {}) {
   const crate = path.join(root, 'src-tauri');
   fs.mkdirSync(path.join(crate, 'src'), { recursive: true });
+  resourceFixture(crate);
   fs.writeFileSync(
     path.join(crate, 'Cargo.toml'),
     `[package]\nname = "madeup"\nversion = "0.0.0"\nedition = "2021"\n\n[workspace]\n${workspace ? 'members = ["helper"]\n' : ''}`,
@@ -229,6 +237,7 @@ function twoManifests() {
     fs.mkdirSync(path.join(dir, p));
     fs.writeFileSync(path.join(dir, p, 'Cargo.toml'), '');
   }
+  resourceFixture(path.join(dir, 'app'));
   return { dir, app: path.join(dir, 'app/Cargo.toml'), other: path.join(dir, 'other/Cargo.toml') };
 }
 
@@ -478,12 +487,60 @@ for (const line of other.slice(3)) out(line);
 writeSync(2, 'DIAG: rendered by the build\\n');
 process.exit(Number(status));
 `;
-function fakeBuildCommands(dir, status, executable = '/t/debug/vela') {
+function fakeBuildCommands(dir, status, executable = path.join(dir, 'target/debug/vela')) {
   const appManifest = path.join(dir, 'app/Cargo.toml');
+  fs.mkdirSync(path.dirname(executable), { recursive: true });
   return {
     appManifest,
     build: { command: process.execPath, args: ['-e', fakeBuild, appManifest, executable, String(status)], cwd: dir },
   };
+}
+
+for (const mapped of ['mpv-scripts/', 'custom/scripts/']) {
+  test(`a reported executable gets missing and different mpv resources at ${mapped}`, async () => {
+    const { dir, app } = twoManifests();
+    try {
+      const source = resourceFixture(path.dirname(app), mapped);
+      const files = new Map([
+        ['markers.lua', Buffer.from('-- markers\n\0')],
+        ['autocrop.lua', Buffer.from('-- new crop\n')],
+        ['LICENSE.GPL', Buffer.from('license')],
+        ['nested/extra.lua', Buffer.from('-- nested')],
+      ]);
+      for (const [name, contents] of files) {
+        fs.mkdirSync(path.dirname(path.join(source, name)), { recursive: true });
+        fs.writeFileSync(path.join(source, name), contents);
+      }
+      // Cargo can report a target reached through a symlink and `..` (pa-6).
+      // Normalizing that string would put the scripts in a different tree.
+      const physical = path.join(dir, 'physical');
+      fs.mkdirSync(path.join(physical, 'nested'), { recursive: true });
+      fs.symlinkSync(path.join(physical, 'nested'), path.join(dir, 'link'), 'dir');
+      const executable = `${dir}/link/../separate-target/triple/debug/vela`;
+      const destination = path.join(physical, 'separate-target/triple/debug', mapped);
+      fs.mkdirSync(destination, { recursive: true });
+      fs.writeFileSync(executable, 'made-up executable');
+      fs.writeFileSync(path.join(destination, 'autocrop.lua'), '-- old crop\n');
+      const unchanged = path.join(destination, 'LICENSE.GPL');
+      fs.writeFileSync(unchanged, files.get('LICENSE.GPL'));
+      fs.utimesSync(unchanged, 123, 123);
+      const unchangedTime = fs.statSync(unchanged).mtimeMs;
+      const echoed = [];
+      const commands = fakeBuildCommands(dir, 0, executable);
+      const located = await locateAppBinary({ skipBuild: false, env: process.env, commands, echo: (line) => echoed.push(line) });
+      assert.equal(located.appBinary, executable);
+      for (const [name, contents] of files) assert.deepEqual(fs.readFileSync(path.join(destination, name)), contents, name);
+      assert.equal(fs.statSync(unchanged).mtimeMs, unchangedTime, 'identical files are left alone');
+      assert.deepEqual(echoed.filter((line) => line.startsWith('e2e:')), [
+        `e2e: copied 3 missing or different mpv resource file(s) to ${destination}`,
+      ], 'the run discloses the repair');
+      echoed.length = 0;
+      await locateAppBinary({ skipBuild: false, env: process.env, commands, echo: (line) => echoed.push(line) });
+      assert.deepEqual(echoed.filter((line) => line.startsWith('e2e:')), [], 'no repair is reported when all resources match');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
 }
 
 test('a build that fails after Cargo reported the app gives no app binary (pa-6)', async () => {
@@ -504,7 +561,7 @@ test("a build's other output reaches the terminal: its standard output's other l
   try {
     const echoed = [];
     const located = await locateAppBinary({ skipBuild: false, env: process.env, commands: fakeBuildCommands(dir, 0), echo: (line) => echoed.push(line) });
-    assert.equal(located.appBinary, '/t/debug/vela');
+    assert.equal(located.appBinary, path.join(dir, 'target/debug/vela'));
     assert.deepEqual(
       echoed,
       otherBuildOutput,
@@ -561,7 +618,7 @@ test('the app artifact is found among mixed Cargo and non-Cargo output (pa-6)', 
   const { dir } = twoManifests();
   try {
     const located = await locateAppBinary({ skipBuild: false, env: process.env, commands: fakeBuildCommands(dir, 0), echo: () => {} });
-    assert.equal(located.appBinary, '/t/debug/vela', 'mixed output lost the app artifact');
+    assert.equal(located.appBinary, path.join(dir, 'target/debug/vela'), 'mixed output lost the app artifact');
     assert.equal(located.built, true);
     assert.equal(located.appBinaryFrom, "cargo's report of this run's build");
   } finally {
