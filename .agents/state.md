@@ -260,8 +260,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     the 1.0.67 builds (2026-11-16): "for the next rev, the "EXPERIMENTAL"
     tag in settings next to Video player is incorrect. the experimental
     feature was the embedded player, not the setting." Fixed on the LOCAL
-    branch `next` (not pushed; worktree `~/dev/vela-agent-keep/wt/next` on
-    `continuum`), commit `793021e`: the heading's badge is gone, the
+    branch `next` (not pushed; its worktree was removed 2026-11-17, the
+    branch kept; its change is on `main` by `git cherry`), commit `793021e`: the heading's badge is gone, the
     "Vela's window (experimental)" choice keeps the word, a guard holds
     both (red-proved); `npm run check` (738) and the build pass. It is kept
     off `main` so that `main` stays exactly the 1.0.67 the owner is

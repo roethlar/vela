@@ -377,8 +377,7 @@ Recorded and verified 2026-11-12, locally on the host.
 - The JS checks, stable-Rust check/clippy/test and E2E run here. The MSRV
   check and `cargo audit` do not (see the toolchain bullet).
 - Embedded-libmpv spike, 2026-11-12: scratch code, clips and evidence are
-  in `~/dev/vela-spike-libmpv/` (not a repo; safe to delete once the plan's
-  log is no longer being checked against it). `wayland-protocols` 1.50 was
+  in `~/dev/vela-spike-libmpv/` (not a repo; deleted 2026-11-17, below). `wayland-protocols` 1.50 was
   installed for it (`pacman -S wayland-protocols`). When the agent's session
   is started under sudo it runs as root: reach the desktop session with
   `sudo -u michael env XDG_RUNTIME_DIR=/run/user/1000
@@ -412,7 +411,16 @@ Recorded and verified 2026-11-12, locally on the host.
   tool (PowerShell 7); a hook blocks the built-in shell. A command that
   prints thousands of error lines can kill the ptk worker
   (`worker_exited_unexpectedly`): redirect bulk output to a file.
-- Embedded-player Slice 0 leftovers, 2026-11-12 (all disposable):
+- Embedded-player Slice 0 leftovers, 2026-11-12 (all disposable). REMOVED
+  2026-11-17 on the owner's word ("remove the extra dirs you created and no
+  longer need"): `~/dev/vela-spike-libmpv/`, `~/dev/vela-probe-wt` and
+  every other agent worktree (`~/dev/vela-*-wt`,
+  `~/dev/vela-agent-keep/wt/`), `~/dev/vela-libmpv-win`,
+  `~/dev/vela-xcheck-target`, and the run logs under `~/dev/vela-agent-keep/`
+  except `pkg/` and `final-b163241/`. Branches were kept; detached heads
+  no branch held are tags `keep/pa4-repair-atk`, `keep/sp-rvview`,
+  `keep/cx-titlebar`. The podman images below were not touched. What
+  follows is the history of what those were:
   - `~/dev/vela-spike-libmpv/`: the probe programs (`probe1`, `probe2`,
     `pbuild.sh` rebuilds them), `p0/` (probe scripts, screenshots, clips)
     and `libset/` (the library-set recipe, its downloaded sources, the
