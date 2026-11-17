@@ -243,6 +243,7 @@ async fn dispatcher_reports(state: &AppState, page: &Page, session: &str) -> Aft
     let completion = PlaybackCompletion {
         session_id: session.to_string(),
         item_key: "test:k".to_string(),
+        first_report_sent: false,
         watch_key: None,
         started_at_ms: 0,
         watch_backings: Vec::new(),
@@ -1025,6 +1026,7 @@ fn completion(session: &str) -> PlaybackCompletion {
     PlaybackCompletion {
         session_id: session.to_string(),
         item_key: "test:k".to_string(),
+        first_report_sent: false,
         watch_key: None,
         started_at_ms: 0,
         watch_backings: Vec::new(),
@@ -1633,6 +1635,7 @@ fn the_dispatchers_report_says_over_or_successor_coming() {
     let completion = PlaybackCompletion {
         session_id: "A".to_string(),
         item_key: "test:k".to_string(),
+        first_report_sent: false,
         watch_key: None,
         started_at_ms: 0,
         watch_backings: Vec::new(),

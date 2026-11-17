@@ -1002,7 +1002,12 @@ test("the dispatcher's report of a clean end names its session and says whether 
   assert.equal(lib.split('commands::clean_end_report(&completion, after)').length - 1, 1,
     'the dispatcher sends the successor verdict once, in the final report');
   assert.equal(lib.split('"playback-ended"').length - 1, 2,
-    'the other report is the first refresh after local admission, with no successor verdict');
+    'the other site sends the first refresh after admission only while it is owed');
+  assert.match(lib, shape(`commands::first_clean_end_report(&completion),`));
+  assert.match(commands, shape(`if !first_report_sent {
+      refresh();
+    }
+    admitted`));
   assert.match(
     commands,
     shape(`"runOver": after == AfterCleanEnd::RunOver,
@@ -1221,7 +1226,8 @@ test("a launch that fails reports the run over only from the state of the app, a
     4,
     'defined once, passed to the launch, and to the two ends of a source choice',
   );
-  assert.equal(shipped.split('"playback-ended"').length - 1, 2, "the tracker's report, and the one the backend owes from the state of the app");
+  assert.equal(shipped.split('"playback-ended"').length - 1, 3,
+    "the tracker's own report, its rescued queue reports, and the backend's run-state report");
   // What it sends: a session and the flag, nothing else, under the view
   // record's lock.
   assert.match(
@@ -1352,7 +1358,10 @@ test("the tracker's report of an end names its session and says whether the run 
             "failedToStart": run_over && end.failed_to_start && certificate_checked,
         }),
     );
-    }
+    true
+    } else {
+      false
+    };
     advance.mark_ended(PlaybackCompletion {`),
   );
   assert.match(

@@ -186,9 +186,16 @@ test("clean EOF refreshes after local admission and again after played state set
     /app_handle\s*\.\s*emit\s*\(\s*"playback-ended"/g,
     "local admission must own the first clean-end refresh",
   );
-  assert.match(firstRefreshBlock.source, /"sessionId":\s*completion\.session_id/);
-  assert.match(firstRefreshBlock.source, /"runOver":\s*false/);
-  assert.doesNotMatch(firstRefreshBlock.source, /"successor"\s*:/,
+  oneCodeMatch(firstRefreshBlock.source, firstRefreshBlock.masked,
+    /commands::first_clean_end_report\(&completion\)/g,
+    "admission and eviction must share the first-report payload");
+  const firstReport = rustFunction(commandsSource, "first_clean_end_report");
+  assert.match(firstReport.source, /"sourceId":\s*source_id/);
+  assert.match(firstReport.source, /"itemKey":\s*completion\.item_key/);
+  assert.match(firstReport.source, /"sessionId":\s*completion\.session_id/);
+  assert.match(firstReport.source, /"runOver":\s*false/);
+  assert.match(firstReport.source, /"failedToStart":\s*false/);
+  assert.doesNotMatch(firstReport.source, /"successor"\s*:/,
     "the first refresh must not decide fullscreen/continuation before sequence release");
   const advance = oneCodeMatch(
     dispatcher.source,
@@ -225,10 +232,9 @@ test("clean EOF refreshes after local admission and again after played state set
     dispatcher.masked,
     /app_handle\s*\.\s*emit\s*\(\s*"playback-ended"/g,
   );
-  // The tracker used to send the first refresh before handing off admission.
-  // Both now live here, still exactly two: the first after local admission,
-  // the second after the server attempt. All prior second-refresh rules remain.
-  assert.equal(refreshes.length, 2, "an admitted clean EOF must still produce exactly two refreshes");
+  // Two emit sites: admission calls the first only while it is owed. A late
+  // EOF already got its tracker report, and gets only the final report here.
+  assert.equal(refreshes.length, 2, "the dispatcher must retain its first and final report sites");
   const [firstRefresh, refresh] = refreshes;
 
   assert.ok(firstRefresh.index < advance.index, "the first refresh must retain its place before sequence release");
@@ -244,21 +250,32 @@ test("clean EOF refreshes after local admission and again after played state set
   );
 });
 
-test("the tracker defers clean refreshes to the admission boundary", () => {
+test("the tracker hands first-report ownership to admission without waiting for EOF", () => {
   const play = rustFunction(commandsSource, "play_by_key_locked");
   const sighting = oneCodeMatch(play.source, play.masked,
     /let\s+clean_eof\s*=\s*advance\.saw_eof\(&session_id\);/g,
     "the tracker must snapshot its clean EOF before handing off");
   const ordinary = oneCodeMatch(play.source, play.masked,
     /if\s+let\s+Some\(app\)\s*=\s*app\.as_ref\(\)\.filter\(\|_\|\s*!clean_eof\)\s*\{/g,
-    "only ordinary stops may refresh before admission");
+    "ends without an observed EOF must refresh before admission");
   const ordinaryBlock = balancedBlock(play.source, play.masked, ordinary.index + ordinary[0].lastIndexOf("{"));
   const emits = /app\s*\.\s*emit\s*\(\s*"playback-ended"/g;
-  assert.equal(allCodeMatches(play.source, play.masked, emits).length, 1);
+  assert.equal(allCodeMatches(play.source, play.masked, emits).length, 2,
+    "the tracker must emit its own report and rescued queue reports");
   oneCodeMatch(ordinaryBlock.source, ordinaryBlock.masked, emits,
-    "the tracker's only refresh must be inside the ordinary-stop branch");
+    "the tracker's own refresh must be inside the no-EOF branch");
+  assert.match(play.masked,
+    /let\s+first_report_sent\s*=\s*if\s+let\s+Some\(app\)/,
+    "the completion must record whether the tracker emitted");
+  assert.match(play.masked, /true\s*\}\s*else\s*\{\s*false\s*\};\s*advance\.mark_ended/);
   const handoff = oneCodeMatch(play.source, play.masked, /advance\.mark_ended\(PlaybackCompletion\s*\{/g,
     "the tracker must still hand its exact completion to the dispatcher");
+  const completion = balancedBlock(play.source, play.masked, handoff.index + handoff[0].lastIndexOf("{"));
+  assert.match(completion.masked, /\bfirst_report_sent\s*,/);
+  assert.match(commandsSource, /#\[serde\(skip\)\]\s*pub first_report_sent: bool/,
+    "report ownership must not change the continue-playing payload");
+  assert.match(play.source, /\},\s*\|report\|\s*\{\s*if let Some\(app\) = app\.as_ref\(\)\s*\{\s*let _ = app\.emit\("playback-ended", report\);/,
+    "the tracker must emit reports rescued from either bounded queue");
   assert.ok(sighting.index < ordinary.index && ordinary.index < handoff.index);
 
   const boundary = rustFunction(commandsSource, "admit_clean_completion");
@@ -269,13 +286,14 @@ test("the tracker defers clean refreshes to the admission boundary", () => {
   const write = oneCodeMatch(implementation.source, implementation.masked,
     /tauri::async_runtime::spawn_blocking\(move\s*\|\|\s*\{/g,
     "settings admission must not block an async worker");
-  // Every end reaches the page: the first refresh follows the admission
+  // Every end reaches the page: an owed first refresh follows the admission
   // attempt whatever its outcome, once, and never inside a branch on it.
+  assert.match(implementation.masked, /let first_report_sent = completion\.first_report_sent;/);
   assert.equal(allCodeMatches(implementation.source, implementation.masked, /\brefresh\(\)/g).length, 1,
     "the first refresh is released exactly once");
   const released = oneCodeMatch(implementation.source, implementation.masked,
-    /\.and_then\(\|admitted\|\s*admitted\);\s*refresh\(\);\s*admitted\b/g,
-    "the first refresh goes out after the admission attempt, whatever its outcome");
+    /\.and_then\(\|admitted\|\s*admitted\);\s*if\s*!first_report_sent\s*\{\s*refresh\(\);\s*\}\s*admitted\b/g,
+    "only an owed first refresh goes out after the attempt, whatever its outcome");
   assert.ok(write.index < released.index);
 });
 

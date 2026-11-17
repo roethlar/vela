@@ -3723,6 +3723,10 @@ struct PlaybackSignals {
 pub(crate) struct PlaybackCompletion {
     pub session_id: String,
     pub item_key: String,
+    /// The tracker (or a queue eviction) already sent the first end report.
+    /// The dispatcher sends it after admission only while it is still owed.
+    #[serde(skip)]
+    pub first_report_sent: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub watch_key: Option<String>,
     /// Internal ordering evidence for exact-session curation. The continuation
@@ -4284,21 +4288,25 @@ impl PlayFailure {
 }
 
 impl PlaybackAdvance {
-    fn push_eof_bounded(queue: &mut VecDeque<String>, session_id: String) {
-        if !queue.iter().any(|held| held == &session_id) {
-            queue.push_back(session_id);
-            while queue.len() > MAX_PLAYBACK_SIGNALS {
-                queue.pop_front();
-            }
-        }
-    }
-
     pub(crate) fn mark_eof(&self, session_id: String) {
         let mut signals = self
             .signals
             .lock()
             .unwrap_or_else(|error| error.into_inner());
-        Self::push_eof_bounded(&mut signals.eof, session_id);
+        if !signals.eof.contains(&session_id) {
+            if signals.eof.len() == MAX_PLAYBACK_SIGNALS {
+                // Make room among the held entries, preserving joined work
+                // ahead of sightings that have no tracker end yet.
+                let index = signals.eof.iter().position(|session| {
+                    !signals.ended.iter().any(|ended| ended.session_id == *session)
+                }).unwrap_or(0);
+                signals.eof.remove(index);
+                // The EOF watcher has no app handle. Keep any newly orphaned
+                // completion in `ended`: the next mark_ended sends its owed
+                // report, outside this lock, even if it also evicts that end.
+            }
+            signals.eof.push_back(session_id);
+        }
         drop(signals);
         self.changed.notify_one();
     }
@@ -4314,7 +4322,8 @@ impl PlaybackAdvance {
             .any(|held| held == session_id)
     }
 
-    fn mark_ended(&self, completion: PlaybackCompletion) {
+    fn mark_ended(&self, completion: PlaybackCompletion, mut report: impl FnMut(serde_json::Value)) {
+        let mut reports = Vec::new();
         let mut signals = self
             .signals
             .lock()
@@ -4324,12 +4333,32 @@ impl PlaybackAdvance {
             .iter()
             .any(|held| held.session_id == completion.session_id)
         {
+            if signals.ended.len() == MAX_PLAYBACK_SIGNALS {
+                let index = signals.ended.iter().position(|ended| {
+                    !signals.eof.contains(&ended.session_id)
+                }).unwrap_or(0);
+                if let Some(orphan) = signals.ended.remove(index) {
+                    if !orphan.first_report_sent {
+                        reports.push(first_clean_end_report(&orphan));
+                    }
+                }
+            }
             signals.ended.push_back(completion);
-            while signals.ended.len() > MAX_PLAYBACK_SIGNALS {
-                signals.ended.pop_front();
+        }
+        // An EOF may have been evicted after the tracker saw it, either before
+        // or after mark_ended. Such an end cannot reach the dispatcher now.
+        // Set ownership under the join lock, retaining the end for a late EOF.
+        let PlaybackSignals { eof, ended } = &mut *signals;
+        for orphan in ended {
+            if !orphan.first_report_sent && !eof.contains(&orphan.session_id) {
+                orphan.first_report_sent = true;
+                reports.push(first_clean_end_report(orphan));
             }
         }
         drop(signals);
+        for payload in reports {
+            report(payload);
+        }
         self.changed.notify_one();
     }
 
@@ -6333,10 +6362,12 @@ async fn play_by_key_locked(
                 );
                 // A proven clean EOF gets its first refresh from the dispatcher,
                 // after local admission. Publishing it here would let Home read
-                // recents/tombstones before that admission. Ordinary stops still
-                // refresh here; they never reach the clean-completion dispatcher.
+                // recents/tombstones before that admission. Without an EOF yet,
+                // report here without waiting for the watcher. If EOF arrives
+                // later, this report precedes admission, as before 2ab8ac5; the
+                // completion carries that fact so the dispatcher won't repeat it.
                 let clean_eof = advance.saw_eof(&session_id);
-                if let Some(app) = app.as_ref().filter(|_| !clean_eof) {
+                let first_report_sent = if let Some(app) = app.as_ref().filter(|_| !clean_eof) {
                     use tauri::Manager;
                     // A plain thread outside any runtime: the active
                     // session's lock is waited for here, and held only to
@@ -6356,14 +6387,22 @@ async fn play_by_key_locked(
                             "failedToStart": run_over && end.failed_to_start && certificate_checked,
                         }),
                     );
-                }
+                    true
+                } else {
+                    false
+                };
                 advance.mark_ended(PlaybackCompletion {
                     session_id: session_id.clone(),
                     item_key: item_key.clone(),
+                    first_report_sent,
                     watch_key: watch_key.clone(),
                     started_at_ms: playback_started_at_ms.load(Ordering::SeqCst),
                     watch_backings: watch_backings.clone(),
                     media_type: media_type.clone(),
+                }, |report| {
+                    if let Some(app) = app.as_ref() {
+                        let _ = app.emit("playback-ended", report);
+                    }
                 });
             }) as playback::EndNotify)
         };
@@ -7437,9 +7476,9 @@ pub async fn server_playlist_play(
 /// Persist local completion for a joined clean EOF. The caller holds
 /// `watch_edit_lock`, keeping this admission ordered with explicit watched-
 /// state edits and the later best-effort server synchronization.
-/// The first refresh belongs to this boundary too: even immediately answered
-/// local reads must see the admitted settings. It goes out once admission has
-/// been tried, whatever the outcome, as the tracker's did before: a failed
+/// If the tracker has not sent the first refresh, this boundary owns it:
+/// even immediately answered local reads must see the admitted settings. It
+/// goes out once admission has been tried, whatever the outcome: a failed
 /// write, or a newer session that owns the item, leaves Home showing what the
 /// settings hold, but the page still hears that the play ended. The tracker
 /// never waits for the dispatcher, and settings I/O runs off the async
@@ -7461,6 +7500,7 @@ async fn admit_clean_completion_with(
     update: impl FnOnce(CleanCompletionChange) -> Result<bool, String> + Send + 'static,
     refresh: impl FnOnce(),
 ) -> Result<bool, String> {
+    let first_report_sent = completion.first_report_sent;
     let admitted = tauri::async_runtime::spawn_blocking(move || {
         update(Box::new(move |cfg| {
             Ok(crate::recents::complete_clean_session(
@@ -7475,8 +7515,24 @@ async fn admit_clean_completion_with(
     .await
     .map_err(|_| "clean playback completion worker failed".to_string())
     .and_then(|admitted| admitted);
-    refresh();
+    if !first_report_sent {
+        refresh();
+    }
     admitted
+}
+
+/// The first clean-end refresh, shared by admission and queue eviction. No
+/// successor verdict is known yet; only the final dispatcher report owns it.
+pub(crate) fn first_clean_end_report(completion: &PlaybackCompletion) -> serde_json::Value {
+    let source_id = completion.item_key.split_once(':')
+        .map(|(source, _)| source).unwrap_or_default();
+    serde_json::json!({
+        "sourceId": source_id,
+        "itemKey": completion.item_key,
+        "sessionId": completion.session_id,
+        "runOver": false,
+        "failedToStart": false,
+    })
 }
 
 /// Best-effort all-backing half of a locally admitted clean completion. The
@@ -7944,6 +8000,7 @@ mod tests {
         PlaybackCompletion {
             session_id: session_id.to_string(),
             item_key: item_key.to_string(),
+            first_report_sent: false,
             watch_key: None,
             started_at_ms: 10,
             watch_backings: backing_for_namespaced_key(item_key).into_iter().collect(),
@@ -10826,14 +10883,210 @@ mod tests {
     fn playback_advance_joins_only_matching_eof_and_tracker_sessions() {
         let advance = PlaybackAdvance::default();
         advance.mark_eof("old".to_string());
-        advance.mark_ended(completion("new", "test:new"));
+        advance.mark_ended(completion("new", "test:new"), |_| {});
         assert_eq!(advance.take_ready(), None);
 
         let mut completed = completion("old", "test:old");
         completed.watch_key = Some("plex:watch-owner".to_string());
-        advance.mark_ended(completed.clone());
+        advance.mark_ended(completed.clone(), |_| {});
         assert_eq!(advance.take_ready(), Some(completed));
         assert_eq!(advance.take_ready(), None);
+    }
+
+    async fn completion_reports_in_either_order(eof_first: bool) {
+        let advance = PlaybackAdvance::default();
+        let mut completed = completion("ended", "test:episode");
+        let mut reports = Vec::new();
+        if eof_first {
+            advance.mark_eof(completed.session_id.clone());
+        }
+        // The tracker snapshots EOF and reports immediately if it has not
+        // arrived. The source guard pins this ownership to the real callback.
+        let clean_eof = advance.saw_eof(&completed.session_id);
+        completed.first_report_sent = !clean_eof;
+        if completed.first_report_sent {
+            reports.push(serde_json::json!({
+                "sourceId": "test", "itemKey": "test:episode", "sessionId": "ended",
+                "runOver": true, "failedToStart": false,
+            }));
+        }
+        advance.mark_ended(completed, |report| reports.push(report));
+        assert_eq!(reports.len(), usize::from(!eof_first));
+        if !eof_first {
+            assert!(advance.take_ready().is_none(), "an ordinary end only reports once");
+            advance.mark_eof("ended".to_string());
+        }
+        let joined = tokio::time::timeout(Duration::from_secs(1), advance.next()).await.unwrap();
+        assert_eq!(joined.first_report_sent, !eof_first);
+        // This is the production dispatcher's admission and report decision,
+        // with only the settings writer and emitter replaced.
+        let admitted = admit_clean_completion_with(
+            joined.clone(),
+            |change| change(&mut config::AppConfig::default()),
+            || reports.push(first_clean_end_report(&joined)),
+        ).await.unwrap();
+        assert!(admitted);
+        assert_eq!(reports.len(), 1, "admission must leave exactly one first report");
+        reports.push(clean_end_report(&joined, AfterCleanEnd::ContinuePlaying));
+        assert_eq!(reports.len(), 2, "a clean completion has exactly two reports");
+        assert!(reports[0].get("successor").is_none());
+        assert_eq!(reports[1]["successor"], false);
+        assert!(advance.take_ready().is_none());
+    }
+
+    #[tokio::test]
+    async fn playback_advance_late_eof_gets_only_the_final_dispatcher_report() {
+        completion_reports_in_either_order(false).await;
+    }
+
+    #[tokio::test]
+    async fn playback_advance_eof_first_gets_both_dispatcher_reports() {
+        completion_reports_in_either_order(true).await;
+    }
+
+    #[test]
+    fn completion_report_ownership_stays_backend_only() {
+        let mut completed = completion("ended", "test:episode");
+        for sent in [false, true] {
+            completed.first_report_sent = sent;
+            assert_eq!(serde_json::to_value(&completed).unwrap(), serde_json::json!({
+                "sessionId": "ended", "itemKey": "test:episode", "mediaType": "episode",
+            }));
+        }
+    }
+
+    fn reported_completion(session: &str) -> PlaybackCompletion {
+        PlaybackCompletion {
+            first_report_sent: true,
+            ..completion(session, "test:episode")
+        }
+    }
+
+    #[test]
+    fn playback_advance_preserves_a_deferred_report_across_64_unjoinable_ends() {
+        let advance = PlaybackAdvance::default();
+        let deferred = completion("deferred", "test:episode");
+        advance.mark_eof(deferred.session_id.clone());
+        advance.mark_ended(deferred.clone(), |_| panic!("the dispatcher owns this report"));
+        for index in 0..MAX_PLAYBACK_SIGNALS {
+            advance.mark_ended(reported_completion(&format!("ordinary-{index}")), |_| {
+                panic!("unjoinable ends must be evicted ahead of deferred work");
+            });
+        }
+        assert_eq!(advance.signals.lock().unwrap().ended.len(), MAX_PLAYBACK_SIGNALS);
+        assert!(!advance.signals.lock().unwrap().ended.iter()
+            .any(|held| held.session_id == "ordinary-0"), "evict the oldest unjoinable end");
+        assert_eq!(advance.take_ready(), Some(deferred));
+        assert!(advance.take_ready().is_none());
+    }
+
+    #[test]
+    fn playback_advance_preserves_a_joined_eof_across_64_unjoinable_sightings() {
+        let advance = PlaybackAdvance::default();
+        let deferred = completion("deferred", "test:episode");
+        advance.mark_eof(deferred.session_id.clone());
+        advance.mark_ended(deferred.clone(), |_| panic!("the dispatcher owns this report"));
+        for index in 0..MAX_PLAYBACK_SIGNALS {
+            advance.mark_eof(format!("unpaired-{index}"));
+        }
+        assert_eq!(advance.signals.lock().unwrap().eof.len(), MAX_PLAYBACK_SIGNALS);
+        assert!(!advance.saw_eof("unpaired-0"), "evict the oldest unjoinable EOF");
+        assert_eq!(advance.take_ready(), Some(deferred));
+    }
+
+    fn fill_joined_completions(advance: &PlaybackAdvance) {
+        for index in 0..MAX_PLAYBACK_SIGNALS {
+            let session = format!("joined-{index}");
+            advance.mark_eof(session.clone());
+            advance.mark_ended(completion(&session, "test:episode"), |_| {
+                panic!("all held ends are still joinable");
+            });
+        }
+    }
+
+    fn assert_rescued_first_report(reports: &[serde_json::Value], session: &str) {
+        assert_eq!(reports, &[serde_json::json!({
+            "sourceId": "test", "itemKey": "test:episode", "sessionId": session,
+            "runOver": false, "failedToStart": false,
+        })], "an orphan must deliver exactly its owed first report, with no successor verdict");
+    }
+
+    #[test]
+    fn playback_advance_delivers_the_report_when_a_joinable_end_must_be_evicted() {
+        let advance = PlaybackAdvance::default();
+        fill_joined_completions(&advance);
+        let mut reports = Vec::new();
+        advance.mark_ended(reported_completion("new"), |report| {
+            assert!(advance.signals.try_lock().is_ok(), "emitting must not hold the join lock");
+            reports.push(report);
+        });
+        assert_rescued_first_report(&reports, "joined-0");
+        advance.mark_ended(reported_completion("new"), |report| reports.push(report));
+        assert_rescued_first_report(&reports, "joined-0");
+        for index in 1..MAX_PLAYBACK_SIGNALS {
+            assert_eq!(advance.take_ready().unwrap().session_id, format!("joined-{index}"));
+        }
+        assert!(advance.take_ready().is_none(), "the evicted end cannot be dispatched again");
+    }
+
+    #[test]
+    fn playback_advance_keeps_an_eof_orphan_until_the_next_tracker_end() {
+        // Exercise both ways the next handoff can meet the orphan: evict it
+        // from a full ended queue, or retain it after the dispatcher took one.
+        for take_one in [false, true] {
+            let advance = PlaybackAdvance::default();
+            fill_joined_completions(&advance);
+            advance.mark_eof("new".to_string());
+            assert!(!advance.saw_eof("joined-0"), "all were joinable: evict the oldest EOF");
+            assert!(advance.signals.lock().unwrap().ended.iter()
+                .any(|held| held.session_id == "joined-0" && !held.first_report_sent),
+                "the EOF watcher must retain the owed report until a tracker can emit it");
+            if take_one {
+                assert_eq!(advance.take_ready().unwrap().session_id, "joined-1");
+            }
+            let mut reports = Vec::new();
+            advance.mark_ended(completion("new", "test:episode"), |report| {
+                assert!(advance.signals.try_lock().is_ok(), "emitting must not hold the join lock");
+                reports.push(report);
+            });
+            assert_rescued_first_report(&reports, "joined-0");
+            advance.mark_ended(completion("new", "test:episode"), |report| reports.push(report));
+            assert_rescued_first_report(&reports, "joined-0");
+            if take_one {
+                assert!(advance.signals.lock().unwrap().ended.iter()
+                    .any(|held| held.session_id == "joined-0" && held.first_report_sent),
+                    "a retained orphan must not owe its first report a second time");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn playback_advance_reports_an_eof_evicted_between_the_sighting_and_tracker_end() {
+        let advance = PlaybackAdvance::default();
+        advance.mark_eof("ended".to_string());
+        assert!(advance.saw_eof("ended"));
+        let completed = completion("ended", "test:episode");
+        for index in 0..MAX_PLAYBACK_SIGNALS {
+            advance.mark_eof(format!("unpaired-{index}"));
+        }
+        assert!(!advance.saw_eof("ended"));
+        let mut reports = Vec::new();
+        advance.mark_ended(completed, |report| {
+            assert!(advance.signals.try_lock().is_ok());
+            reports.push(report);
+        });
+        assert_rescued_first_report(&reports, "ended");
+        // If a sighting arrives again, ownership follows the retained end and
+        // admission must not repeat the eviction's first report either.
+        advance.mark_eof("ended".to_string());
+        let joined = advance.take_ready().unwrap();
+        assert!(joined.first_report_sent);
+        assert!(admit_clean_completion_with(
+            joined.clone(),
+            |change| change(&mut config::AppConfig::default()),
+            || reports.push(first_clean_end_report(&joined)),
+        ).await.unwrap());
+        assert_rescued_first_report(&reports, "ended");
     }
 
     #[tokio::test]
@@ -10948,7 +11201,7 @@ mod tests {
         advance.mark_eof("one".to_string());
         assert!(advance.saw_eof("one"));
         assert!(!advance.saw_eof("other"));
-        advance.mark_ended(completion("one", "test:one"));
+        advance.mark_ended(completion("one", "test:one"), |_| {});
         assert!(advance.take_ready().is_some());
         assert!(!advance.saw_eof("one"), "joined, the sighting is gone");
     }

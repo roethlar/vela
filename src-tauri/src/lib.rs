@@ -365,20 +365,11 @@ pub fn run() {
                     let _edit = state.watch_edit_lock.lock().await;
                     use tauri::Emitter;
                     let admitted = match commands::admit_clean_completion(&completion, || {
-                        // The tracker's first refresh, now after admission: Home
-                        // may answer its local reads before even asking a server.
-                        // No successor verdict yet; the final report owns that.
-                        let source_id = completion.item_key.split_once(':')
-                            .map(|(source, _)| source).unwrap_or_default();
+                        // Admission calls this only if the tracker has not sent
+                        // the first report. Home may answer local reads at once.
                         let _ = app_handle.emit(
                             "playback-ended",
-                            serde_json::json!({
-                                "sourceId": source_id,
-                                "itemKey": completion.item_key,
-                                "sessionId": completion.session_id,
-                                "runOver": false,
-                                "failedToStart": false,
-                            }),
+                            commands::first_clean_end_report(&completion),
                         );
                     }).await {
                         Ok(admitted) => admitted,
