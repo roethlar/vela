@@ -108,23 +108,25 @@ async function runScenario(scenario, tauriDriverBin) {
   const scenarioEnv = scenario.environment
     ? await scenario.environment({ configRoot, repoRoot })
     : {};
+  let trustedCa = null;
   let cleanupPromise = null;
-  const runCleanup = scenario.cleanup
-    ? () => {
-        if (!cleanupPromise) {
-          // Start from an already-resolved promise so a synchronous cleanup
-          // throw becomes a rejection too; both ordinary teardown and the
-          // signal handler can then wait without skipping the remaining rails.
-          cleanupPromise = Promise.resolve()
-            .then(() => scenario.cleanup())
-            .finally(() => {
-              cleanupPromise = null;
-            });
-        }
-        return cleanupPromise;
-      }
-    : null;
-  if (runCleanup) activeCleanups.add(runCleanup);
+  const runCleanup = () => {
+    if (!cleanupPromise) {
+      // Share one settled promise between normal teardown and signals. The
+      // CA's removal is registered before trust-ca can succeed, even for a
+      // scenario without cleanup, and a failed scenario cleanup cannot skip it.
+      cleanupPromise = Promise.resolve()
+        .then(() => scenario.cleanup?.())
+        .finally(() => {
+          if (trustedCa) {
+            try { windowsTool('untrust-ca', [trustedCa]); }
+            catch (untrustError) { console.error(`e2e: removing the scenario's test CA: ${untrustError.message}`); }
+          }
+        });
+    }
+    return cleanupPromise;
+  };
+  activeCleanups.add(runCleanup);
   const logFd = fs.openSync(path.join(artifactsDir, `${scenario.name}-driver.log`), 'w');
   // detached ⇒ own process group, so killing -pid also takes down the
   // WebKitWebDriver child tauri-driver spawns.
@@ -160,7 +162,6 @@ async function runScenario(scenario, tauriDriverBin) {
   // SSL_CERT_FILE a scenario gives for its mock server's CA; that CA is
   // trusted in the machine's root store for this scenario only (a disposable
   // runner: windows.ps1 refuses otherwise) and removed in the cleanup below.
-  let trustedCa = null;
   try {
     if (isWindows && scenarioEnv.SSL_CERT_FILE) {
       trustedCa = windowsTool('trust-ca', [scenarioEnv.SSL_CERT_FILE]).thumbprint;
@@ -207,17 +208,15 @@ async function runScenario(scenario, tauriDriverBin) {
     }
     return { err, proof };
   } finally {
-    endProof();
-    if (runCleanup) await runCleanup().catch(() => {});
-    if (runCleanup) activeCleanups.delete(runCleanup);
+    try { endProof(); }
+    finally {
+      await runCleanup().catch(() => {});
+      activeCleanups.delete(runCleanup);
+    }
     await driver.deleteSession().catch(() => {});
     if (isWindows) stopWindowsApps(configRoot);
     killTree();
     if (isWindows) forgetWindowsApp(configRoot);
-    if (trustedCa) {
-      try { windowsTool('untrust-ca', [trustedCa]); }
-      catch (untrustError) { console.error(`e2e: removing the scenario's test CA: ${untrustError.message}`); }
-    }
     activeKills.delete(killTree);
     process.removeListener('exit', killTree);
     fs.closeSync(logFd);

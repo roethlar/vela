@@ -5,6 +5,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import vm from 'node:vm';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { appBinaryFromMetadata, appCommands, appExecutableFromMessages, appIdentity, locateAppBinary, MESSAGE_FORMAT_ARG, webdriverBuildArgs, webdriverConfig, writeWebdriverConfig } from './e2e/app-binary.mjs';
@@ -797,17 +798,75 @@ test('a click a fixed overlay intercepts is retried once with the element centre
 test("Windows: a scenario's mock CA is trusted for that scenario only, on a disposable runner", () => {
   const run = harnessText('run.mjs');
   const trust = run.indexOf("trustedCa = windowsTool('trust-ca', [scenarioEnv.SSL_CERT_FILE]).thumbprint;");
-  const untrust = run.indexOf("windowsTool('untrust-ca', [trustedCa])");
-  assert.ok(trust > 0 && untrust > trust, 'trusted when the scenario starts, removed in its cleanup');
+  assert.ok(trust > 0, 'trusted when the scenario starts');
   assert.match(run, /if \(isWindows && scenarioEnv\.SSL_CERT_FILE\) \{\s*trustedCa = /, 'only on Windows, only for a scenario that names a CA');
-  // Inside the scenario's try, so its finally removes it even when the scenario fails.
+  // Inside the scenario's try, so a failed trust still tears down the scenario.
   const body = run.slice(run.indexOf('async function runScenario('), run.indexOf('\n}\n', run.indexOf('async function runScenario(')));
   assert.ok(body.indexOf('  try {\n    if (isWindows && scenarioEnv.SSL_CERT_FILE)') > 0);
-  assert.ok(body.lastIndexOf('} finally {') < body.indexOf("windowsTool('untrust-ca'"));
   const tool = harnessText('windows.ps1');
   assert.match(tool, /'trust-ca' \{[\s\S]*?if \(\$env:VELA_E2E_DISPOSABLE_WINDOWS -ne '1'\) \{\s*throw/, 'never on a machine that is not disposable');
   assert.match(tool, /'untrust-ca' \{\s*if \(\$Value -notmatch '\^\[0-9A-F\]\{40\}\$'\) \{ throw/);
 });
+
+for (const signal of [null, 'SIGINT', 'SIGTERM']) {
+  for (const failure of ['none', 'sync-cleanup', 'async-cleanup', 'teardown']) {
+    test(`Windows: test CA removed once on ${signal ?? 'normal teardown'} with ${failure}`, async () => {
+      const source = harnessText('run.mjs');
+      const signals = source.slice(source.indexOf('const activeKills ='), source.indexOf('\nfunction runStep('));
+      const start = source.indexOf('async function runScenario(');
+      const scenarioCode = source.slice(start, source.indexOf('\n}\n', start) + 2);
+      const events = [];
+      const handlers = new Map();
+      let reached, proceed;
+      const waiting = new Promise((resolve) => { reached = resolve; });
+      const resume = new Promise((resolve) => { proceed = resolve; });
+      let waits = 0;
+      const scenario = {
+        name: 'ca-probe',
+        environment: () => ({ SSL_CERT_FILE: '/mock/ca.pem' }),
+        run: async () => {},
+      };
+      // Also exercise a CA-backed scenario that has no cleanup of its own.
+      if (failure !== 'none') scenario.cleanup = () => {
+        events.push('scenario-cleanup');
+        if (failure === 'sync-cleanup') throw new Error('synchronous cleanup failed');
+        if (failure === 'async-cleanup') return Promise.reject(new Error('async cleanup failed'));
+      };
+      const context = vm.createContext({
+        scenario, path, os, console,
+        isWindows: true, repoRoot: '/repo', artifactsDir: '/artifacts', nativeDriver: 'native',
+        driverPort: 4444, driverUrl: 'http://driver.invalid', displayEnv: {}, appBinary: '/app', runPlayer: 'external',
+        fs: { mkdtempSync: () => '/config', openSync: () => 9, closeSync() {}, rmSync() {} },
+        process: { env: {}, on: (name, fn) => handlers.set(name, fn), removeListener() {}, exit: (code) => events.push(`exit:${code}`) },
+        spawn: () => ({ pid: 123 }),
+        Driver: class { async newSession() {} async deleteSession() {} },
+        prepareWindowsConfig() {}, setScenarioConfigRoot() {}, registerWindowsApp() {}, forgetWindowsApp() {},
+        killWindowsTree: () => events.push('kill-tree'),
+        stopWindowsApps() { if (failure === 'teardown') throw new Error('app teardown failed'); },
+        windowsTool(operation, args) {
+          if (operation === 'protect-fixtures') return;
+          events.push(`${operation}:${args[0]}`);
+          return { thumbprint: 'test-thumbprint' };
+        },
+        beginProof() {}, endProof: () => ({}), proofProblems: () => [], driverListening() {},
+        waitUntil: async () => { if (++waits === 1) { reached(); await resume; } },
+      });
+      vm.runInContext(`${signals}\n${scenarioCode}`, context);
+      const running = vm.runInContext("runScenario(scenario, 'tauri-driver')", context);
+      await waiting; // trust-ca has succeeded; no driver session has started yet.
+      if (signal) {
+        await handlers.get(signal)();
+        assert.ok(events.indexOf('untrust-ca:test-thumbprint') > events.indexOf('trust-ca:/mock/ca.pem'));
+        assert.ok(events.indexOf('untrust-ca:test-thumbprint') < events.indexOf(`exit:${signal === 'SIGINT' ? 130 : 143}`), 'CA removed before signal exit');
+      }
+      proceed();
+      if (failure === 'teardown') await assert.rejects(running, /app teardown failed/);
+      else await running;
+      assert.equal(events.filter((e) => e === 'untrust-ca:test-thumbprint').length, 1, 'normal and signal cleanup share exactly one CA removal');
+      assert.equal(events.filter((e) => e === 'scenario-cleanup').length, failure === 'none' ? 0 : 1);
+    });
+  }
+}
 
 test('an aliased second driver in another module cannot start another app (pa-6)', () => {
   driverCase(`
