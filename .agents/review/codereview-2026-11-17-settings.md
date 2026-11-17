@@ -25,5 +25,8 @@ red-proved (the old placement, the old note branch, a "Settings → Player"
 put back, the explanation's render removed: each fails its test); st-3
 and st-6 change documents and comments only.
 
-Not run over these repairs yet: a hunt (dispatched as slice `set2` over
-`ce6e96d..5ec199a`; its outcome is added here).
+The hunt over the repairs (slice `set2`, `ce6e96d..5ec199a`, same
+reviewer setup in `rv-final-set2`; schema-valid, `capability_ok` true,
+pins echoed) found one more: st-8 (LOW), `docs/development.md` still said
+the setting decides how the window is created and to restart; repaired at
+`a65f521` (a document only).
