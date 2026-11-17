@@ -2576,8 +2576,12 @@ Linux); the library Vela's window needs, inside the package.
      network.
   2. Play in mpv's own window; fullscreen on the other screen; play again.
   3. Choose Vela's window, restart Vela, play an SDR file: the picture
-     inside Vela's window, smooth, the clock moving; keys and mouse as on
-     Linux; Close, then play another.
+     inside Vela's window within a moment of the play starting, smooth,
+     the clock moving; keys and mouse as on Linux; Close, then play
+     another. (On the hosted Mac the first play of a run showed its first
+     picture about three seconds late, mpv compiling its shaders on
+     Apple's software renderer; a delay like that on your Mac's GPU would
+     be a defect.)
   4. An HDR10 file on the MacBook's screen: highlights brighter than
      Vela's white. A playlist going SDR, HDR, SDR: a brief black between,
      no flash of wrong colour. Drag the window to an SDR screen while it

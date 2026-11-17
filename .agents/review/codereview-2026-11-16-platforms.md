@@ -9,8 +9,9 @@ thirteen admitted (one HIGH, nine MEDIUM, three LOW), none declined.
 All but pl-9 are repaired and closed: codex wrote pl-1 to pl-6's, pl-8's,
 pl-11's, pl-12's and pl-14 to pl-19's repairs as coding tasks and the
 working agent's review closed them (adding the Windows half of pl-5); the
-working agent wrote pl-7's, pl-10's and pl-13's. A ninth and tenth hunt,
-over pl-14 to pl-19's repairs, are running.
+working agent wrote pl-7's, pl-10's, pl-13's and pl-20 to pl-22's. A
+ninth and tenth hunt, over pl-14 to pl-19's repairs, found pl-20 to pl-22;
+an eleventh, over those, is running.
 pl-9 is about tests alone and waits for the release's test pass
 (`.agents/decisions.md`, 2026-11-14). pl-11 leaves one path open on
 purpose, stated in its section.
@@ -59,6 +60,9 @@ purpose, stated in its section.
 | pl-17 | MEDIUM  | macOS: an image unloaded during pl-4's scan makes a cached, spurious refusal | `[x]` | `cf09211` |
 | pl-18 | MEDIUM  | screens: Vela's own fallback screen overrides the user's numbered screen like a remembered one | `[x]` | `0b2099a` |
 | pl-19 | MEDIUM  | macOS: a conditional profile can undo video-timing-offset=0, so video runs ahead of audio | `[x]` | `91c72f6` |
+| pl-20 | MEDIUM  | Windows set: the PE scanner reads the first of two overlapping sections, the loader a later one | `[x]` | `09c42c0` |
+| pl-21 | MEDIUM  | screens: a fullscreen start on Vela's fallback screen lost Linux's fullscreen output name | `[x]` | `0352976` |
+| pl-22 | LOW     | macOS: DYLD_ROOT_PATH, simulator-only, refused the embedded player for nothing | `[x]` | `2bc6e3c` |
 
 ### pl-1 (whost)
 
@@ -475,3 +479,54 @@ existing runtime protection observes only the five colour properties."
 Admitted. Repair (`91c72f6`, codex): an observer of its own keeps
 `video-timing-offset` at 0 for the whole play, setting it back
 asynchronously whenever it changes.
+
+## A ninth and tenth hunt: the repairs of pl-14 to pl-19
+
+Dispatched by the working agent over `3061b52..91c72f6`, as two slices: the
+runtime repairs (pl-16 to pl-19) and the packaging ones (pl-14, pl-15).
+Same harness and reviewer as above. **findings**: three candidates, all
+admitted: pl-20 (MEDIUM, packaging), pl-21 (MEDIUM) and pl-22 (LOW). The
+working agent repaired all three; an eleventh hunt reads those repairs.
+
+### pl-20 (fix4pkg)
+
+Reviewer, verbatim, evidence: "packaging/libmpv/windows-pe.py:93 now accepts
+directory extents without checking ambiguous section mappings, while :68
+selects the first matching section. A PE32+ fixture has an import directory
+at RVA 0x1000, size 0x1200, and two 0x200-byte sections at RVA 0x1000: the
+first contains zeros; the second imports rv-helper.dll. Head reports no
+dependencies and production check_closure exits 0, including after
+stripping. Base rejects the same stripped bytes. Wine reads the later
+section and requires rv-helper.dll." Predicted failure: "The build's
+dependency gate can certify an incomplete set."
+
+Admitted. Repair (`09c42c0`): an image whose sections overlap in
+virtual-address space is refused as ambiguous; the set CI built reads as
+before.
+
+### pl-21 (fix4rt)
+
+Reviewer, verbatim, evidence: "src-tauri/src/player/launch.rs:453-455 and
+628-640: fallback screens now bypass the fullscreen selector. A
+production-builder probe with Player window=Fullscreen, no remembered
+screen, and Vela on DP-2 produced --screen-name=DP-2 and --fullscreen=yes,
+but no --fs-screen-name. Linux mpv selects its initial fullscreen output
+separately." Predicted failure: "When the compositor's default output
+differs from Vela's screen, the first fullscreen play opens on the wrong
+monitor."
+
+Admitted. Repair (`0352976`): `fallback_screen_args` gives Linux's
+`--fs-screen-name` for a fullscreen start on the fallback screen, still a
+default before the user's options, and applies only to the external
+player.
+
+### pl-22 (fix4rt)
+
+Reviewer, verbatim, evidence: "src-tauri/src/player/embedded/libmpv.rs:430
+and 570 reject any DYLD_ROOT_PATH. In a native, unhardened macOS launch this
+variable does not redirect libraries: Apple's dyld implementation applies
+it only when the executable targets a simulator." Predicted failure: "A
+development launch inheriting DYLD_ROOT_PATH unnecessarily disables
+embedded playback."
+
+Admitted. Repair (`2bc6e3c`): DYLD_ROOT_PATH is no longer refused.
