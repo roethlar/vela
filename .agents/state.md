@@ -510,7 +510,11 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   `xvfb-run`, not what ran under it), kept this machine at a load of
   about 20; `watchposition` failed twice and `pagefail` once in that
   window (next entry).
-- The Windows end-to-end suite did not pass at `9d44c5e` (run 44101184219),
+- The Windows end-to-end suite PASSED IN FULL at `b871fcc` (run
+  44115812289: external 46 of 46, embedded 50 of 50, parity verdict PASS),
+  which carries N1, W1 and `smoke`'s repair. The intermittents below stay
+  recorded; the draft plan `.agents/plans/e2e-slow-runner.md` awaits the
+  owner. Before that, it did not pass at `9d44c5e` (run 44101184219),
   failing different scenarios on each of two attempts. Attempt 1: external
   in full, embedded 48 of 50 (`curation`, `resume`: "mpv: no reply to
   get_property"; both failure screenshots show the first play run to its
