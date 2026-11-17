@@ -2519,6 +2519,14 @@ artifact keeps the probe's logs and screenshots.
   opened, before the page had listed them (the suite's; repaired after
   this). The release run at `0357eec` (44034987765) passed; its installer
   and app carry the repaired marker script.
+- **2026-11-17, Windows run 7 at `aa8c0b0`: both suites pass in full.**
+  Run 44040455337, not dirty: external 46 of 46, embedded 50 of 50, parity
+  verdict PASS, with the boot repair (`2f6f37d`) and `playlistedit`'s wait
+  (`aa8c0b0`). Skipped on Windows besides the other player's scenarios:
+  `playerfallback` (Linux's X11 notice) and `sourcepolicy` (the venue; see
+  `019c08b`). The release run at `23d4745` (44042221966), the product code
+  of `aa8c0b0`, passed; its installer and app carry the repaired marker
+  script.
 
 ### Design that follows (2026-11-16)
 
@@ -2604,7 +2612,7 @@ artifact keeps the probe's logs and screenshots.
 
 Written once, at the end of the amendment's work, as the amendment asks.
 The builds are the artifacts of the release workflow run by hand at
-`cd4f4ee`, run 43991901348 (`gh run download 43991901348 --repo
+`23d4745`, run 44042221966 (`gh run download 44042221966 --repo
 roethlar/vela`: `vela-macos` the DMG, `vela-windows` the NSIS installer and
 the MSI, `vela-linux` the AppImage, deb and rpm, `vela-arch`); if a later
 run replaces it, `.agents/state.md` names it. mpv's own window stays the
@@ -2615,29 +2623,42 @@ Player → Video player → "Vela's window (experimental)", then restart Vela.
 with progress, resume and the remembered window (fullscreen or not, size,
 and the screen, even when your own mpv options name a numbered screen);
 Vela's window with Vela's own controls, keys and mouse (the view you use on
-Linux); the library Vela's window needs, inside the package.
+Linux); the library Vela's window needs, inside the package; skipping
+intros, credits and commercials and black-bar cropping in both windows
+(their mpv scripts are inside every package: checked in the Windows
+installer and the macOS app).
 
 **Linux (Wayland, as you use it now).**
 - Has: all of the above; HDR in Vela's window through the compositor.
 - Lacks: Vela's window on X11, and with NVIDIA's proprietary driver (the
   video plays in mpv's own window and Settings says why).
 - Proven by machine: both end-to-end suites in full at every product
-  commit (48 of 48, 51 of 51, parity PASS).
+  commit (48 of 48, 51 of 51, parity PASS), apart from one intermittent
+  failure of `markers` in the embedded suite, under investigation
+  (`.agents/state.md`, Blockers).
 - Check by eye: nothing new beyond a play remembered fullscreen on your
   second screen reopening there.
 
 **Windows.**
 - Has: all of the above; Vela's window shows mpv's own Direct3D 11 output
   inside it; HDR there when Windows' HDR is on. Vela now also starts under
-  Windows' built-in Administrator account (`96c0f4d`).
+  Windows' built-in Administrator account (`96c0f4d`), and Vela's window
+  plays HTTPS from a server whose certificate an authority Windows trusts
+  issued even when its revocation cannot be checked, as browsers do
+  (`3c4a510`).
 - Lacks: signed installers (SmartScreen: "More info", then "Run anyway").
 - Proven by machine: the release run unpacks both installers and plays the
   library from each on a Windows runner; probe W2 played twice in Vela's
   window on a Windows runner, the test pattern on screen (Direct3D 11 on
-  WARP, the software adapter; run 43987838828).
-- Not proven by machine: the end-to-end suite (its harness cannot yet open
-  a WebDriver session on the hosted runner: the release's test pass), a
-  real GPU, HDR, your keys and mouse on Windows.
+  WARP, the software adapter; runs 43987838828 to 44018869179); the
+  end-to-end suite in full on a hosted Windows runner in both players:
+  external 46 of 46 and embedded 50 of 50, parity verdict PASS (run
+  44040455337 at `aa8c0b0`). Skipped there besides the other player's
+  scenarios: `playerfallback` (Linux's X11 notice, which Windows has no use
+  for) and `sourcepolicy` (the runner's IPv6-only sockets cannot reach its
+  distant copy; its row is shown there by `multiplex` and `mergedview`).
+- Not proven by machine: a real GPU, HDR, your keys and mouse on
+  Windows.
 - Check by eye, in order:
   1. Install mpv if it is not there (winget, scoop or Chocolatey, where
      Vela finds it; anywhere else, give its path in Settings → Player),
@@ -2663,7 +2684,9 @@ Linux); the library Vela's window needs, inside the package.
   library inside and plays the library from the finished DMG on Apple
   Silicon and under Rosetta; probe M2 played twice in Vela's window on a
   hosted Mac, the test pattern on screen and the clock advancing (Apple's
-  software renderer, with mpv's fast profile; runs 43990824184 and after).
+  software renderer, with mpv's fast profile; runs 43990824184 to
+  44018857651). There is no end-to-end suite on macOS: tauri-driver has no
+  macOS WebDriver.
 - Not proven by machine: a real Mac's GPU at mpv's default settings, HDR,
   your keys and mouse on a Mac. This is the platform where your eyes matter
   most.

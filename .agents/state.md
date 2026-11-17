@@ -56,14 +56,18 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   - THE OWNER'S CHECKS: `.agents/plans/embedded-player.md`, "For the
     owner: each platform, what it has, what to check (2026-11-17)": what
     each platform has and lacks, what machines proved, what to look at, in
-    order. Builds: release run by hand 44018388540 at `019c08b` (every job
-    passed; it carries pl-1 to pl-26 and the release's test pass's product
-    repairs: the clean-end report order and `build.rs`); later commits are
-    tests and records only, unless a later entry here says otherwise. The
-    mpv scripts were checked inside the previous run's NSIS installer
-    (next to `vela.exe`) and DMG (`Vela.app/Contents/Resources`). Probes
-    M2 (44018857651) and W2 (44018869179) played twice in Vela's window at
-    that product code.
+    order. Builds: release run by hand 44042221966 at `23d4745` (every
+    job passed; it carries pl-1 to pl-26 and every product repair of the
+    release's test pass: the clean-end report order, `build.rs`, the
+    Windows set's revocation soft-fail, the marker script's paused
+    button, the boot keeping Playlists); later commits are tests and
+    records only, unless a later entry here says otherwise. The repaired
+    marker script was checked inside its NSIS installer (next to
+    `vela.exe`) and DMG (`Vela.app/Contents/Resources`). Probes M2
+    (44018857651) and W2 (44018869179) played twice in Vela's window at
+    `dcb0d2d`; the product changes since touch neither (the set's TLS on
+    Windows, a mpv script, the page's boot), and the Windows suite in
+    full (below) plays in Vela's window at `aa8c0b0`.
   - Linux unchanged through all of it: both end-to-end suites in full at
     `6b206ec`, `623ec17`, `c49be2a`, `49f2c3c`, `cf23d90`, `959f437`,
     `3061b52`, `0b2099a`, `2bc6e3c`, `c3ea91d` and `dc3c9e8` (48 of 48,
@@ -111,17 +115,21 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     `markerbutton` (45 passed), which found a third real defect: the
     marker script drew no skip button when a play was paused inside a
     marker before mpv's OSD had a size, the case the scenario makes.
-    Reproduced with real mpv and repaired in the script (this commit;
-    the plan's Probe log), with tests under LuaJIT and Lua 5.2, which
-    CI's `frontend` job now installs. The sixth Windows run
+    Reproduced with real mpv and repaired in the script (`0357eec`; the
+    plan's Probe log), with tests under LuaJIT and Lua 5.2, which CI's
+    `frontend` job installs, and in a CI run a missing one fails the
+    check (`311347e`, tp-10 to tp-12). The sixth Windows run
     (44034984612 at `0357eec`) passed the embedded suite in full again
     (50) and `markerbutton`; its `playlistplay` found a fourth real
     defect: Playlists chosen while Vela starts was put back to Home by
-    the boot's first Home load (repaired in the page, this commit; the
-    plan's Probe log). RELEASE_NOTES.md describes the embedded player on
-    all three platforms and the fixes. Release run 44034987765 at
-    `0357eec` passed; this repair changes the page, so a release run
-    after it replaces that one.
+    the boot's first Home load (repaired in the page, `2f6f37d`), and
+    `playlistedit` looked for a playlist before the view had listed it
+    (`aa8c0b0`). THE SEVENTH WINDOWS RUN PASSED BOTH SUITES IN FULL:
+    44040455337 at `aa8c0b0`, not dirty, external 46 of 46, embedded 50
+    of 50, parity verdict PASS. Codex hunts six and eight were clean;
+    seven found tp-10 to tp-12, repaired. RELEASE_NOTES.md describes the
+    embedded player on all three platforms and the fixes. Release run
+    44042221966 at `23d4745` passed: the builds above.
   - Type-checking Windows and macOS Rust from Linux:
     `scripts/check-other-platforms.sh` (repo-guidance, Verification).
 - VELA 1.0.66 IS READY TO BE RELEASED, AS FAR AS THE AGENT CAN TAKE IT
@@ -463,7 +471,21 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   scenario keeps evidence in every run: mpv's verbose log per player and
   leg in the suite's artifacts (`markers-mpv-<player>-leg<N>.log`), and a
   failure says how long it waited and which check-ins came. Read those
-  the next time it fails.
+  the next time it fails. (The machine's load during those runs was not
+  recorded; see the next entry.)
+- A timing failure in a local end-to-end run proves nothing until the
+  machine is known to be quiet: check `uptime`, and look for stray
+  `mpv` and `Xvfb` processes, first. On 2026-11-17, from about 06:50 to
+  08:09 UTC, twelve `mpv` processes and their `Xvfb` servers, left by the
+  agent's own reproduction of the marker defect (its script stopped
+  `xvfb-run`, not what ran under it), kept this machine at a load of
+  about 20. In that window `watchposition` failed twice in the embedded
+  suite (the grid's `scrollTop` moved 1 to 4 px during a hold) and
+  `pagefail` once (page 2 arrived on the grid it truncates); outside it
+  neither has failed. WebKitGTK does anchor scrolling (seen: content
+  inserted above the view moves `scrollTop` by its height; a transform
+  does not), so a layout shift above the view under load is the likely
+  path; what shifted was not found.
 - The `refresh` E2E flake remains recorded (1.0.59 full Linux run, 36/39,
   with `continueon` and `playverbs`). A candidate cause, seen 2026-11-15:
   `refresh.mjs` and `watchposition.mjs` scrolled the grid with the helper
