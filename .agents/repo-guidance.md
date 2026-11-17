@@ -150,11 +150,12 @@ Rules the command list doesn't carry on its own:
 
 ### Guard discipline (earned the hard way, r17-r24 of library-refresh-scan)
 
-**Owner, 2026-11-14: tests are not a priority until the app is done and a
-release is in view** (`.agents/decisions.md`, that date). Until the owner
-says otherwise, this section governs the tests a change to product code
-gets, and nothing more: do not spend review rounds or repairs on findings
-that are about tests alone; record them for the release's test pass.
+**Owner, 2026-11-14: tests were not a priority until the app was done and
+a release was in view** (`.agents/decisions.md`, that date). That condition
+was reached on 2026-11-16 (`.agents/decisions.md`, "Get 1.0.64
+release-ready", "Also superseded"): the release's test pass is under way,
+findings about tests alone are repaired again, and what was recorded for
+that pass is taken up in it. This section governs every test.
 
 Carved out of `.agents/state.md` 2026-07-14 so it survives that entry's
 rotation. The evidence is the `## Code review log` in
