@@ -33,6 +33,15 @@ async function openPlaylists(driver) {
   );
 }
 
+// The view lists the playlists after it opens, once it has read them: on
+// the slower Windows runner a look straight after opening found none.
+async function voyageListed(driver) {
+  await driver.waitFor(
+    `return !!document.querySelector('section.playlists .playlistgrid button[aria-label^="Open Voyage,"]')`,
+    'the Voyage playlist in the list',
+  );
+}
+
 async function openItemMenu(driver, title) {
   await driver.exec(
     `const element = [...document.querySelectorAll('button.poster')]
@@ -174,6 +183,7 @@ export default {
     );
 
     await openPlaylists(driver);
+    await voyageListed(driver);
     const openVoyage = await driver.find(
       'css selector',
       'section.playlists .playlistgrid button[aria-label^="Open Voyage,"]',
@@ -226,6 +236,7 @@ export default {
       fs.writeFileSync(connectionsFile, JSON.stringify(connections));
     });
     await openPlaylists(driver);
+    await voyageListed(driver);
     const reopen = await driver.find(
       'css selector',
       'section.playlists .playlistgrid button[aria-label^="Open Voyage,"]',
