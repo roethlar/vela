@@ -11,8 +11,8 @@ pl-11's, pl-12's and pl-14 to pl-19's repairs as coding tasks and the
 working agent's review closed them (adding the Windows half of pl-5); the
 working agent wrote pl-7's, pl-9's, pl-10's, pl-13's and pl-20 to pl-26's. A
 ninth and tenth hunt, over pl-14 to pl-19's repairs, found pl-20 to pl-22;
-an eleventh, over those, found pl-23 to pl-26; a twelfth, over those, is
-running.
+an eleventh, over those, found pl-23 to pl-26; a twelfth, over those,
+found nothing.
 pl-9, about tests alone, was set aside for the release's test pass
 (`.agents/decisions.md`, 2026-11-14) and repaired in it (`50b8893`).
 pl-11 leaves one path open on purpose, stated in its section.
@@ -609,3 +609,10 @@ Predicted failure: "The source and generated API documentation describe
 the fallback helper with the opposite precedence contract."
 
 Admitted. Repair (`35d6757`): each function carries its own comment.
+
+## A twelfth hunt: the repairs of pl-23 to pl-26
+
+Dispatched by the working agent over `2bc6e3c..35d6757` (slice `fix6`), the
+four repairs it wrote itself. Same harness and reviewer as above.
+**clean**: no finding. The review's repair loop ends here: every finding
+from pl-1 to pl-26 is closed.

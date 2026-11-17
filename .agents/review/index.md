@@ -1174,4 +1174,4 @@ pl-14 to pl-19's repairs found pl-20 to pl-22 (2 MEDIUM, 1 LOW), repaired
 by the working agent (`09c42c0`, `0352976`, `2bc6e3c`); an eleventh hunt
 over those found pl-23 to pl-26 (3 MEDIUM, 1 LOW; pl-25 reverses pl-22),
 repaired by the working agent (`15a6be0`, `b7b035e`, `a2f9673`,
-`35d6757`); a twelfth hunt reads those.
+`35d6757`); a twelfth hunt over those was clean.
