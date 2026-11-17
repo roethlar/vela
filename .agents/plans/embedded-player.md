@@ -2470,6 +2470,23 @@ artifact keeps the probe's logs and screenshots.
   Run 44013741142 at `e87ffe2`, not dirty: external 39 passed, 8 failed;
   embedded 42 passed, 9 failed, every failure one whose repair landed
   after that commit. A third run at `019c08b` (44018219446) follows.
+- **2026-11-17, Windows runs 3 and 4: a defect in the Windows set's TLS.**
+  Run 44018219446 at `019c08b` (external 43 passed, 3 failed; embedded 48
+  passed, 2 failed) and run 44023883002 at `8d1a8b5` (embedded 49 passed,
+  1 failed; its external suite ended early on a harness fault, repaired at
+  `931542b`). The embedded `multiplex` play failed with Vela's HTTPS hint
+  while mpv's own window played the same stream: the set's FFmpeg uses
+  Schannel, and FFmpeg 9.0.2 verifies with a hard revocation check, so a
+  certificate from an authority Windows trusts but without revocation
+  information (any private authority's), or one whose revocation service
+  is out of reach, failed. Repaired in the set's build (`3c4a510`: the
+  verifying branch soft-fails revocation, as browsers do; chain and host
+  name still checked); the Linux set's GnuTLS and the macOS set's
+  SecureTransport do not impose it. The rest were the suite's: an
+  intercepted click's retry (`658a924`), a Settings read (`8d1a8b5`), the
+  temporary folder's removal (`931542b`); `markers` failed once in the
+  embedded player (the intermittent in `.agents/state.md`, Blockers, which
+  now keeps mpv's log, `b5142f6`).
 - **2026-11-17, M2 and W2 at `dcb0d2d`** (the product code of `019c08b`:
   pl-23 to pl-26, the clean-end report repair, `build.rs`). M2 run
   44018857651 and W2 run 44018869179: each played twice in Vela's window
