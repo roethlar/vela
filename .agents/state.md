@@ -519,7 +519,10 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   its pipe before the harness's `time-pos` question, helpers.mjs:607).
   Attempt 2: embedded in full, external 44 of 46 (`continuetv`: a WebDriver
   `execute/sync` got no response within 30 s; `smoke`, next: the page's
-  version line read null). Nothing that runs on Windows changed since
+  version line read null; that one was a real race in the test, which
+  read the footer before the page's `get_app_info` answer had drawn it:
+  repaired in the commit after `0b485de`, red-proved with the version
+  removed from the footer). Nothing that runs on Windows changed since
   `74df55a`, where both suites passed in full (44087343362): the product
   change of `daa182c` is Linux-only, and the harness change of `9d44c5e`
   touches Windows only in a log line. So these are the hosted runner's

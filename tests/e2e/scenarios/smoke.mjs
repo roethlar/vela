@@ -14,6 +14,11 @@ export default {
       `return document.readyState === 'complete' && !!document.querySelector('h1,h2')`,
       'app render',
     );
+    // The footer appears only once the page's `get_app_info` call has
+    // answered, which can be after the heading on a slow machine (the
+    // Windows runner read it as null, 2026-11-17). Wait for a version line;
+    // the exact version is asserted below.
+    await driver.waitFor(`return /Vela v[0-9]/.test(document.body.innerText)`, 'the version footer');
     const state = await driver.exec(`return {
       heading: document.querySelector('h1,h2')?.textContent?.trim(),
       hasTauriIpc: !!window.__TAURI_INTERNALS__,
