@@ -12,10 +12,45 @@ import { appBinaryFromMetadata, appCommands, appExecutableFromMessages, appIdent
 import { MpvIpc, mpvSocketSnapshot, setScenarioConfigRoot, socketOfScenario } from './e2e/mpv.mjs';
 import { npmCommand, ownedWindowsApps, windowsConfigPaths, windowsPipePaths } from './e2e/windows.mjs';
 import { resultsFileProblems, scenarioProblems, skipOutcome, verdictProblems } from './e2e/scenario-loader.mjs';
+import { settingValue } from './e2e/helpers.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 const harnessText = (file) => fs.readFileSync(path.join(repoRoot, 'tests/e2e', file), 'utf8');
+
+for (const [selector, expected, loaded] of [['#continue-playing', 'only-tv', 'off'], ['#player-window', 'remember', 'default']]) {
+  test(`settingValue waits for ${selector} to load before accepting its default`, async (t) => {
+    let now = 0;
+    t.mock.method(Date, 'now', () => now);
+    let reads = 0;
+    const driver = {
+      async exec(script) {
+        reads += 1;
+        const busy = reads === 1;
+        if (!busy) now = 10001; // Reach the helper's deadline without a ten-second test.
+        const document = { querySelector(requested) {
+          assert.equal(requested, selector);
+          return { value: busy ? expected : loaded, getAttribute: (name) => name === 'aria-busy' ? String(busy) : null };
+        } };
+        return new Function('document', script)(document);
+      },
+    };
+    await assert.rejects(settingValue(driver, selector, expected, 'loaded setting'),
+      (err) => err.message.includes(`shows "${loaded}", not "${expected}"`));
+    assert.equal(reads, 2, 'the busy default was not accepted');
+    // A loaded default is valid too, once its busy indication clears.
+    now = 0;
+    reads = 0;
+    driver.exec = async (script) => {
+      reads += 1;
+      return new Function('document', script)({ querySelector: () => ({
+        value: expected, getAttribute: () => String(reads === 1),
+      }) });
+    };
+    await settingValue(driver, selector, expected, 'loaded default');
+    assert.equal(reads, 2);
+  });
+}
 
 test('Windows: npm executes its JS CLI and Cargo metadata predicts the exe suffix', () => {
   const cli = path.join(repoRoot, 'package.json'); // existence only; never executed

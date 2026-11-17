@@ -225,6 +225,34 @@ function settingsBackend(spec) {
 
 const settingsTurn = () => new Promise((resolve) => setImmediate(resolve));
 
+test('every loaded Settings control is busy exactly until its setting is known', () => {
+  const source = fs.readFileSync('src/lib/Settings.svelte', 'utf8');
+  const ast = parse(source, { modern: true });
+  const settings = {
+    playback: 'playbackSetting', continuation: 'continuePlayingSetting', videoPlayer: 'videoPlayerSetting',
+    playerWindow: 'playerWindowSetting', tls: 'tlsSetting', mpvPath: 'mpvSetting', advanced: 'advancedSetting',
+  };
+  const seen = new Set();
+  function walk(node) {
+    if (!node || typeof node !== 'object') return;
+    if (node.type === 'RegularElement' && ['input', 'select', 'textarea'].includes(node.name)) {
+      const binding = node.attributes.find((a) => a.type === 'BindDirective');
+      const bound = binding && source.slice(binding.expression.start, binding.expression.end);
+      const setting = settings[bound?.split('.')[0]];
+      if (setting) {
+        seen.add(bound);
+        const busy = node.attributes.find((a) => a.type === 'Attribute' && a.name === 'aria-busy');
+        const tag = Array.isArray(busy?.value) ? busy.value[0] : busy?.value;
+        assert.equal(tag?.expression && source.slice(tag.expression.start, tag.expression.end),
+          `!${setting}.confirmed.known`, `${bound} must expose its own confirmed load state`);
+      }
+    }
+    for (const [key, value] of Object.entries(node)) if (key !== 'parent') walk(value);
+  }
+  walk(ast.fragment);
+  assert.equal(seen.size, 15, 'all fifteen loaded value controls were checked');
+});
+
 test("Settings choices use the new DOM value before binding (assignment-removal red-proof)", async () => {
   const source = fs.readFileSync("src/lib/Settings.svelte", "utf8");
   const mutant = source.replace("    draft.value[key] = value;\n", "");

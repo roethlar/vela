@@ -832,7 +832,7 @@
                 type="radio"
                 name="playback-source-policy"
                 value={policy.value}
-                bind:group={playback.policy}
+                aria-busy={!playbackSetting.confirmed.known} bind:group={playback.policy}
                 onchange={(e) => changeDraft(playbackDraft, "policy", e.currentTarget.value as PlaybackSourcePolicy, savePlaybackPreferences)}
               />
               <span>
@@ -878,7 +878,7 @@
           <div class="overridegrid">
             <div class="field">
               <label for="playback-resolution-override">Resolution</label>
-              <select id="playback-resolution-override" bind:value={playback.resolutionOverride} onchange={(e) => changeDraft(playbackDraft, "resolutionOverride", e.currentTarget.value, savePlaybackPreferences)}>
+              <select id="playback-resolution-override" aria-busy={!playbackSetting.confirmed.known} bind:value={playback.resolutionOverride} onchange={(e) => changeDraft(playbackDraft, "resolutionOverride", e.currentTarget.value, savePlaybackPreferences)}>
                 <option value="">Auto (detected)</option>
                 <option value="720p">1280 × 720</option>
                 <option value="1080p">1920 × 1080</option>
@@ -889,7 +889,7 @@
             </div>
             <div class="field">
               <label for="playback-hdr-override">HDR</label>
-              <select id="playback-hdr-override" bind:value={playback.hdrOverride} onchange={(e) => changeDraft(playbackDraft, "hdrOverride", e.currentTarget.value, savePlaybackPreferences)}>
+              <select id="playback-hdr-override" aria-busy={!playbackSetting.confirmed.known} bind:value={playback.hdrOverride} onchange={(e) => changeDraft(playbackDraft, "hdrOverride", e.currentTarget.value, savePlaybackPreferences)}>
                 <option value="">Auto (detected)</option>
                 <option value="enabled">HDR enabled</option>
                 <option value="disabled">SDR / HDR disabled</option>
@@ -907,7 +907,7 @@
       <div class="form">
         <div class="field">
           <label for="continue-playing">After a video or playlist finishes</label>
-          <select id="continue-playing" bind:value={continuation.mode} onchange={(e) => changeDraft(continueDraft, "mode", e.currentTarget.value as ContinuePlayingMode, saveContinuePlaying)}>
+          <select id="continue-playing" aria-busy={!continuePlayingSetting.confirmed.known} bind:value={continuation.mode} onchange={(e) => changeDraft(continueDraft, "mode", e.currentTarget.value as ContinuePlayingMode, saveContinuePlaying)}>
             <option value="off">Off</option>
             <option value="on">On — continue through Continue Watching</option>
             <option value="only-tv">TV only — play the next episode</option>
@@ -927,7 +927,7 @@
       <div class="form">
         <div class="field">
           <label for="video-player">Videos play in</label>
-          <select id="video-player" bind:value={videoPlayer.player} onchange={(e) => changeDraft(videoPlayerDraft, "player", e.currentTarget.value as VideoPlayer["player"], saveVideoPlayer)}>
+          <select id="video-player" aria-busy={!videoPlayerSetting.confirmed.known} bind:value={videoPlayer.player} onchange={(e) => changeDraft(videoPlayerDraft, "player", e.currentTarget.value as VideoPlayer["player"], saveVideoPlayer)}>
             <option value="external">mpv's own window</option>
             <option value="embedded">Vela's window (experimental)</option>
           </select>
@@ -954,7 +954,7 @@
       <div class="form">
         <div class="field">
           <label for="player-window">After Vela starts, the first video opens</label>
-          <select id="player-window" bind:value={playerWindow.mode} onchange={(e) => changeDraft(playerWindowDraft, "mode", e.currentTarget.value as PlayerWindowMode, savePlayerWindowMode)}>
+          <select id="player-window" aria-busy={!playerWindowSetting.confirmed.known} bind:value={playerWindow.mode} onchange={(e) => changeDraft(playerWindowDraft, "mode", e.currentTarget.value as PlayerWindowMode, savePlayerWindowMode)}>
             <option value="remember">As you last left it</option>
             <option value="fullscreen">Full screen</option>
             <option value="default">Default — as mpv and your options say</option>
@@ -975,7 +975,7 @@
           <input
             type="checkbox"
             id="player-skip-certificate-checks"
-            bind:checked={tls.skip}
+            aria-busy={!tlsSetting.confirmed.known} bind:checked={tls.skip}
             onchange={(e) => changeDraft(tlsDraft, "skip", e.currentTarget.checked, savePlayerTls)}
             disabled={!tlsSetting.confirmed.known}
             aria-describedby="player-certificate-help"
@@ -1006,7 +1006,7 @@
           <input
             id="mpv-path"
             placeholder={navigatorIsWindows() ? "C:\\Program Files\\mpv\\mpv.exe" : "/usr/local/bin/mpv"}
-            bind:value={mpvPath.path}
+            aria-busy={!mpvSetting.confirmed.known} bind:value={mpvPath.path}
             oninput={() => mpvDraft.edit("path")}
             onblur={saveMpvPath}
             onkeydown={(e) => { if (e.key === "Enter") { e.preventDefault(); void saveMpvPath(); } }}
@@ -1044,7 +1044,7 @@
             rows="4"
             spellcheck="false"
             placeholder={"One option per line, e.g.\n--vo=gpu\n--profile=fast"}
-            bind:value={advanced.extraArgs}
+            aria-busy={!advancedSetting.confirmed.known} bind:value={advanced.extraArgs}
             oninput={() => advancedDraft.edit("extraArgs")}
             onblur={blurMpvAdvanced}
           ></textarea>
@@ -1057,7 +1057,7 @@
         </div>
 
         <label class="check">
-          <input type="checkbox" bind:checked={advanced.useOwnConfig} onchange={(e) => changeDraft(advancedDraft, "useOwnConfig", e.currentTarget.checked, saveMpvAdvanced)} />
+          <input type="checkbox" aria-busy={!advancedSetting.confirmed.known} bind:checked={advanced.useOwnConfig} onchange={(e) => changeDraft(advancedDraft, "useOwnConfig", e.currentTarget.checked, saveMpvAdvanced)} />
           Use my own mpv config (<code>~/.config/mpv/mpv.conf</code>)
         </label>
         <p class="muted small">
@@ -1068,7 +1068,7 @@
 
         <div class="field">
           <label for="mpv-autocrop">Black-bar cropping (mpv autocrop)</label>
-          <select id="mpv-autocrop" bind:value={advanced.autocrop} onchange={(e) => changeDraft(advancedDraft, "autocrop", e.currentTarget.value as AutocropMode, saveMpvAdvanced)}>
+          <select id="mpv-autocrop" aria-busy={!advancedSetting.confirmed.known} bind:value={advanced.autocrop} onchange={(e) => changeDraft(advancedDraft, "autocrop", e.currentTarget.value as AutocropMode, saveMpvAdvanced)}>
             <option value="off">Off</option>
             <option value="manual">Manual — press Shift+C to crop</option>
             <option value="auto">Automatic — crop every video</option>
@@ -1092,7 +1092,7 @@
 
         <div class="field">
           <label for="playback-quality">Playback quality</label>
-          <select id="playback-quality" bind:value={advanced.playbackQuality} onchange={(e) => changeDraft(advancedDraft, "playbackQuality", e.currentTarget.value, saveMpvAdvanced)}>
+          <select id="playback-quality" aria-busy={!advancedSetting.confirmed.known} bind:value={advanced.playbackQuality} onchange={(e) => changeDraft(advancedDraft, "playbackQuality", e.currentTarget.value, saveMpvAdvanced)}>
             <option value="original">Original — play the file as it is</option>
             {#each qualityTiers as tier (tier.id)}
               <!-- Two tiers share the label "Convert to 1080p HD" and differ
@@ -1135,7 +1135,7 @@
 
         <div class="field">
           <label for="skip-intros">Skip intros</label>
-          <select id="skip-intros" bind:value={advanced.skipIntros} onchange={(e) => changeDraft(advancedDraft, "skipIntros", e.currentTarget.value as SkipPolicy, saveMpvAdvanced)}>
+          <select id="skip-intros" aria-busy={!advancedSetting.confirmed.known} bind:value={advanced.skipIntros} onchange={(e) => changeDraft(advancedDraft, "skipIntros", e.currentTarget.value as SkipPolicy, saveMpvAdvanced)}>
             <option value="off">Off</option>
             <option value="button">Button — ask on screen</option>
             <option value="autoskip">Auto-skip</option>
@@ -1144,7 +1144,7 @@
 
         <div class="field">
           <label for="skip-credits">Skip credits</label>
-          <select id="skip-credits" bind:value={advanced.skipCredits} onchange={(e) => changeDraft(advancedDraft, "skipCredits", e.currentTarget.value as SkipPolicy, saveMpvAdvanced)}>
+          <select id="skip-credits" aria-busy={!advancedSetting.confirmed.known} bind:value={advanced.skipCredits} onchange={(e) => changeDraft(advancedDraft, "skipCredits", e.currentTarget.value as SkipPolicy, saveMpvAdvanced)}>
             <option value="off">Off</option>
             <option value="button">Button — ask on screen</option>
             <option value="autoskip">Auto-skip</option>
@@ -1153,7 +1153,7 @@
 
         <div class="field">
           <label for="skip-commercials">Skip commercials</label>
-          <select id="skip-commercials" bind:value={advanced.skipCommercials} onchange={(e) => changeDraft(advancedDraft, "skipCommercials", e.currentTarget.value as SkipPolicy, saveMpvAdvanced)}>
+          <select id="skip-commercials" aria-busy={!advancedSetting.confirmed.known} bind:value={advanced.skipCommercials} onchange={(e) => changeDraft(advancedDraft, "skipCommercials", e.currentTarget.value as SkipPolicy, saveMpvAdvanced)}>
             <option value="off">Off</option>
             <option value="button">Button — ask on screen</option>
             <option value="autoskip">Auto-skip</option>

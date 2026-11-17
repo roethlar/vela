@@ -104,17 +104,20 @@ export function seedPlaylists(configRoot, playlists) {
 // A Settings control shows the product default until its setting's load
 // answers (Settings.svelte, createDraft: a choice made before then wins), so
 // a value read the moment a tab opens can be that default on a slow machine
-// (the first Windows runs). Wait, bounded, for the expected value, and say
-// what the control showed if it never comes.
+// (the first Windows runs). Wait for the control's confirmed load before
+// comparing values, even if the expected value is the product default.
 export async function settingValue(driver, selector, expected, what) {
   let shown;
   try {
     await pollUntil(async () => {
-      shown = await driver.exec(`return document.querySelector(${JSON.stringify(selector)})?.value`);
-      return shown === expected;
+      shown = await driver.exec(`
+        const control = document.querySelector(${JSON.stringify(selector)});
+        return control && { value: control.value, busy: control.getAttribute('aria-busy') === 'true' };
+      `);
+      return shown && !shown.busy && shown.value === expected;
     }, what, { timeoutMs: 10000 });
   } catch {
-    throw new Error(`${what}: ${selector} shows ${JSON.stringify(shown)}, not ${JSON.stringify(expected)}`);
+    throw new Error(`${what}: ${selector} shows ${JSON.stringify(shown?.value)}, not ${JSON.stringify(expected)}${shown?.busy ? ' (still loading)' : ''}`);
   }
 }
 
