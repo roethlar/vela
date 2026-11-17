@@ -518,8 +518,13 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   `packaging/libmpv/check-package.sh`, on the NVIDIA machine as
   `~/vela-nv-test/vela-1.0.68-1-settings-x86_64.pkg.tar.zst` (sha256
   `455a9f3d…b142`). The owner installed it there: "verified on the other
-  linux box" (2026-11-17). Not yet run on these commits: the Windows suite (no
-  release builds while the audit gate fails; CI's own jobs ran).
+  linux box" (2026-11-17). WINDOWS, 2026-11-17, at `84497a8` (release run
+  44166626358, every job passed, after the owner's decision to audit what
+  ships): the Windows suite passed both players in full (run 44166655927,
+  parity PASS), and the owner, on the NVIDIA machine booted into Windows,
+  with the plan's Windows checks: "works, but there's no working second
+  screen to test". NOT TESTED on Windows: the remembered second screen and
+  moving a playing window between screens (no second screen there).
 
 - FOUND 2026-11-17, NOT FIXED: Vela's Linux AppImage always runs under
   X11. Tauri's bundler puts linuxdeploy's GTK plugin hook in it
