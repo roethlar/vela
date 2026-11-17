@@ -450,9 +450,7 @@ fn base_args(
     // User-supplied advanced options remain last among defaults, so repeated
     // mpv options retain their documented last-option-wins behavior.
     // Vela's own screen is only a default, unlike a remembered placement.
-    if spec.screen_source == ScreenSource::Fallback {
-        args.extend(screen_name_arg(spec.screen_name.as_deref(), &spec.screens));
-    }
+    args.extend(fallback_screen_args(spec, player, cfg!(target_os = "linux")));
     args.extend(user_args(cfg));
 
     (args, env)
@@ -624,6 +622,24 @@ fn screen_name_arg(name: Option<&str>, screens: &PlaybackScreens) -> Option<Laun
 /// `default` and `current`. Only Linux's backends also need the fullscreen
 /// screen's name; macOS and Windows go fullscreen on the restored window's
 /// screen once no number overrides it.
+/// Vela's own screen, when nothing remembered is usable: a default placed
+/// before the user's options, which override it (pl-18). Only mpv's own
+/// window has a screen to place. Linux's backends pick a fullscreen output
+/// on their own (`initial_fullscreen_screen_name`), so a fullscreen start
+/// names Vela's screen for that too (pl-21).
+fn fallback_screen_args(spec: &PlaySpec, player: PlayerKind, linux: bool) -> Vec<LaunchArg> {
+    if player != PlayerKind::External || spec.screen_source != ScreenSource::Fallback {
+        return Vec::new();
+    }
+    let mut args: Vec<LaunchArg> = screen_name_arg(spec.screen_name.as_deref(), &spec.screens)
+        .into_iter()
+        .collect();
+    if let Some(name) = initial_fullscreen_screen_name(spec, player, linux) {
+        args.push(LaunchArg::set("fs-screen-name", name));
+    }
+    args
+}
+
 fn restored_screen_args(spec: &PlaySpec, player: PlayerKind, linux: bool) -> Vec<LaunchArg> {
     if player != PlayerKind::External || spec.screen_source != ScreenSource::Remembered {
         return Vec::new();
@@ -1420,6 +1436,11 @@ mod tests {
                         let mut expected = Vec::new();
                         if source == ScreenSource::Fallback {
                             expected.push(option.to_string());
+                            // pl-21: Linux names Vela's screen for a
+                            // fullscreen start too, still before the user's.
+                            if fullscreen && linux {
+                                expected.push(format!("--fs-screen-name={name}"));
+                            }
                         }
                         expected.extend(user.lines().map(str::to_string));
                         if source == ScreenSource::Remembered {
@@ -1437,7 +1458,8 @@ mod tests {
                         // Exercise each platform's rules on every host, and
                         // the complete launch on its native named backend
                         // and on Windows' explicitly enumerated backend.
-                        let (mut args, _) = base_args(&spec, &cfg, PlayerKind::External);
+                        let mut args = fallback_screen_args(&spec, PlayerKind::External, linux);
+                        args.extend(user_args(&cfg));
                         args.extend(restored_screen_args(&spec, PlayerKind::External, linux));
                         let mut groups = vec![("screen groups", cli(args))];
                         if linux == cfg!(target_os = "linux")
@@ -1463,6 +1485,23 @@ mod tests {
             }
         }
         assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    #[test]
+    fn an_embedded_play_gets_no_fallback_screen() {
+        for linux in [false, true] {
+            let spec = PlaySpec {
+                screen_name: Some("DP-2".into()),
+                screen_source: ScreenSource::Fallback,
+                inherited_window_state: PlaybackWindowState {
+                    fullscreen: Some(true),
+                    ..Default::default()
+                },
+                ..plain_spec(PlayerKind::Embedded, "https://media.invalid/video.mkv")
+            };
+            assert!(fallback_screen_args(&spec, PlayerKind::Embedded, linux).is_empty());
+            assert!(!fallback_screen_args(&spec, PlayerKind::External, linux).is_empty());
+        }
     }
 
     #[test]

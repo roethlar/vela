@@ -123,9 +123,14 @@ test('Advanced arguments are still applied inside base_args', () => {
   );
   assert.ok(body.lastIndexOf('LaunchArg::set(') < taken[1], 'no external default follows them');
   assert.ok(body.lastIndexOf('LaunchArg::flag(') < taken[1]);
-  const fallback = body.indexOf('if spec.screen_source == ScreenSource::Fallback');
+  const fallback = body.indexOf('args.extend(fallback_screen_args(spec, player, cfg!(target_os = "linux")));');
   assert.ok(fallback > taken[0] && fallback < taken[1], 'the external fallback belongs before Advanced options');
-  assert.match(body.slice(fallback, taken[1]), /args\.extend\(screen_name_arg\(spec\.screen_name\.as_deref\(\), &spec\.screens\)\);/);
+  const fallbackBody = functionBody(launch, 'fn fallback_screen_args(', 'launch::fallback_screen_args');
+  assert.match(fallbackBody, /if player != PlayerKind::External \|\| spec\.screen_source != ScreenSource::Fallback \{\s+return Vec::new\(\);/,
+    'only mpv\'s own window gets a fallback screen');
+  assert.match(fallbackBody, /screen_name_arg\(spec\.screen_name\.as_deref\(\), &spec\.screens\)/);
+  // pl-21: Linux's backends pick a fullscreen output on their own.
+  assert.match(fallbackBody, /initial_fullscreen_screen_name\(spec, player, linux\)[\s\S]{0,120}LaunchArg::set\("fs-screen-name", name\)/);
 });
 
 test("the embedded player's required options follow everything the user controls", () => {
