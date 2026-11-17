@@ -290,13 +290,17 @@ state are in `.agents/plans/embedded-player.md`.
    `"player": "embedded"` in `~/.config/vela/config.json`; choosing mpv's own
    window removes the field.
 
-The setting is read when Vela starts, because it decides how the window is
-created: with `"player": "embedded"` the window is transparent, so that video
-on a surface underneath it can show through, and WebKitGTK's GPU renderer
-is left on, which every other start turns off. Change the setting and
-restart. Before starting that way Vela leaves a marker file in its config
-directory and the page removes it once it has loaded; if a start does not
-get that far, the next one starts the ordinary way.
+Every start creates the window ready for the embedded player, whichever
+player is chosen: the window is transparent, so that video on a surface
+underneath it can show through, and WebKitGTK's GPU renderer is on. So
+switching players never needs a restart. A start is made the ordinary way
+(opaque, renderer off) only when something rules this out: a start-up
+marker left behind, a session that is not Wayland, or
+`WEBKIT_DISABLE_DMABUF_RENDERER` set in Vela's environment, which is how to
+keep the renderer off for as long as a system needs it (the player choice
+does not). Before each start in that mode Vela leaves a marker file in its
+config directory and the page removes it once it has loaded; if a start
+does not get that far, the next one starts the ordinary way and says why.
 
 Whenever the embedded player cannot be used, the play goes to the external
 player and says why in one line on its display. That includes a play the
