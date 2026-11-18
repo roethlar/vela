@@ -682,6 +682,14 @@ Owner, verbatim (2026-11-18): "ipad A16 base model, iPad Pro M5, apple TV
   date that is iPadOS 27.x and tvOS 27.x. This is the agent's reading of
   Apple's yearly September release; the exact point release was not
   read from a device.
-- Still unknown: the LG models, and the audio chain behind the TVs
-  (speakers, eARC to a receiver, or a soundbar). These are asked when the
-  slice needing them comes.
+- Audio behind the Apple TVs, owner verbatim (2026-11-18): "apple tvs
+  are connected to soundbars, homepod speakers, or tv speakers. soundbar
+  is atmos capable". So three routes:
+  - an Atmos-capable soundbar;
+  - HomePods, which are wireless, so the engine's synchronizer must
+    account for the route's output latency;
+  - the TV's own speakers.
+- Still unknown: the LG models, and how the soundbar connects (through
+  the TV's eARC, ARC, or to the Apple TV directly). That decides whether
+  multichannel PCM and Dolby MAT reach it. It is asked before T7 of
+  `tvos-port.md`.

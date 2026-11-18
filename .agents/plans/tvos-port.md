@@ -75,8 +75,15 @@ absence.
     native, V-4's rule applies.
   - They run tvOS 27.x, updated at each release, so tvOS 27 is the
     floor, as iPadOS 27 is in `ipados-port.md` (B-2).
-  - Still unknown, asked before T7: the LG models and the audio chain
-    (TV speakers, eARC to a receiver, or a soundbar).
+  - The audio routes (owner, 2026-11-18): an Atmos-capable soundbar,
+    HomePods, or the TV's speakers. T7 covers each one.
+    - On HomePods, which are wireless, picture and sound stay in sync
+      only if the synchronizer accounts for the route's output latency.
+    - On the soundbar, multichannel PCM and Dolby MAT arrive only over
+      eARC, so lossless and Atmos claims are limited to what that link
+      shows (B4).
+  - Still unknown, asked before T7: the LG models, and whether the
+    soundbar is on eARC, ARC, or the Apple TV directly.
 - **V2. The differences that need approval**, one at a time, before
   slice T8. See the list below.
 - **V3. The distribution channel** is ruled once, as O2 of
