@@ -234,8 +234,11 @@ the page:
   resolver, and the credentials stay in Rust. A test renders a Plex
   poster from a cold cache against the mock Plex.
 - **The other direction, core to engine.** A play can start in the core,
-  not only from a button: a playlist advance, Continue Playing, or an
-  Automatic quality step-down. So the host callback given to
+  not only from a button: a playlist advance, or an Automatic quality
+  step-down. Continue Playing stays the screen's choice, as on the
+  desktop: the core sends `continue-playing`, and the tvOS Home picks the
+  next title from the carousel the user saw and calls `play_item` with
+  the finished session (`App.svelte`). So the host callback given to
   `vela_core_start` also receives:
   - `play`: a session id and a `PlayRequest`;
   - `command`: a session id and a `PlayerCommand`. Stopping is
