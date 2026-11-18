@@ -369,6 +369,8 @@ never replace an unreadable document with defaults, explicit recovery):
   copy in Caches. If that was purged, the screen says the playlists are
   unavailable offline, never an empty library. Each edit shows whether it
   is saved on this TV or accepted by iCloud.
+- **Quota.** A CloudKit quota or limit error is shown to the user, and
+  the edit stays pending, not lost.
 
 ### V-4. The engine on tvOS (additions to `apple/VelaEngine`)
 
