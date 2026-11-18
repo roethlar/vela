@@ -2,7 +2,11 @@
 
 ## Status
 
-**DRAFT 2026-11-18. Not approved; no code is authorized.** Review:
+**DRAFT 2026-11-18. Not approved; no code is authorized.** Test specifics
+written here before the code exists are not binding: tests are designed
+with the code, in the slice that writes it (`.agents/decisions.md`
+2026-11-18, "No tests are designed for code that has not been
+written"). Review:
 pending (`codereview codex gpt-6.2-astra xhigh`, owner's request of
 2026-11-18).
 

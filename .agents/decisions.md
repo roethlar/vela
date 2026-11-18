@@ -2684,3 +2684,25 @@ Supersedes:
 The libmpv half of 2026-11-12 "Embedded playback through libmpv is the
 direction" for Apple mobile devices ("iOS/iPadOS is a stated porting
 goal" of an in-process libmpv player). The desktop half stands.
+
+## 2026-11-18 - No tests are designed for code that has not been written; plan reviews skip them
+
+Status: OWNER RULING (2026-11-18), standing.
+
+Decision:
+During the codex review of the three Apple-port plans, whose findings had
+turned largely to test designs for code not yet written, the owner,
+verbatim: "don't spend tokens on developing tests for code that hasn't
+been written. don't review tests that shouldn't be conceived of yet."
+
+How to apply:
+- A plan names what must be true and how the slice proves it in a line,
+  not a test design. Tests are designed with the code they test, in the
+  slice that writes it, and then the repo's guard discipline applies to
+  them in full.
+- Test specifics already written into a plan before its code exists are
+  not binding.
+- A plan review is not asked about tests for unwritten code. A finding
+  of that kind is declined with this ruling as its reason.
+- Probes are experiments on the platform, not tests of Vela's code. They
+  stay in plans, as briefly as they can be stated.
