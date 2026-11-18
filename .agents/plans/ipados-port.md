@@ -342,8 +342,9 @@ Inside:
   - the desktop's recorded Jellyfin and Emby boundary
     (`.agents/decisions.md` 2026-07-23) is unchanged.
 - **Video:** compressed HEVC, H.264, AV1 (where the device has a
-  hardware decoder) and VP9 go to Apple's pipeline by the renderer P2
-  chose (A2). Codecs Apple does not decode, such as MPEG-2, VC-1, H.264
+  hardware decoder) and VP9 go to Apple's pipeline as compressed sample
+  buffers (A2). Only a Dolby Vision profile and device named in a
+  reviewed amendment may take another path. Codecs Apple does not decode, such as MPEG-2, VC-1, H.264
   10-bit, and AV1 on devices without a hardware decoder:
   FFmpeg decodes them on the device, in software, into `CVPixelBuffer`s
   (dav1d for AV1). They are shown by the sample-buffer display layer on
@@ -817,8 +818,8 @@ records what landed.
   `check-other-platforms.sh`.
 - **A4, the Tauri iOS target (B-2, first half).** The app runs in the
   simulator with the page and no playback; the icons; the CI job.
-- **A5, engine core (A-2).** Input, video on P2's path, audio, events and
-  commands, with XCTests on generated media.
+- **A5, engine core (A-2).** Input, video through sample buffers, audio,
+  events and commands, with XCTests on generated media.
 - **A6, the plugin and `PlayerKind::Apple` (B-2, second half).** Rows 1–7
   and 12 in the simulator venue (B-5's harness work comes first).
 - **A7, HDR and Dolby Vision (rows 15–16).** By eye on the owner's iPad,
