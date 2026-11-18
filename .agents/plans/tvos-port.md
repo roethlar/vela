@@ -270,8 +270,12 @@ never replace an unreadable document with defaults, explicit recovery):
   a user name and password through tvOS's keyboard, or a token, as
   `connect_jellyfin` and `connect_jellyfin_token` do today.
 - **Durable-state faults and recovery:** the same choices the page
-  offers (`get_durable_state_status`, `recover_invalid_file`,
-  `rollback_invalid_file`).
+  offers: the status (`get_durable_state_status`), "Try again"
+  (`retry_durable_state`, which resumes an interrupted recovery and
+  reloads the registry), fresh recovery (`recover_invalid_file`) and the
+  dated versions (`rollback_invalid_file`). T4 proves "Try again" on a
+  store that was unavailable and comes back: the app reopens with its
+  healthy data untouched.
 
 ### V-6. Keeping two kinds of screens in step
 
