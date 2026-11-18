@@ -111,6 +111,9 @@ therefore built here; `ios-port.md` adds what is specific to the phone.
   no `sudo`. An Apple Development certificate for the owner's team is in
   the keychain, so development signing needs only the devices registered
   and paired.
+- **O5. AVS2 (a decision, pending).** AVS2, a Chinese broadcast codec,
+  has only a GPL decoder, which Vela's licensing rule keeps out, so it
+  cannot play locally. Asked of the owner on 2026-11-18.
 - **O4. The differences below: APPROVED 2026-11-18**, for iPad, iPhone
   and Apple TV.
 
@@ -494,10 +497,13 @@ This follows the libmpv set's recipe (`packaging/libmpv/versions.txt`;
     expected `CONFIG_*` features afterwards, as the macOS script does.
     Every decoder, demuxer and parser FFmpeg's LGPL configuration
     provides is enabled, and so is every external decoder library FFmpeg
-    can use whose licence the licensing rule of 2026-11-12 permits: dav1d
-    (AV1) and uavs3d (AVS3), both BSD and both pinned like the rest. A
-    codec whose only decoder that rule excludes is listed in the Log,
-    and is not claimed. swresample and swscale are built too. Any codec Apple's
+    can use whose licence the licensing rule of 2026-11-12 permits. The
+    list is made from the pinned FFmpeg release codec by codec, and each
+    library is pinned like the rest. Known today: dav1d (AV1), uavs3d
+    (AVS3, built with `COMPILE_10BIT=1` so 10-bit plays) and XEVD (MPEG-5
+    EVC). A codec whose only decoder that rule excludes, AVS2 today (its
+    decoder, davs2, is GPL), is the owner's question O5. swresample and
+    swscale are built too. Any codec Apple's
     hardware does not take is then decoded in software, and the engine
     falls back to software whenever VideoToolbox refuses a stream.
     FFmpeg's HTTP and HTTPS protocols are compiled in, because its HLS
