@@ -109,9 +109,12 @@ detail pages, top-tab Settings, the player's single sheet):
     the engine's layer follows it. Today `PlayerView.svelte` reports the
     whole player view (`player_set_rect`), which on the desktop is also
     the picture, so `embeddedcontrols`' full-page check still holds there.
-  - A scenario checks the native layer's frame against that element in
+  - A scenario first checks the layout itself: in portrait, the picture
+    element is the width of the viewport and in its top third, with the
+    controls below it; in landscape, it fills the viewport. Only then
+    does it compare the native layer's frame with that element, in
     portrait and again after rotating, while the same session keeps
-    playing.
+    playing and its position advances.
 - **Navigation:** the iPadOS plan's drawer, unless I2's check on the
   owner's phone shows it is hard to reach with one hand. Then the same
   destinations move to a bottom bar at phone sizes. That is a layout
