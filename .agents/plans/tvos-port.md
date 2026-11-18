@@ -389,6 +389,9 @@ never replace an unreadable document with defaults, explicit recovery):
   sortable position key, so no record grows with the playlist.
   - Order is the position key, then the entry id, for display, playback
     and later moves alike, so two TVs that chose the same key still agree.
+    Keys are fractional, so one can always be made between two others.
+    A move between two entries that share a key first rekeys that tied
+    run, in one change-checked save.
   - Adds and removals merge by id.
   - A move names the entries it goes between, not an index, from the
     screen onward: the tvOS screen calls a reorder command that takes the
@@ -397,10 +400,11 @@ never replace an unreadable document with defaults, explicit recovery):
     ids. If they are gone, it is
     reported to the user.
   - A conflicting rename takes the server's revision and is reported.
-  - Each entry names its playlist. Deleting a playlist wins over edits
-    that arrive later: those are dropped. Its entries are deleted in
-    retryable batches, without CloudKit's cascading references, which are
-    limited to 750 per record.
+  - Each entry has its playlist as its CloudKit `parent` (action none).
+    Deleting a playlist deletes that record first, so a late entry save
+    for it fails and is dropped. Its remaining entries are deleted in
+    retryable batches, without cascading references, which are limited to
+    750 per record.
 - **Offline.** Pending edits wait in `UserDefaults`, within a fixed share
   that leaves settings and recovery their space. When the share is full,
   further offline edits are refused visibly until the queue drains. That
