@@ -423,11 +423,14 @@ Inside:
          next comes to the foreground or launches, from the checkpoint.
        - Transcode teardown and progress are tracked apart. A teardown
          stays pending until the server confirms it, and is retried.
-         Progress from an old play is written only if the server has
-         nothing newer for that item, so it never moves a resume point
-         backwards after the owner watched elsewhere.
-    3. Coming back after that, the player view shows the play paused at
-       the saved position, and playing again starts a fresh session
+         A finalization finished late retries only that cleanup. Its
+         position is never sent to the server later, because the
+         servers' progress writes cannot be made conditional on nothing
+         newer having happened. The position stays in Vela's recents.
+    3. Coming back after that, the resume point is settled first: the
+       newer of Vela's saved position and the server's current progress
+       and watched state for the item. The player view shows the play
+       paused there, and playing again starts a fresh session
        there.
 
     Proof: whether the app comes back, is suspended or is ended, the
