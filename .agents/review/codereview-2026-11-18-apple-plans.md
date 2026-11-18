@@ -210,4 +210,4 @@ test designs (recovery interruption, coverage guards, argument
 round-trips), so they are declined under the same ruling.
 
 Open: the `[~]` rows above have no verdict on their latest repair. The
-owner decides whether a further codex round runs (state.md, NEXT).
+owner declined a further codex round on 2026-11-18 (usage), so these rows close without one.

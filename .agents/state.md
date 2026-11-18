@@ -41,8 +41,18 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     for unwritten code), 9 declined and the rest repaired. 33 rows wait
     for a verdict.
 
-  NEXT, the owner's: whether a further codex round runs, scoped to
-  design and excluding tests. O1 is answered (devices in
+  The owner declined a further codex round (2026-11-18, usage at 86% of
+  the week), so the 33 rows stay repaired without a verdict. No go to
+  start has been given.
+
+  Pending with the owner:
+  - O4, the four features absent on Apple devices;
+  - V4, playlists on tvOS. The owner's idea: Vela playlists in CloudKit
+    when the Apple TV is signed into iCloud, and server playlists only
+    when it is not.
+  - the bundle identifier. The owner rejected the `com.michael` prefix;
+    songr-mobile's owner signing uses `com.roethlar.Songr`, so the agent
+    proposed `com.roethlar.Vela` for the Apple apps. O1 is answered (devices in
   `.agents/machines.md`, "Apple test devices"); no owner input is
   waiting. O2 is ruled (TestFlight and development signing now, the App
   Store later), and O3 needs nothing, since Xcode 27.2 is installed. O4
