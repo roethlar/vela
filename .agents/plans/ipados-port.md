@@ -157,7 +157,13 @@ hardware keyboard.
   - **The loopback is only a fallback for Dolby Vision.** In it, FFmpeg
     repackages the stream as HLS with fragmented MP4 and serves it from
     inside the app to AVPlayer. P2 tries it only if Dolby Vision does not
-    reach the TV and the iPad through sample buffers.
+    reach the TV and the iPad through sample buffers. Its master playlist
+    is written by the engine with the attributes Apple requires:
+    `CODECS`, `SUPPLEMENTAL-CODECS` with the Dolby Vision compatibility
+    brand, and `VIDEO-RANGE`. FFmpeg's playlist writer omits these, and
+    without them a working route would look unsupported. Its segment
+    producer has byte and retention limits of its own, and stops
+    producing when it reaches them.
   - **If Dolby Vision works only through the loopback, the plan stops.**
     The common pairing of Dolby Vision with TrueHD or DTS-HD MA (UHD
     Blu-ray remuxes) would then need lossless audio beside AVPlayer on one
