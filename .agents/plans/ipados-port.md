@@ -402,8 +402,8 @@ Inside:
   - Leaving the foreground follows one contract:
     1. The play pauses, and a background task starts. If the app comes
        back before finalization has begun, the same session continues.
-       Once finalization has begun, a return always starts a fresh
-       session at the saved position.
+       Once finalization has begun, a return never resumes that
+       session; step 3 applies.
     2. UIKit may grant no background time, and sends no termination
        callback to a suspended app. So, while a play runs, its position
        and any server transcode still to be torn down are kept in a
