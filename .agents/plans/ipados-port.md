@@ -253,6 +253,18 @@ Inside:
   FFmpeg's HLS demuxer reads the master and child playlists and their
   MPEG-TS or fragmented-MP4 segments, with the request's headers on
   every child request.
+- **Credential-free stream requests.** Today a Jellyfin transcode URL
+  carries `api_key` in its query (`source/jellyfin.rs`,
+  `transcode_url`), and the play command passes that URL on beside the
+  auth header (`commands.rs`). For the Apple engine:
+  - the core builds the transcode request without `api_key`, and the
+    token travels in the header on the master, child-playlist and
+    segment requests;
+  - a test against the mock Jellyfin checks that no request the engine
+    makes carries a token in its URL, and that no child playlist the
+    server writes does either;
+  - the desktop's recorded Jellyfin and Emby boundary
+    (`.agents/decisions.md` 2026-07-23) is unchanged.
 - **Video:** compressed HEVC, H.264, AV1 (where the device has a
   hardware decoder) and VP9 go to Apple's pipeline as compressed sample
   buffers (A2). Codecs Apple does not decode are decoded by FFmpeg in
