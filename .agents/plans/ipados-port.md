@@ -328,7 +328,11 @@ Inside:
     which uses its CoreText font provider, into a layer above the video.
     libass consumes ASS events only, so FFmpeg's subtitle decoders
     (`subrip`, `webvtt`, `mov_text`, `ass`) decode each format into ASS
-    dialogue events. The engine hands them to libass with their start
+    dialogue events. Each libass track is first set up with the
+    decoder's subtitle header (for a Matroska ASS track, its script
+    resolution and named styles, from `CodecPrivate`), and the file's font
+    attachments are loaded, so positioned and styled signs render as
+    authored. The engine then hands the events to libass with their start
     and end times on the synchronizer's clock. A test shows a visible cue
     and then its removal for each listed format.
   - Bitmap formats (PGS, VobSub, DVB) come from FFmpeg's decoders and are
