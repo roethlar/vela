@@ -349,6 +349,11 @@ never replace an unreadable document with defaults, explicit recovery):
 - **Authority.** While the Apple TV is signed into iCloud, the CloudKit
   private database is the only durable home of Vela's playlists on tvOS.
   Signed out, only server playlists show.
+- **Portable identities.** Each entry's backings, and its artwork issuer,
+  are stored as the server's own identifier plus the provider's item id,
+  never as Vela's per-install connection UUID. Each Apple TV resolves
+  them to its own connection to that server, so a playlist made on one
+  TV plays on another.
 
 ### V-4. The engine on tvOS (additions to `apple/VelaEngine`)
 
