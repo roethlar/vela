@@ -189,9 +189,14 @@ the page:
   one today. Tests: a play the core starts (a playlist advance, a
   step-down) reaches the engine, and a stale session's command is
   refused.
-- **Swift `Codable` types for the DTOs.** A contract test serializes
-  every DTO's Rust fixtures to JSON, and the Swift tests decode them, so
-  a field changed on one side fails the other.
+- **Swift `Codable` types for the DTOs**, with contract tests in both
+  directions:
+  - every DTO's Rust fixtures, with every optional field populated, are
+    decoded in Swift, and each value is checked, not just the decode;
+  - Swift-encoded arguments for every command go through the real
+    dispatcher, covering optional fields, tagged results and errors.
+
+  A field renamed on one side then fails instead of decoding as nil.
 - **Why one JSON contract rather than a generated typed binding
   (UniFFI):** the page already speaks exactly this contract. Keeping it
   means a feature added to the core is available to both kinds of
