@@ -383,6 +383,10 @@ never replace an unreadable document with defaults, explicit recovery):
     ids. If they are gone, it is
     reported to the user.
   - A conflicting rename takes the server's revision and is reported.
+  - Each entry names its playlist. Deleting a playlist wins over edits
+    that arrive later: those are dropped. Its entries are deleted in
+    retryable batches, without CloudKit's cascading references, which are
+    limited to 750 per record.
 - **Offline.** Pending edits wait in `UserDefaults`, within a fixed share
   that leaves settings and recovery their space. When the share is full,
   further offline edits are refused visibly until the queue drains; that
