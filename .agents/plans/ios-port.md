@@ -89,8 +89,13 @@ detail pages, top-tab Settings, the player's single sheet):
   simulator's safe areas.
 - **Small heights:** in landscape below about 500 pt of height, the
   header collapses to one row, and the Continue Watching cover-flow
-  sizes by height. Dialogs and Settings scroll inside the visible
-  viewport (`dvh`).
+  sizes by height.
+  - Dialogs, Settings and forms are sized and scrolled by the visual
+    viewport (`window.visualViewport`, its height and offset), not by
+    `dvh`. WKWebView can shrink or pan the visual viewport for the
+    keyboard while `dvh` layout keeps its height.
+  - I2 checks that the focused field and the form's action button are
+    both reachable with the software keyboard up, in both orientations.
 - **The player in portrait:** the picture is letterboxed at the top
   third, with the controls below it, reachable with one hand. Turning to
   landscape fills the screen. Rotation does not interrupt the play.
