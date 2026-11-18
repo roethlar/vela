@@ -145,45 +145,29 @@ hardware keyboard.
   Apple TV, and plays Dolby Vision on an HDR iPad. It does this for
   profiles 5 and 8.1 from MKV, and for profile 7 converted to 8.1 live
   with libdovi, through the engine's renderer.
-  - **Which renderer is P2's decision** (owner, 2026-11-18: "add the
-    player decision to the list of things the apple tv probe will
-    decide"). The two are compared on equal terms, on the Apple TV and
-    on the iPad Pro.
-  - **Loopback:** FFmpeg remuxes the stream into HLS with fragmented MP4,
-    and the engine serves it from inside the app to AVPlayer. AVPlayer
-    then does buffering, seeking, sync, display matching and Now Playing
-    itself, so there is less engine code.
-    - Its master playlist is written by the engine with the attributes
-      Apple requires: `CODECS`, `SUPPLEMENTAL-CODECS` with the Dolby
-      Vision compatibility brand, and `VIDEO-RANGE`. FFmpeg's writer
-      omits these.
-    - Its segment producer has byte and retention limits of its own, and
-      stops producing when it reaches them.
-    - It cannot show video Vela decodes itself, and Apple's HLS audio
-      codecs exclude multichannel LPCM.
-  - **Sample buffers:** FFmpeg demuxes into compressed `CMSampleBuffer`s
-    whose format description carries the Dolby Vision configuration
-    (`dvcC`/`dvvC`). They go to `AVSampleBufferDisplayLayer` and
+  - **The renderer is Apple's sample-buffer path, for everything.**
+    FFmpeg demuxes into compressed `CMSampleBuffer`s whose format
+    description carries the Dolby Vision configuration (`dvcC`/`dvvC`).
+    They go to `AVSampleBufferDisplayLayer` and
     `AVSampleBufferAudioRenderer`, with one
-    `AVSampleBufferRenderSynchronizer` as the clock for both. It shows
-    software-decoded video and plays multichannel LPCM, at the cost of
-    more engine code.
-  - **The rule** (owner, 2026-11-18: every codec plays locally, and no
-    server transcode unless the user chooses one; `.agents/decisions.md`):
-    - The sample-buffer renderer is needed in every outcome, since only
-      it shows video Vela decodes itself. Infuse is built the same way,
-      by the libraries it links.
-    - P2 decides one thing: whether Dolby Vision also goes through the
-      sample-buffer renderer, which gives one renderer for everything,
-      or whether a loopback must be added beside it for Dolby Vision
-      alone.
-    - The loopback is added only if Dolby Vision cannot engage through
-      sample buffers. Then lossless multichannel audio must also reach
-      AVPlayer, as ALAC or FLAC in fragmented MP4, or the design goes to
-      the owner.
-    - The comparison and the choice are recorded in the Log.
-  - **P2 plays mixed combinations through both:** Dolby Vision with
-    TrueHD, software-decoded video with E-AC-3, and HDR10 with DTS-HD MA.
+    `AVSampleBufferRenderSynchronizer` as the clock for both. Only this
+    path shows video Vela decodes itself and plays multichannel LPCM, so
+    every codec plays locally (owner, 2026-11-18: no server transcode
+    unless the user chooses one). Infuse is built the same way, by the
+    libraries it links.
+  - **P2 decides one thing** (owner, 2026-11-18: "add the player decision
+    to the list of things the apple tv probe will decide"): whether Dolby
+    Vision engages through the sample-buffer path, for each profile, on
+    the Apple TV and the iPad Pro. P2 plays mixed combinations: Dolby
+    Vision with TrueHD, software-decoded video with E-AC-3, and HDR10
+    with DTS-HD MA.
+  - **If a Dolby Vision profile does not engage that way**, P2 tries a
+    throwaway remux of it to AVPlayer, to see whether that path engages
+    it. A production remux path would then be designed for those
+    profiles and devices only, in an amendment reviewed before any code.
+    Its known requirements are in the review findings ipd-38, ipd-39 and
+    ipd-43 to ipd-46 (`.agents/review/codereview-2026-11-18-apple-plans.md`).
+    It would not be designed before P2 shows it is needed.
 - **A3 (P2).** The TV's Dolby Vision mode is triggered by
   `AVDisplayManager.preferredDisplayCriteria`, built with
   `AVDisplayCriteria(refreshRate:formatDescription:)` (tvOS 17), from a
