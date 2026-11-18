@@ -2741,3 +2741,22 @@ How to apply (agent's reading, not the owner's words):
     goes to the Mac App Store.
   - The 27 floor suits the owner's devices. A public release may want an
     older floor, which is a later decision.
+
+## 2026-11-18 - Plans are for agents; the owner gets an executive summary and open questions
+
+Status: OWNER RULING (2026-11-18), standing.
+
+Decision:
+Asked to approve the three Apple-port plans, the owner, verbatim: "plans
+are not for human consumption. they are for agents only. I only care
+about the exec summary and open questions."
+
+How to apply:
+- A plan is written for implementing agents. The owner is never asked to
+  read one.
+- What goes to the owner about a plan is a short executive summary (what
+  it delivers, in what order, its main risks) and its open questions,
+  each in plain words with a recommendation. Approval is asked on that
+  summary.
+- The "Owner Gates" rule of one decision at a time still governs how the
+  questions are put.
