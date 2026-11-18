@@ -354,6 +354,9 @@ never replace an unreadable document with defaults, explicit recovery):
   never as Vela's per-install connection UUID. Each Apple TV resolves
   them to its own connection to that server, so a playlist made on one
   TV plays on another.
+- **Account binding.** The cached copy and the pending edits carry the
+  CloudKit account they came from. When the account changes, they are
+  hidden and their uploads suspended until the same account returns.
 
 ### V-4. The engine on tvOS (additions to `apple/VelaEngine`)
 
