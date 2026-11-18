@@ -92,8 +92,9 @@ detail pages, top-tab Settings, the player's single sheet):
   than both the drawer's threshold (about 700 pt) and the player's compact
   form (about 900 px). So the drawer and the compact player also switch
   on compact height, not only on width. A test at 932 x 430 checks that
-  the drawer and the compact player controls are what shows, and that
-  every control is reachable. Below about 500 pt of height, the header
+  the navigation I2 settled on (the drawer, or the bottom bar if the
+  reach check chose it) and the compact player controls are what shows,
+  and that every destination and control is reachable. Below about 500 pt of height, the header
   also collapses to one row, and the Continue Watching cover-flow
   sizes by height.
   - Dialogs, Settings and forms are sized and scrolled by the visual
