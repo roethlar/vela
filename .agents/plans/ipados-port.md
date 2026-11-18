@@ -503,10 +503,10 @@ list is completed by P3, and the slice lands what P3 finds:
   configuration. CI makes it on every build; it is never committed or
   edited (repo-guidance: `src-tauri/gen/` is generated).
   - Device family: iPad only in this plan.
-  - Minimum iPadOS: set by what P2 proves for each route, on the oldest
-    release it claims. Apple's 2026 HLS update lists Dolby Vision 8.1 in
-    HLS on iPadOS as new that year, so if the loopback route carries
-    Dolby Vision, the floor is that release.
+  - Minimum iPadOS: the oldest release on which every profile-and-route
+    combination the app needs is proven by P2. For example, Apple's 2026
+    HLS update lists Dolby Vision 8.1 in HLS on iPadOS as new that year,
+    which matters only if 8.1 actually goes through the loopback.
   - Icons: `tauri icon` from a 1024 x 1024 source. The repo's largest
     is `src-tauri/icons/icon.png` at 512 x 512, so slice A4 finds or
     makes the source artwork.
