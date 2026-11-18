@@ -263,7 +263,7 @@ Verdicts on round 2's repairs:
   - tvp-33, `5cd14bc`;
   - tvp-35 and tvp-39, `1fdc860`;
   - tvp-36, `8795422`;
-  - tvp-37, `d81091a` and `fc0f1f1`.
+  - tvp-37, `d81091a` and `16e2bab`.
 
 New findings, numbered in the iPadOS report's order (the iPhone and tvOS
 reports raised the same engine defects; their duplicates are not numbered
