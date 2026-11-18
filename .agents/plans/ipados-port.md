@@ -309,7 +309,10 @@ Inside:
   - Each playlist's references are resolved against the URL it was
     finally served from, after redirects, and cleaned, before FFmpeg
     sees them.
-  - An HLS byte range is carried through the read.
+  - A read returns exactly the bytes asked for: a `206` whose
+    `Content-Range` matches, or, when the server sends the whole
+    resource, the interval cut from it as it streams. Anything else is a
+    read error.
   - FFmpeg's HLS demuxer runs with its HTTP persistence off, since it
     expects its own HTTP context when that is on.
 
