@@ -107,12 +107,19 @@ are rebuilt in SwiftUI, not dropped:
   engine puts each of the owner's LG OLEDs into Dolby Vision mode, with
   display criteria built from a format description whose codec subtype
   is `dvh1` or `dvhe` (A3 of the iPadOS plan).
-- **B4 (T0).** On tvOS 26 and later, `AVAudioContentSource.passthrough`
-  (AVFAudio) sends TrueHD and DTS-HD MA to a receiver as a bitstream. It
-  is documented, but whether it does this is not confirmed anywhere
-  (2026-11-18). If it does, it is the engine's path for those formats on
-  tvOS, so lossless audio keeps Atmos and DTS:X. If not, they are decoded
-  to multichannel LPCM, as on the iPad.
+- **B4 (T0).** TrueHD, DTS and DTS-HD MA are decoded to multichannel
+  LPCM on tvOS, as on the iPad. That is the baseline: lossless audio
+  reaches the receiver intact, without Atmos or DTS:X objects.
+  - A bitstream path is used only if tvOS has a real output-routing API
+    for it. `AVAudioContentSource.passthrough` was reported as one, but
+    Apple's Apple Positional Audio Codec specification ("Setting the
+    Content Source type") describes it as a content classification given
+    to an encoder, so it is not taken as that API.
+  - A bitstream path is adopted only with receiver evidence that names
+    the codec: the receiver shows TrueHD or DTS-HD MA, not PCM or Dolby
+    MAT. The receiver's Atmos light alone is not evidence, because Apple
+    notes that a continuous Dolby MAT connection can make older
+    receivers show Atmos for other content.
 
 ## Design
 
@@ -303,8 +310,8 @@ never replace an unreadable document with defaults, explicit recovery):
     switch to the content.
 - **Profile 8.1 on generations that take only profile 5:** converted to
   5 by the engine, if P2 or T0 shows it is needed (V1).
-- **Audio:** B4 decides between bitstreaming TrueHD and DTS-HD MA and
-  decoding them to LPCM. E-AC-3 with Atmos passes to Apple, which sends
+- **Audio:** TrueHD, DTS and DTS-HD MA are decoded to LPCM, unless B4
+  finds a real bitstream path. E-AC-3 with Atmos passes to Apple, which sends
   Dolby MAT.
 - **The Siri Remote:** play/pause, scrubbing on the clickpad, and
   ±5 s and ±60 s jumps, as the desktop's arrows do (`playerControls.ts`;
@@ -386,7 +393,8 @@ Each slice is one or more commits with tests and red-proofs, a
     owner's Apple TV, with TLS to the mock Plex (B1).
   - Keychain and `UserDefaults` persistence across a restart, a reboot
     and a storage-pressure purge, if one can be caused (B2).
-  - The passthrough API on the owner's receiver (B4).
+  - Whether tvOS has a bitstream output path at all, with receiver
+    evidence that names the codec (B4).
   - The focus engine and remote events in a minimal SwiftUI player.
 - **T1, the core split (V-1).** In steps, each with every suite green.
 - **T2, the Swift interface and its contract tests (V-2).**
@@ -441,4 +449,6 @@ Each slice is one or more commits with tests and red-proofs, a
   - display criteria: KSPlayer issue 633 and Anemone PR 21;
   - the Rust targets: rust-lang/rust PR 152021 and the 1.95.0 release
     notes;
-  - passthrough: Apple's AVFAudio documentation, as reported, unconfirmed.
+  - passthrough: Apple's AVFAudio documentation, as reported. Per review
+    finding tvp-13, Apple's Apple Positional Audio Codec specification
+    describes it as an encoder's content type.
