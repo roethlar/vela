@@ -294,9 +294,10 @@ never replace an unreadable document with defaults, explicit recovery):
     (every server copy of a merged entry). The desktop keeps these so an
     unavailable entry stays identifiable and playback can pick another
     copy (`playlists.rs`). Only artwork and metadata that can be fetched
-    again live in Caches. Recents, whose snapshots sit in
-    `config.json`, are handled the same way if T0's measurement shows
-    they need it.
+    again live in Caches. Recents keep Vela's own position, session and
+    recency fields durably (`recents.rs`), because a server may hold an
+    older position or none. Only their fetchable metadata may move to
+    Caches.
   - T0 measures the owner's real desktop documents and the cost of one
     reference. T3 shows the documents and their history fit with room to
     grow far beyond the owner's use.
