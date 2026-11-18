@@ -2822,3 +2822,21 @@ answered: "yes".
 How to apply:
 - The bound applies only to edits made while offline.
 - Online, Vela's playlists have no size limit (CloudKit).
+
+## 2026-11-18 - AVS2 is not supported in Vela's own players
+
+Status: OWNER RULING (2026-11-18). O5 of `.agents/plans/ipados-port.md`.
+An approved exception to "Apple devices play every codec locally".
+
+Decision:
+AVS2's only decoder FFmpeg can use, davs2, is GPL, and the licensing rule
+of 2026-11-12 keeps GPL out of the libraries Vela ships. Asked to accept
+AVS2 as unsupported rather than write a decoder of its own, the owner
+answered: "yeah".
+
+How to apply:
+- AVS2 does not play in the Apple engine, and is not in the desktop's
+  embedded libmpv set either. The external mpv the user installs is
+  unaffected.
+- Any other codec whose only decoder the licensing rule excludes goes to
+  the owner the same way. It is never dropped silently.

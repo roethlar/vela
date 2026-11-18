@@ -354,4 +354,5 @@ tvOS:
   - tvp-50, playlist base URL on the bridge: `23d1c71`.
 - The others duplicate the iPadOS findings.
 
-Open: these repairs have no verdict; O5 waits for the owner.
+Open: these repairs have no verdict. O5 was approved by the owner
+(AVS2 unsupported), which settles ipd-54.
