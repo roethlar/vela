@@ -353,19 +353,23 @@ Inside:
     1. The play pauses, and a background task starts. If the app comes
        back before the task's time runs out, the same session continues;
        nothing was finalized.
-    2. When the task's time is about to run out, or iPadOS signals
-       termination, the session is finalized as a quit. The final
-       position is reported (Plex timeline `stopped`, Jellyfin and Emby
-       `Stopped`), any server transcode is torn down as the desktop does
-       (`playback.rs`), and the play is remembered as resumable.
+    2. UIKit may grant no background time, and sends no termination
+       callback to a suspended app. So, while a play runs, its position
+       and any server transcode still to be torn down are saved in the
+       durable stores as they change.
+       - Finalization starts as soon as the task's remaining time falls
+         below what finalizing needs, not at expiry. It reports the final
+         position (Plex timeline `stopped`, Jellyfin and Emby `Stopped`),
+         tears down any server transcode as the desktop does
+         (`playback.rs`), and keeps the play resumable.
+       - A finalization that did not complete is finished at the next
+         launch, from what was saved.
     3. Coming back after that, the player view shows the play paused at
        the saved position, and playing again starts a fresh session
        there.
 
-    Tests against the mock servers, judged by the reports they receive:
-    a return within the task's time; a return after finalization; and
-    termination while in the background, where the mock sees the
-    transcode torn down.
+    Proof: whether the app comes back, is suspended or is ended, the
+    servers see one final report and the transcode torn down.
 
 Tests: XCTest in the simulator (A7), with test media generated as in
 A-3. They include an AAC direct play (the harness's standard clip,
