@@ -354,10 +354,13 @@ never replace an unreadable document with defaults, explicit recovery):
   private database is the only durable home of Vela's playlists on tvOS.
   Signed out, only server playlists show.
 - **Portable identities.** Each entry's backings, and its artwork issuer,
-  are stored as the server's own identifier plus the provider's item id,
-  never as Vela's per-install connection UUID. Each Apple TV resolves
-  them to its own connection to that server, so a playlist made on one
-  TV plays on another.
+  are stored as the provider, the server's own identifier, the account
+  on that server (the Plex account, or the Jellyfin or Emby user id) and
+  the provider's item id. They are never stored as Vela's per-install
+  connection UUID. Each Apple TV resolves them only to its own
+  connection for that same server and account, so a playlist made on one
+  TV plays on another without playing or marking watched as another
+  user.
 - **Account binding.** The cached copy and the pending edits carry the
   CloudKit account they came from. When the account changes, they are
   hidden and their uploads suspended until the same account returns.
