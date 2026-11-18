@@ -125,8 +125,12 @@ are rebuilt in SwiftUI, not dropped:
   display criteria built from a format description whose codec subtype
   is `dvh1` or `dvhe` (A3 of the iPadOS plan).
 - **B4 (T0).** TrueHD, DTS and DTS-HD MA are decoded to multichannel
-  LPCM on tvOS, as on the iPad. That is the baseline: lossless audio
-  reaches the receiver intact, without Atmos or DTS:X objects.
+  LPCM on tvOS, as on the iPad. That is the baseline: decoded losslessly,
+  without Atmos or DTS:X objects. Whether the receiver gets that as
+  multichannel PCM depends on the Apple TV's audio output setting, which
+  can re-encode to Dolby Digital 5.1. The owner's checklist names the
+  setting, and lossless delivery is claimed only for a route seen to
+  carry it.
   - A bitstream path is used only if tvOS has a real output-routing API
     for it. `AVAudioContentSource.passthrough` was reported as one, but
     Apple's Apple Positional Audio Codec specification ("Setting the
