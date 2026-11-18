@@ -680,15 +680,20 @@ records what landed.
 - **A5, engine core (A-2).** Input, video on P2's path, audio, events and
   commands, with XCTests on generated media.
 - **A6, the plugin and `PlayerKind::Apple` (B-2, second half).** Rows 1–7
-  and 11–12 in the simulator venue.
+  and 12 in the simulator venue (B-5's harness work comes first).
 - **A7, HDR and Dolby Vision (rows 15–16).** By eye on the owner's iPad,
   with the integrated engine in Vela's app. Apple TV is proven by
   `tvos-port.md` (T6, T7) with the integrated engine there. P2's
   throwaway build only chooses the architecture and counts for neither.
 - **A8, audio, subtitles and multi-part items (rows 17–19).** Also
   TLS-verify (row 20).
-- **A9, markers, cropping and Automatic quality (rows 8–10).** Also the
-  page on iPad (B-3), after O4's rulings.
+- **A9, markers, cropping and Automatic quality (rows 8–11).** Row 11,
+  the notice of an unrequested relaunch, is proved here with a real
+  step-down. The mock server degrades the stream under control (the
+  harness records today that its mocks cannot force the condition,
+  `tests/e2e/parity.mjs`, so this control is built here), and the test
+  checks the resumed position and that the notice shows exactly once.
+  Also the page on iPad (B-3), after O4's rulings.
 - **A10, lifecycle, signing and distribution (B-4, O2).** Then the docs
   (README platform list, `docs/`), the release notes and the owner's
   checklist.
