@@ -396,6 +396,12 @@ Each slice is one or more commits with tests and red-proofs, a
     owner's Apple TV, with TLS to the mock Plex (B1). The real crate
     carries Tauri's runtime and build dependencies, which do not build for
     tvOS, so it cannot be the probe.
+    The mock Plex (`tests/e2e/mockplex.mjs`) binds `127.0.0.1`,
+    advertises that address, and its certificate names it. On an Apple
+    TV that address is the TV itself. For this probe the mock binds the
+    Mac's LAN address and advertises it, with a certificate for that name
+    from a test CA installed on the Apple TV. The probe checks that the
+    box accepts that certificate and refuses one from an untrusted CA.
   - Keychain and `UserDefaults` persistence across a restart, a reboot
     and a storage-pressure purge, if one can be caused (B2).
   - Whether tvOS has a bitstream output path at all, with receiver
