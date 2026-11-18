@@ -73,6 +73,8 @@ absence.
     spec page listed profile 5 for it, while Infuse's forum reports that
     Apple later made profile 8 native. P2 settles it, and if it is not
     native, V-4's rule applies.
+  - They run tvOS 27.x, updated at each release, so tvOS 27 is the
+    floor, as iPadOS 27 is in `ipados-port.md` (B-2).
   - Still unknown, asked before T7: the LG models and the audio chain
     (TV speakers, eARC to a receiver, or a soundbar).
 - **V2. The differences that need approval**, one at a time, before

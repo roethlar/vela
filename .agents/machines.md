@@ -676,6 +676,12 @@ Owner, verbatim (2026-11-18): "ipad A16 base model, iPad Pro M5, apple TV
   unconfirmed: Apple's spec page for it listed profile 5, while Infuse's
   forum reports Apple later made profile 8 native. Probe P2 settles it,
   and if it is not native, tvp-11's rule applies (`tvos-port.md`, V-4).
-- Still unknown: the iPadOS and tvOS versions, the LG models, and the
-  audio chain behind the TVs (speakers, eARC to a receiver, or a
-  soundbar). These are asked when the slice needing them comes.
+- Operating systems: all on the latest release, updated as each one
+  ships. Owner, verbatim (2026-11-18): "all devices are are the latest
+  version, so 27.x? I update them whenever a new version drops." On that
+  date that is iPadOS 27.x and tvOS 27.x. This is the agent's reading of
+  Apple's yearly September release; the exact point release was not
+  read from a device.
+- Still unknown: the LG models, and the audio chain behind the TVs
+  (speakers, eARC to a receiver, or a soundbar). These are asked when the
+  slice needing them comes.

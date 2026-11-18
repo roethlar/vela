@@ -46,8 +46,7 @@ iPhone, and the page is usable:
 
 - Features the desktop does not have: picture in picture, AirPlay of
   video, offline downloads, a cellular-data setting, and CarPlay.
-- iPhones whose iOS is below the iPadOS plan's minimum, which P2 sets
-  there.
+- iPhones below iOS 27, the minimum set in the iPadOS plan (B-2).
 - Apple TV (`tvos-port.md`).
 
 ## Owner inputs needed (one at a time)

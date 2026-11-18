@@ -86,8 +86,9 @@ therefore built here; `ios-port.md` adds what is specific to the phone.
     by its measured EDR headroom (B-1).
   - Probe P2 runs on the iPad Pro and on one of the Apple TVs. They are
     all one generation.
-  - The OS versions and the TVs' audio chain are still unknown, and are
-    asked when the slice needing them comes.
+  - All run the latest release, 27.x (owner, 2026-11-18). The TVs'
+    audio chain is still unknown, and is asked when the slice needing it
+    comes.
 - **O2. Distribution channel (a decision).** How builds reach the owner's
   devices. Recommendation: TestFlight, internal testing. Builds install
   over the air on every device the owner signs into, Apple TVs included.
@@ -511,10 +512,11 @@ list is completed by P3, and the slice lands what P3 finds:
   configuration. CI makes it on every build; it is never committed or
   edited (repo-guidance: `src-tauri/gen/` is generated).
   - Device family: iPad only in this plan.
-  - Minimum iPadOS: the oldest release on which every profile-and-route
-    combination the app needs is proven by P2. For example, Apple's 2026
-    HLS update lists Dolby Vision 8.1 in HLS on iPadOS as new that year,
-    which matters only if 8.1 actually goes through the loopback.
+  - Minimum iPadOS: 27. The owner's devices run the latest release and
+    are updated as each one ships (owner, 2026-11-18), and the owner is
+    Vela's only user. So P2 and every check run on the 27.x the devices
+    have, and no older release is supported or tested. When a new major
+    ships, the floor moves with the devices.
   - Icons: `tauri icon` from a 1024 x 1024 source. The repo's largest
     is `src-tauri/icons/icon.png` at 512 x 512, so slice A4 finds or
     makes the source artwork.
