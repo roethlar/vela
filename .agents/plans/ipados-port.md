@@ -419,10 +419,14 @@ list is completed by P3, and the slice lands what P3 finds:
   (`renamex_np`) and Windows, and returns `Unsupported` everywhere else.
   It backs `install_json_new` and `write_private_new`, which
   `preserve_valid_history` (`durable.rs`) uses on every save over an
-  existing `config.json` or `connections.json`. The macOS branch becomes
-  `target_vendor = "apple"`, since libc declares `renamex_np` for every
-  Apple target. The fix is red-proved by a test that saves twice on that
-  branch.
+  existing `config.json` or `connections.json`. Both predicates change together:
+  the macOS branch becomes `target_vendor = "apple"`, since libc declares
+  `renamex_np` for every Apple target, and the fallback branch below it
+  (`not(any(linux, macos, windows))`) excludes Apple targets. Widening
+  only the first would leave the fallback also compiled for iOS, so the
+  rename could succeed and then report `Unsupported` before syncing the
+  parent directory. Red-proof: tests on the iOS target save twice, and
+  try a rename onto an existing file, which must be refused.
 - **Branches iOS takes by mistake.** iOS is `unix` but not `macos`, so
   every `all(unix, not(target_os = "macos"))` branch is a Linux branch
   that compiles there. Each is given its correct iOS meaning or compiled
