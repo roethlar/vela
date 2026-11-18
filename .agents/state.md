@@ -9,6 +9,23 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Now
 
+- HANDOFF, 2026-11-17 ~18:20 EST. Branch `main`, head `d645615` (pushed to
+  origin and github). Task in progress: the Linux AppImage starts on Wayland
+  (`.agents/plans/appimage-wayland.md`, its Log). Stage: fix landed
+  (`de91332`, `25b4e8d`); release run 44195133042's AppImage passes the
+  package check and plays in Vela's window on this AMD machine. NEXT:
+  (1) read the codex hunt `ai1` (scratchpad `review-final`, slice `ai1`,
+  range `03a4d98..25b4e8d`; record it in a new
+  `.agents/review/codereview-2026-11-17-appimage.md`, repair findings one
+  per commit); (2) the owner's NVIDIA test of that AppImage when the
+  machine (10.1.10.77) is back on Linux; (3) then correct RELEASE_NOTES'
+  AppImage lines. Live blockers: none of the agent's; the AppImage's NVIDIA
+  proof waits on the owner's machine. Settled today and verified on all
+  three platforms by the owner: N1 (NVIDIA offered), W1 (weston), the
+  Settings restructure and its repairs, audit-what-ships
+  (`.agents/decisions.md`, 2026-11-17 entries). Still owner's: the slow-runner
+  plan (`.agents/plans/e2e-slow-runner.md`, draft), tagging.
+
 - PLATFORM PARITY, OWNER RULING 2026-11-16 (`.agents/decisions.md`, last
   entry; read it first). Vela works the same on Linux, macOS and Windows;
   a feature missing on one platform is a defect, and "by design" is never
