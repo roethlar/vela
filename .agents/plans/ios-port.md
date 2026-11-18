@@ -179,10 +179,15 @@ each pushed to `origin` and `github` as it lands
   that applies to the Apple engine.
   - The list of applicable scenarios is kept with the iPadOS plan's Apple
     run set (`tests/e2e/parity.mjs`).
-  - Each excluded scenario names its reason: mpv's own behaviour
-    (`mpvargs`, the mpv lifecycle and window-state scenarios), or, for a
-    feature difference, the owner's ruling. The
-  desktop suites run too, to show the desktop is unchanged.
+  - Each excluded scenario names its reason: mpv's own mechanism (the
+    mpv lifecycle and window-state scenarios), or, for a feature
+    difference, the owner's ruling.
+  - Excluding a scenario never settles a parity row. Each row a scenario
+    proves on the desktop gets its own phone disposition: an Apple test
+    for the portable behaviour, or an iPhone-scoped ruling for a feature
+    left out. `mpvargs` proves row 13a (the user's mpv options), which
+    stays open until difference 2 is ruled for the iPhone.
+  - The desktop suites run too, to show the desktop is unchanged.
 - **I3, icons and release packaging.** The iPhone icon sizes. The
   release workflow's iOS job, if O2 made one, ships the universal app.
 - **I4, the engine's memory and thermal response.** XCTests check the
