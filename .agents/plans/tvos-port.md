@@ -65,16 +65,16 @@ absence.
 
 ## Owner inputs needed (one at a time, in this order)
 
-- **V1. Each Apple TV's generation (a fact).** Shown in Settings,
-  General, About, Model: A1842 is the first generation (2017), A2169 the
-  second (2021), A2737 or A2843 the third (2022), or a later model.
-  - Apple's current specifications list Dolby Vision profiles 5 and 8.1;
-    older pages listed only 5. So the generation decides whether 8.1
-    plays natively on that box (V-4).
-  - Also the LG models, and the audio chain: TV speakers, eARC to a
-    receiver, or a soundbar.
-  - The ruling of O1 in `ipados-port.md` may already have answered
-    this; ask only what is still unknown.
+- **V1. Each Apple TV's generation: ANSWERED 2026-11-18.** All are the
+  third generation (2022, A15 Bionic), as recorded in `.agents/machines.md`,
+  "Apple test devices".
+  - It has no AV1 decoder, so profile 10 does not apply on these boxes.
+  - Whether it plays Dolby Vision 8.1 natively is unconfirmed: Apple's
+    spec page listed profile 5 for it, while Infuse's forum reports that
+    Apple later made profile 8 native. P2 settles it, and if it is not
+    native, V-4's rule applies.
+  - Still unknown, asked before T7: the LG models and the audio chain
+    (TV speakers, eARC to a receiver, or a soundbar).
 - **V2. The differences that need approval**, one at a time, before
   slice T8. See the list below.
 - **V3. The distribution channel** is ruled once, as O2 of

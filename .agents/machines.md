@@ -652,3 +652,30 @@ Recorded 2026-07-14. Owner-approved access (2026-07-14) to the boxes below.
   `scripts/e2e-live.sh` (with legacy pre-split `config.json` fallback), written
   0600 to the VM's `/tmp`, and deleted on exit. Gitignored. Never printed,
   never logged, never committed.
+
+## Apple test devices (owner's, for the Apple ports)
+
+Owner, verbatim (2026-11-18): "ipad A16 base model, iPad Pro M5, apple TV
+4ks are not the one released in 2026, they are the generation before."
+
+- **iPad (A16), base model.** Liquid Retina LCD, not an HDR or XDR
+  screen, and the A16 has no AV1 hardware decoder (Apple's first is the
+  A17 Pro; agent's knowledge, not checked on the device). It covers
+  tone-mapped playback of HDR and Dolby Vision, the software AV1 path
+  (dav1d), and the page at a smaller iPad size. Its measured EDR headroom
+  decides whether it takes part in any HDR check
+  (`.agents/plans/ipados-port.md`, O1).
+- **iPad Pro (M5).** Tandem OLED Ultra Retina XDR, the reference screen
+  for HDR and Dolby Vision on iPad. The M-series media engine decodes AV1
+  (true of the M4, assumed for the M5), so Dolby Vision profile 10 is
+  checked here.
+- **Apple TV 4K, third generation (2022, A15 Bionic; model A2737 or
+  A2843), several, each connected to an LG OLED with HDR and Dolby
+  Vision.** There is no AV1 hardware decoder, so profile 10 does not
+  apply to them. Native Dolby Vision 8.1 on this generation is
+  unconfirmed: Apple's spec page for it listed profile 5, while Infuse's
+  forum reports Apple later made profile 8 native. Probe P2 settles it,
+  and if it is not native, tvp-11's rule applies (`tvos-port.md`, V-4).
+- Still unknown: the iPadOS and tvOS versions, the LG models, and the
+  audio chain behind the TVs (speakers, eARC to a receiver, or a
+  soundbar). These are asked when the slice needing them comes.
