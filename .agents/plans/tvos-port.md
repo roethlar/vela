@@ -373,7 +373,11 @@ never replace an unreadable document with defaults, explicit recovery):
   bound is part of the owner's design (V4), not a limit on playlists. The list shown offline is the cached
   copy in Caches. If that was purged, the screen says the playlists are
   unavailable offline, never an empty library. Each edit shows whether it
-  is saved on this TV or accepted by iCloud.
+  is saved on this TV or accepted by iCloud. "Saved on this TV" is shown
+  only after the queue's write has returned from disk: the queue is kept
+  with the durable stores' atomic save and `fsync`, not in
+  `UserDefaults`, whose writes reach disk later. It stays inside the same
+  share of persistent space.
 - **Quota.** A CloudKit quota or limit error is shown to the user, and
   the edit stays pending, not lost.
 - **Setup.** The iCloud container entitlement is in the tracked XcodeGen
