@@ -387,8 +387,10 @@ never replace an unreadable document with defaults, explicit recovery):
 - **Quota.** A request over CloudKit's per-request limit is split and
   sent again. An exhausted iCloud quota is shown to the user, and the
   edit stays pending, not lost.
-- **Setup.** The iCloud container entitlement is in the tracked XcodeGen
-  spec and the provisioning, and the production schema is deployed
+- **Setup.** Both iCloud entitlements are in the tracked XcodeGen spec
+  and the provisioning: the container identifier, and
+  `com.apple.developer.icloud-services` with `CloudKit`. Together with
+  that, and the production schema is deployed
   before the first TestFlight build that uses it.
 
 ### V-4. The engine on tvOS (additions to `apple/VelaEngine`)
