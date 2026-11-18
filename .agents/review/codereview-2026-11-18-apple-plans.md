@@ -314,8 +314,8 @@ tvOS:
 - Closed: tvp-33, tvp-36, tvp-37, tvp-39, tvp-42.
 - Reopened:
   - tvp-35 and tvp-41, repaired again at `2fcbc06` and `2b656f1`;
-  - tvp-4, which now needs the owner's ruling on a full offline queue
-    (V5 in `tvos-port.md`), so it waits for that.
+  - tvp-4, which needed the owner's ruling on a full offline queue
+    (V5 in `tvos-port.md`). The owner approved the bound on 2026-11-18.
 - New, each repaired:
   - tvp-43, identities captured at linking: `d425cd2`;
   - tvp-44, total order: `a848d11`;

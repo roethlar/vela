@@ -41,8 +41,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     for unwritten code), 9 declined and the rest repaired. 33 rows wait
     for a verdict.
 
-  Rounds 3 and 4 ran and every finding is repaired but tvp-4, which waits
-  on the owner's V5 (a full offline playlist queue on tvOS). Earlier note:
+  Rounds 3 and 4 ran and every finding is repaired; V5 (a full offline
+  playlist queue on tvOS) was approved by the owner on 2026-11-18. Earlier note:
   a design-only codex round over the updated plans (owner,
   2026-11-18: "review with codex is fine once you have the updated
   plans"). It gives the 33 repaired rows their verdicts. No go to start

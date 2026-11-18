@@ -106,12 +106,11 @@ absence.
   Vela's playlists being absent without iCloud is a difference approved
   by the owner's own design.
 
-- **V5. A full offline queue (a decision, pending).** An Apple TV that
+- **V5. A full offline queue: APPROVED 2026-11-18** (owner: "yes"). An Apple TV that
   stays offline keeps its playlist edits in the persistent store until
   iCloud is back. If enough of them pile up to fill their share of that
   store (hundreds of edits), new playlist edits are refused, visibly,
-  until it reconnects. Asked of the owner on 2026-11-18; the agent
-  recommends approving that bound.
+  until it reconnects. The owner approved that bound.
 
 ## Differences the owner approved (2026-11-18)
 
@@ -403,7 +402,7 @@ never replace an unreadable document with defaults, explicit recovery):
 - **Offline.** Pending edits wait in `UserDefaults`, within a fixed share
   that leaves settings and recovery their space. When the share is full,
   further offline edits are refused visibly until the queue drains. That
-  refusal is the owner's question V5, not yet ruled. The list shown offline is the cached
+  refusal is approved by the owner (V5). The list shown offline is the cached
   copy in Caches. If that was purged, the screen says the playlists are
   unavailable offline, never an empty library. Each edit shows whether it
   is saved on this TV or accepted by iCloud. The queue is one journal in

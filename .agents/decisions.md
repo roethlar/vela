@@ -2808,3 +2808,17 @@ How to apply:
   `AVSampleBufferRenderSynchronizer`. It demuxes and decodes on the
   device and presents through those renderers. AVPlayer is linked too,
   for purposes not known.
+
+## 2026-11-18 - tvOS may refuse playlist edits while offline once their queue is full
+
+Status: OWNER RULING (2026-11-18). V5 of `.agents/plans/tvos-port.md`.
+
+Decision:
+Asked whether an Apple TV that stays offline may refuse new playlist
+edits, visibly and until it reconnects, once its pending edits fill their
+share of tvOS's small persistent store (hundreds of edits), the owner
+answered: "yes".
+
+How to apply:
+- The bound applies only to edits made while offline.
+- Online, Vela's playlists have no size limit (CloudKit).
