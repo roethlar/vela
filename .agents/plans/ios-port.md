@@ -102,8 +102,11 @@ detail pages, top-tab Settings, the player's single sheet):
     viewport (`window.visualViewport`, its height and offset), not by
     `dvh`. WKWebView can shrink or pan the visual viewport for the
     keyboard while `dvh` layout keeps its height.
-  - I2 checks that the focused field and the form's action button are
-    both reachable with the software keyboard up, in both orientations.
+  - I2 checks, with the software keyboard up and in both orientations,
+    that the focused field and the form's action button are both
+    reachable. Search has no button: it is submitted with Enter
+    (`App.svelte`), so its check uses the keyboard's Search or Return key
+    and verifies the results appear.
 - **The player in portrait:** the picture is letterboxed at the top
   third, with the controls below it, reachable with one hand. Turning to
   landscape fills the screen. Rotation does not interrupt the play.
