@@ -289,9 +289,12 @@ never replace an unreadable document with defaults, explicit recovery):
 - **Space.** Besides the Keychain, `UserDefaults` is the only persistent
   store on tvOS (Apple: 500 KB; a warning at 512 kB and termination at
   1 MB). tvOS must not get a limit the desktop does not have. So:
-  - Playlists persist item references (source and item id), not full
-    snapshots. The snapshots are cached in Caches and fetched again from
-    the servers after a purge. Recents, whose snapshots sit in
+  - Playlists persist each entry's credential-free identity, its display
+    context (title, episode label, source name) and its backing set
+    (every server copy of a merged entry). The desktop keeps these so an
+    unavailable entry stays identifiable and playback can pick another
+    copy (`playlists.rs`). Only artwork and metadata that can be fetched
+    again live in Caches. Recents, whose snapshots sit in
     `config.json`, are handled the same way if T0's measurement shows
     they need it.
   - T0 measures the owner's real desktop documents and the cost of one
