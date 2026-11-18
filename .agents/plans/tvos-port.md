@@ -373,6 +373,8 @@ never replace an unreadable document with defaults, explicit recovery):
 - **Records and merging.** One small record per playlist (its name) and
   one per entry, each with a stable id. Each entry record carries its own
   sortable position key, so no record grows with the playlist.
+  - Order is the position key, then the entry id, for display, playback
+    and later moves alike, so two TVs that chose the same key still agree.
   - Adds and removals merge by id.
   - A move names the entries it goes between, not an index, from the
     screen onward: the tvOS screen calls a reorder command that takes the
