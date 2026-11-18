@@ -301,7 +301,10 @@ Inside:
     display and content light level.
   - For Dolby Vision it carries the configuration record and the RPU of
     each frame. Profile 7 (MEL or FEL) becomes 8.1 live through
-    libdovi's conversion mode 2.
+    libdovi's conversion mode 2. Profile 10 is AV1, whose Dolby Vision
+    metadata travels in metadata OBUs, so the engine carries those and an
+    AV1 Dolby Vision format description (HLS names it `dav1`). Which
+    subtype Apple's pipeline needs is found in P2.
   - Native 8.1 is used wherever the device takes it. P2 checks that per
     device and per Apple TV generation.
   - Converting 8.1 to 5 for a device that takes only 5 needs the picture
@@ -696,8 +699,9 @@ records what landed.
     Apple TVs with its LG. It covers profiles 5, 8.1 (CMv2.9 and CMv4.0)
     and 7 (MEL and FEL, converted), HDR10, HLG and SDR; E-AC-3 Atmos,
     TrueHD and DTS-HD MA; seeking, track switching and memory. Profile
-    8.4 comes from an iPhone recording, and every route P2 tries is run
-    on the oldest OS it would claim.
+    8.4 comes from an iPhone recording, profile 10 plays on hardware that
+    decodes AV1, and every route P2 tries is run on the oldest OS it
+    would claim.
     - Each Apple TV run starts in SDR, with Match Content's Dynamic
       Range on, so a box already in Dolby Vision mode cannot pass for a
       switch. SDR and HDR10 clips are played as controls.
