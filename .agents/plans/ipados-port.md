@@ -498,7 +498,9 @@ of any new layout logic.
   other two.
 - **By eye, on devices:** HDR and Dolby Vision cannot be judged in the
   simulator, so the owner checks them on the iPad, in the order the
-  plan's "For the owner" section will give when A10 lands.
+  plan's "For the owner" section will give when A10 lands. The Dolby
+  Vision rows use P2's reference clip and its stripped-metadata control,
+  played through the integrated engine.
 
 ## Parity list for the Apple engine
 
@@ -545,6 +547,14 @@ records what landed.
     Apple TVs with its LG. It covers profiles 5, 8.1 (CMv2.9 and CMv4.0)
     and 7 (MEL and FEL, converted), HDR10, HLG and SDR; E-AC-3 Atmos,
     TrueHD and DTS-HD MA; seeking, track switching and memory.
+    - Each Apple TV run starts in SDR, with Match Content's Dynamic
+      Range on, so a box already in Dolby Vision mode cannot pass for a
+      switch. SDR and HDR10 clips are played as controls.
+    - Metadata, not just the mode, is checked with a reference clip: one
+      base layer with two RPUs chosen to look visibly different, plus
+      the same base layer with its RPU stripped (dovi_tool, test-only).
+      The owner confirms each looks as its metadata says, on the TV and
+      on the iPad.
   - P3: the Rust crate built and run in the iOS Simulator, with TLS to
     the mock Plex, `File::lock` and the config location.
   - P4: Appium driving the page in the simulator.
@@ -564,8 +574,10 @@ records what landed.
   commands, with XCTests on generated media.
 - **A6, the plugin and `PlayerKind::Apple` (B-2, second half).** Rows 1–7
   and 11–12 in the simulator venue.
-- **A7, HDR and Dolby Vision (rows 15–16).** By eye on the owner's iPad;
-  P2's results are reused for Apple TV.
+- **A7, HDR and Dolby Vision (rows 15–16).** By eye on the owner's iPad,
+  with the integrated engine in Vela's app. Apple TV is proven by
+  `tvos-port.md` (T6, T7) with the integrated engine there. P2's
+  throwaway build only chooses the architecture and counts for neither.
 - **A8, audio, subtitles and multi-part items (rows 17–19).** Also
   TLS-verify (row 20).
 - **A9, markers, cropping and Automatic quality (rows 8–10).** Also the
