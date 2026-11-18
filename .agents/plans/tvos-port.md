@@ -357,6 +357,12 @@ never replace an unreadable document with defaults, explicit recovery):
 - **Account binding.** The cached copy and the pending edits carry the
   CloudKit account they came from. When the account changes, they are
   hidden and their uploads suspended until the same account returns.
+- **Records and merging.** One record per playlist (name, order) and one
+  per entry, each with a stable id, so records stay within CloudKit's
+  limits and two TVs' edits merge by id. Adds and removals merge. A
+  rename or reorder that conflicts takes the server's revision, and the
+  other TV's change is re-applied where it still fits, otherwise
+  reported to the user.
 
 ### V-4. The engine on tvOS (additions to `apple/VelaEngine`)
 
