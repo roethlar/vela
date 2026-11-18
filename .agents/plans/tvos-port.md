@@ -307,8 +307,9 @@ never replace an unreadable document with defaults, explicit recovery):
   decoding them to LPCM. E-AC-3 with Atmos passes to Apple, which sends
   Dolby MAT.
 - **The Siri Remote:** play/pause, scrubbing on the clickpad, and
-  ±10 s and ±60 s jumps (matching the desktop's arrows). The skip button
-  is a focusable control; the track lists, cropping and volume are in the
+  ±5 s and ±60 s jumps, as the desktop's arrows do (`playerControls.ts`;
+  `tests/player-controls.test.mjs`). A test checks the commands that
+  remote input sends. The skip button is a focusable control; the track lists, cropping and volume are in the
   player's menu. Now Playing information is kept up to date.
 
 ### V-5. The SwiftUI app (`apple/tvos/`)
