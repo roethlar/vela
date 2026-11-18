@@ -300,10 +300,12 @@ Inside:
   - the core builds the transcode request without `api_key`, and the
     token travels in the header on the master, child-playlist and
     segment requests;
-  - the engine refuses to request any playlist or segment URI whose
-    query carries a credential (`api_key`, `X-Plex-Token`,
-    `X-Emby-Token`), even when the server wrote it, so no token ever
-    leaves in a URL;
+  - a playlist or segment URI the server wrote with a credential in its
+    query (`api_key`, `X-Plex-Token`, `X-Emby-Token`) is cleaned: if it
+    is same-origin and the credential is the active connection's, the
+    parameter is removed, the rest of the query kept, and the request
+    sent with the header. Any other credential-bearing URI is refused.
+    No token ever leaves in a URL;
   - the desktop's recorded Jellyfin and Emby boundary
     (`.agents/decisions.md` 2026-07-23) is unchanged.
 - **Video:** compressed HEVC, H.264, AV1 (where the device has a
