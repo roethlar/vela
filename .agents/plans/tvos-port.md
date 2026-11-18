@@ -291,7 +291,12 @@ never replace an unreadable document with defaults, explicit recovery):
   are long-press menus here.
 - **Signing in:** Plex uses the existing PIN flow. `link_begin` already
   returns the code and a QR image of the `plex.tv/link` address, and
-  `link_poll` waits for the server. Jellyfin and Emby take an address and
+  `link_poll` waits for the account. When the account has several
+  reachable servers, `link_poll` answers `chooseServer` and holds the
+  credential in an expiring session; the source is saved only by
+  `link_select_server`. So the app shows a focusable server chooser for
+  that answer. T4 tests a two-server account (mock plex.tv) through
+  choosing and saving. Jellyfin and Emby take an address and
   a user name and password through tvOS's keyboard, or a token, as
   `connect_jellyfin` and `connect_jellyfin_token` do today.
 - **Durable-state faults and recovery:** the same choices the page
