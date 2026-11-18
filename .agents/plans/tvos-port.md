@@ -259,8 +259,9 @@ the page:
   desktop's three branches (`App.svelte`; `.agents/decisions.md`): `off`
   stops; `only-tv`, the default, plays the next episode in series order
   and stops after a movie or a final episode; `on` picks the next title
-  from the carousel the user saw. Each calls `play_item` with the
-  finished session. So the host callback given to
+  from the carousel the user saw. Only when a mode has picked a next
+  title does Home call `play_item`, with the finished session; otherwise
+  the run ends. So the host callback given to
   `vela_core_start` also receives:
   - `play`: a session id and a `PlayRequest`;
   - `command`: a session id and a `PlayerCommand`. Stopping is
