@@ -248,7 +248,11 @@ Inside:
 - **Input:** FFmpeg's `libavformat` reads every part through HTTP(S),
   with the request's headers and the TLS-verify setting. The auth header
   never appears in a URL, a log or a loopback address (parity row 7).
-  Multi-part items play as one timeline.
+  Multi-part items play as one timeline. Server transcodes arrive as HLS
+  (the quality tiers of `plex_library.rs` and `source/jellyfin.rs`), so
+  FFmpeg's HLS demuxer reads the master and child playlists and their
+  MPEG-TS or fragmented-MP4 segments, with the request's headers on
+  every child request.
 - **Video:** compressed HEVC, H.264, AV1 (where the device has a
   hardware decoder) and VP9 go to Apple's pipeline as compressed sample
   buffers (A2). Codecs Apple does not decode are decoded by FFmpeg in
@@ -273,7 +277,8 @@ Inside:
   - On tvOS the engine sets display criteria per play and clears them at
     the end (`tvos-port.md` owns that part).
 - **Audio:**
-  - AC-3 and E-AC-3 (Atmos included) pass to Apple.
+  - AC-3 and E-AC-3 (Atmos included) pass to Apple, and so do AAC, ALAC
+    and MP3, compressed, to the audio renderer.
   - TrueHD, DTS, DTS-HD MA, FLAC, Opus, Vorbis and PCM variants are
     decoded by FFmpeg into multichannel LPCM.
   - Track switching happens without restarting the play.
@@ -298,7 +303,9 @@ Inside:
     final report is sent inside a background task.
 
 Tests: XCTest in the simulator (A7), with test media generated as in
-A-3.
+A-3. They include an AAC direct play (the harness's standard clip,
+`tests/e2e/helpers.mjs` `makeClips`) and a real move to a server's HLS
+transcode when Automatic steps down, against the mock servers.
 
 ### A-3. The media libraries for Apple devices (`packaging/apple-media/`)
 
@@ -313,8 +320,9 @@ This follows the libmpv set's recipe (`packaging/libmpv/versions.txt`;
     --disable-autodetect`. The script asserts the licence string and the
     expected `CONFIG_*` features afterwards, as the macOS script does.
     The enabled set is only what A-2 names: those demuxers, parsers,
-    decoders, swresample and swscale, the mp4 and HLS muxers if the
-    loopback is chosen, and HTTP(S).
+    decoders, swresample and swscale, the HLS demuxer with MPEG-TS and
+    fragmented-MP4 segments, the mp4 and HLS muxers only if P2 needs the
+    loopback, and HTTP(S).
   - libass, with FreeType, HarfBuzz and FriBidi, and CoreText on.
   - dav1d.
   - libdovi: the C interface of the `dolby_vision` crate, built with
