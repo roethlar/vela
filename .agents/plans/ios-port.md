@@ -87,8 +87,13 @@ detail pages, top-tab Settings, the player's single sheet):
   `env(safe-area-inset-*)` in both orientations. An end-to-end check in
   the iPhone simulator venue reads each element's position against the
   simulator's safe areas.
-- **Small heights:** in landscape below about 500 pt of height, the
-  header collapses to one row, and the Continue Watching cover-flow
+- **Small heights:** a landscape phone (up to 932 x 430 pt) is wider
+  than both the drawer's threshold (about 700 pt) and the player's compact
+  form (about 900 px). So the drawer and the compact player also switch
+  on compact height, not only on width. A test at 932 x 430 checks that
+  the drawer and the compact player controls are what shows, and that
+  every control is reachable. Below about 500 pt of height, the header
+  also collapses to one row, and the Continue Watching cover-flow
   sizes by height.
   - Dialogs, Settings and forms are sized and scrolled by the visual
     viewport (`window.visualViewport`, its height and offset), not by
