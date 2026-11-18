@@ -367,6 +367,12 @@ never replace an unreadable document with defaults, explicit recovery):
   connection for that same server and account, so a playlist made on one
   TV plays on another without playing or marking watched as another
   user.
+  - Today's links keep only part of that: Plex keeps the server's
+    machine id but not the account id, and Jellyfin and Emby keep the
+    user id but not the server id. Linking now records both, and an
+    existing connection gets the missing one at its next authenticated
+    reconnect.
+  - An entry no connection matches shows as unavailable.
 - **Account binding.** The cached copy and the pending edits carry the
   CloudKit account they came from. When the account changes, they are
   hidden and their uploads suspended until the same account returns.
