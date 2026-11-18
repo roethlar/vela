@@ -46,8 +46,9 @@ does on the desktop:
 - the same Svelte page, servers, browsing, search, playlists, watched
   state, Continue Playing and settings;
 - videos play inside Vela's window through the Apple engine: HDR10 and
-  HLG on HDR iPads, and real Dolby Vision for profiles 5 and 8.x and for
-  profile 7 converted live;
+  HLG on HDR iPads, and real Dolby Vision for profiles 5, 8.1 and 8.4
+  (the HLG-compatible profile iPhones record), for profile 7 converted
+  live to 8.1, and for profile 10 (AV1) on devices with an AV1 decoder;
 - every row of the parity list below passes.
 
 The page renders correctly at every size an iPad window can take: full
@@ -398,7 +399,10 @@ list is completed by P3, and the slice lands what P3 finds:
   configuration. CI makes it on every build; it is never committed or
   edited (repo-guidance: `src-tauri/gen/` is generated).
   - Device family: iPad only in this plan.
-  - Minimum iPadOS: whatever P2's APIs need; iPadOS 18 is assumed.
+  - Minimum iPadOS: set by what P2 proves for each route, on the oldest
+    release it claims. Apple's 2026 HLS update lists Dolby Vision 8.1 in
+    HLS on iPadOS as new that year, so if the loopback route carries
+    Dolby Vision, the floor is that release.
   - Icons: `tauri icon` from a 1024 x 1024 source. The repo's largest
     is `src-tauri/icons/icon.png` at 512 x 512, so slice A4 finds or
     makes the source artwork.
@@ -526,7 +530,8 @@ are mpv's own. Row 13 is difference 2.
 New rows, for every Apple device:
 
 15. HDR10 and HLG tagged and shown in HDR.
-16. Dolby Vision profiles 5, 8.1 and 7 (converted) shown as Dolby Vision.
+16. Dolby Vision profiles 5, 8.1, 8.4, 7 (converted) and 10 (where the
+    device decodes AV1) shown as Dolby Vision, each on the minimum OS.
 17. Each audio format listed in A-2, decoded or passed as A-2 says.
 18. Text and bitmap subtitles, chosen and turned off.
 19. Multi-part items play as one timeline.
@@ -546,7 +551,9 @@ records what landed.
   - P2: the engine's paths on an HDR iPad and on each of the owner's
     Apple TVs with its LG. It covers profiles 5, 8.1 (CMv2.9 and CMv4.0)
     and 7 (MEL and FEL, converted), HDR10, HLG and SDR; E-AC-3 Atmos,
-    TrueHD and DTS-HD MA; seeking, track switching and memory.
+    TrueHD and DTS-HD MA; seeking, track switching and memory. Profile
+    8.4 comes from an iPhone recording, and every route P2 tries is run
+    on the oldest OS it would claim.
     - Each Apple TV run starts in SDR, with Match Content's Dynamic
       Range on, so a box already in Dolby Vision mode cannot pass for a
       switch. SDR and HDR10 clips are played as controls.
