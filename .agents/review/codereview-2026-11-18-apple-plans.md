@@ -288,3 +288,41 @@ again):
   `839e218`.
 
 Open: this round's repairs have no verdict yet.
+
+## Design round 4 (2026-11-18, `510a619..1f560b1`)
+
+Design only. Two codex sessions, iPadOS and tvOS; the iPhone plan
+changed only through the shared text. Runs 17:29Z to 18:03Z, exit 0.
+Reports, verbatim: `ipados-r4.md` and `tvos-r4.md`.
+
+iPadOS:
+- Closed: ipd-11, ipd-38, ipd-41 to ipd-47.
+- Reopened and repaired again:
+  - ipd-32, `4b09826`;
+  - ipd-36, `1df0c39` and `6d0eddd`;
+  - ipd-37, `3c34bc9`;
+  - ipd-39, `14891f0`;
+  - ipd-40, `602cce5`.
+- New, each repaired:
+  - ipd-48, redirects carrying provider tokens: `602cce5`;
+  - ipd-49, FFmpeg's protocol registry: `b6bf77e`;
+  - ipd-50, exact byte ranges: `fc63a6e`;
+  - ipd-51, the 15 s deadline on media reads: `602cce5`;
+  - ipd-52, direct-play session close: `4b09826`.
+
+tvOS:
+- Closed: tvp-33, tvp-36, tvp-37, tvp-39, tvp-42.
+- Reopened:
+  - tvp-35 and tvp-41, repaired again at `2fcbc06` and `2b656f1`;
+  - tvp-4, which now needs the owner's ruling on a full offline queue
+    (V5 in `tvos-port.md`), so it waits for that.
+- New, each repaired:
+  - tvp-43, identities captured at linking: `d425cd2`;
+  - tvp-44, total order: `a848d11`;
+  - tvp-45, deletion: `d5f7679`;
+  - tvp-46, the media read in the bridge: `c21a484`.
+- The engine defects this report raised duplicate the iPadOS ones and
+  share their repairs.
+
+Open: these repairs have no verdict yet. The owner decides whether a
+fifth round runs.
