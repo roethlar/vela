@@ -91,18 +91,20 @@ absence.
   builds now, the App Store later. The tvOS app shares the iOS app's
   bundle identifier and App Store Connect record, so one purchase can
   cover iPad, iPhone and Apple TV (`.agents/decisions.md`, that date).
-- **V4. Where playlists live on tvOS (a decision).** Apple TV keeps only
-  `UserDefaults` (and the Keychain) persistent, and terminates an app
-  whose defaults reach 1 MB. The two choices:
-  - **`UserDefaults`:** works with no account or network, but bounds
-    playlists. That limit needs the owner's approval, and a save that
-    would cross it is refused visibly, well before the 1 MB termination.
-  - **The CloudKit private database:** no such bound, but it needs the
-    owner's iCloud account signed in on each Apple TV. The plan must then
-    also say what happens to edits already made while the account or the
-    network is missing.
+- **V4. Where playlists live on tvOS: the owner's design, 2026-11-18.**
+  Owner, verbatim: "Server playlists only if the user isn't signed into
+  icloud. client also if they are? would that work?" It works, and it is
+  the plan:
+  - **Signed into iCloud:** Vela's own playlists live in the CloudKit
+    private database. They have no size limit, and every Apple TV on the
+    account shares them. Server playlists are there, as on the desktop.
+  - **Not signed in:** server playlists only. Vela's own playlists are
+    not shown and not lost; they return with the account.
+  - **Signed in but offline:** the last copy is shown. Edits made then
+    are kept in the small persistent store until they reach CloudKit.
 
-  T0 measures the owner's real documents to inform the choice.
+  Vela's playlists being absent without iCloud is a difference approved
+  by the owner's own design.
 
 ## Differences that need the owner's approval (none approved yet)
 

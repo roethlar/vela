@@ -210,4 +210,5 @@ test designs (recovery interruption, coverage guards, argument
 round-trips), so they are declined under the same ruling.
 
 Open: the `[~]` rows above have no verdict on their latest repair. The
-owner declined a further codex round on 2026-11-18 (usage), so these rows close without one.
+next codex round, design-only, over the updated plans, gives them their
+verdicts (owner, 2026-11-18).

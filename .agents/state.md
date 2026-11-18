@@ -41,9 +41,11 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     for unwritten code), 9 declined and the rest repaired. 33 rows wait
     for a verdict.
 
-  The owner declined a further codex round (2026-11-18, usage at 86% of
-  the week), so the 33 rows stay repaired without a verdict. No go to
-  start has been given.
+  Next: a design-only codex round over the updated plans (owner,
+  2026-11-18: "review with codex is fine once you have the updated
+  plans"). It gives the 33 repaired rows their verdicts. No go to start
+  has been given. [Corrected: the agent misread the owner's Claude usage
+  as declining that round.]
 
   Pending with the owner:
   - O4, the four features absent on Apple devices;
