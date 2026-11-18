@@ -289,9 +289,22 @@ Inside:
 - **Every network request is the engine's own.** FFmpeg never opens a
   connection. Its built-in HTTP follows redirects and reuses connections
   without asking the engine. Instead, every playlist and segment is
-  fetched by the engine's HTTP client (`URLSession`), and FFmpeg reads
-  the bytes through a custom I/O context. The client applies the policy
-  to each request and to each redirect before it is followed:
+  fetched by Vela's core HTTP client (reqwest with native-tls, the
+  client that already talks to the servers), called across the bridge
+  as a read of a byte range. FFmpeg reads those bytes through a custom
+  I/O context.
+  - The core's client is not Apple's URL Loading System, so App
+    Transport Security does not govern it (P3 confirms). It already
+    honours the TLS-verify setting, and keeps no cookie store.
+  - Each playlist's references are resolved against the URL it was
+    finally served from, after redirects, and cleaned, before FFmpeg
+    sees them.
+  - An HLS byte range is carried through the read.
+  - FFmpeg's HLS demuxer runs with its HTTP persistence off, since it
+    expects its own HTTP context when that is on.
+
+  The client applies the policy to each request and to each redirect
+  before it is followed:
   - auth headers go only to the connection's own origin (scheme, host
     and port), as Plex part URLs are already pinned to it
     (`plex_library.rs`);
