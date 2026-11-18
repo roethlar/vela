@@ -363,6 +363,12 @@ never replace an unreadable document with defaults, explicit recovery):
   rename or reorder that conflicts takes the server's revision, and the
   other TV's change is re-applied where it still fits, otherwise
   reported to the user.
+- **Offline.** Pending edits wait in `UserDefaults`, within a fixed share
+  that leaves settings and recovery their space; an edit that would
+  exceed it is refused visibly. The list shown offline is the cached
+  copy in Caches. If that was purged, the screen says the playlists are
+  unavailable offline, never an empty library. Each edit shows whether it
+  is saved on this TV or accepted by iCloud.
 
 ### V-4. The engine on tvOS (additions to `apple/VelaEngine`)
 
