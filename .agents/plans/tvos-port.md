@@ -458,9 +458,21 @@ Each slice is one or more commits with tests and red-proofs, a
 - The repo-guidance Verification set.
 - Every desktop and iPad suite, after the core split.
 - The tvOS CI job, and its UI tests against the mock servers.
-- The owner's by-eye checks on every Apple TV generation: the LG's Dolby
-  Vision and HDR indicators, the frame rate, and the receiver's audio
-  format. Each is recorded with what was seen.
+- The owner's by-eye checks on every Apple TV generation, each recorded
+  with what was seen:
+  - the LG's Dolby Vision and HDR indicators, and the frame rate. The
+    Apple TV starts in SDR, with Match Content's Dynamic Range on, so a
+    box left in Dolby Vision mode cannot pass for a switch. SDR and HDR10
+    clips are played as controls.
+  - that the Dolby Vision metadata reaches the picture, not only that
+    the mode switched. The reference is a clip made of the same base
+    layer with two different RPUs, chosen so their scenes look visibly
+    different (dovi_tool, test-only), plus a control with the RPU
+    stripped. The owner confirms each looks as its metadata says.
+  - the receiver's audio format.
+
+  These run with the integrated engine in Vela's app (T6, T7). Probe
+  P2's throwaway build is not counted as that evidence.
 
 ## Log
 
