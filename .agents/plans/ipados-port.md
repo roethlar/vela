@@ -471,7 +471,7 @@ This follows the libmpv set's recipe (`packaging/libmpv/versions.txt`;
     can use whose licence the licensing rule of 2026-11-12 permits: dav1d
     (AV1) and uavs3d (AVS3), both BSD and both pinned like the rest. A
     codec whose only decoder that rule excludes is listed in the Log,
-    and is not claimed. The build is with swresample and swscale. Any codec Apple's
+    and is not claimed. swresample and swscale are built too. Any codec Apple's
     hardware does not take is then decoded in software, and the engine
     falls back to software whenever VideoToolbox refuses a stream.
     FFmpeg's HTTP and HTTPS protocols are compiled in, because its HLS
