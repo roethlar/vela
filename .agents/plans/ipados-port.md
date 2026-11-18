@@ -579,9 +579,20 @@ of any new layout logic.
   with generated media, in the simulator.
 - **End-to-end:** the scenarios run on the iOS Simulator through Appium's
   XCUITest driver (P4), against the harness's mock Plex and Jellyfin/Emby
-  servers on the Mac host. `tests/e2e/parity.mjs` gains the Apple engine
-  as a third player, and every parity row is judged for it as for the
-  other two.
+  servers on the Mac host. That needs harness work, done in slice A6
+  before any parity row is claimed for the Apple engine:
+  - **Run sets per platform.** `parity-verdict.mjs` reads exactly two
+    result files, requires both players and rejects mixed platforms. So
+    the desktop verdict stays the external and embedded pair, unchanged,
+    and an Apple run set gets its own verdict over the rows that apply to
+    it.
+  - **An Appium session** in `driver.mjs`, beside its `tauri:options`
+    session, with an adapter for the web-view context.
+  - **Apple playback observations** in place of the waits on mpv's socket
+    (`helpers.mjs`). The scenarios learn a play's state from
+    `player-state` and from the mock servers' reports.
+  - **A first proof:** before A6 relies on the venue, it shows one
+    complete play, seek, stop and server report.
 - **By eye, on devices:** HDR and Dolby Vision cannot be judged in the
   simulator, so the owner checks them on the iPad, in the order the
   plan's "For the owner" section will give when A10 lands. The Dolby
