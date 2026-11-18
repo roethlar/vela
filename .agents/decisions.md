@@ -2649,10 +2649,11 @@ Decision:
   dolby vision". On tvOS only Apple's own pipeline (VideoToolbox decoding,
   AVFoundation display) puts the TV into Dolby Vision mode. mpv, on every
   platform, applies Dolby Vision's metadata itself and outputs an ordinary
-  picture, never a Dolby Vision signal. That picture is a PQ signal, or on
-  macOS PQ with Display P3 on an EDR screen and sRGB otherwise (Vela's
-  embedded host, `macos_hdr.rs`). [Corrected 2026-11-18, review finding
-  ipd-20: the first wording said mpv always outputs HDR10.] So Apple TV
+  picture, never a Dolby Vision signal; what that picture is depends on
+  the platform and display, and this ruling says nothing about it.
+  [Corrected 2026-11-18, review finding ipd-20, twice: the first wording
+  said mpv always outputs HDR10, the second listed output signals too
+  narrowly.] So Apple TV
   plays through a player built on Apple's pipeline, with FFmpeg unpacking
   containers Apple does not take (MKV) and decoding audio Apple cannot
   output (TrueHD, DTS), and with Vela drawing subtitles.
