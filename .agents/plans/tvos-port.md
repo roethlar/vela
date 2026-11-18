@@ -374,8 +374,11 @@ never replace an unreadable document with defaults, explicit recovery):
   one per entry, each with a stable id. Each entry record carries its own
   sortable position key, so no record grows with the playlist.
   - Adds and removals merge by id.
-  - A move names the entries it goes between, not an index, and is
-    rebased onto the server's order by those ids. If they are gone, it is
+  - A move names the entries it goes between, not an index, from the
+    screen onward: the tvOS screen calls a reorder command that takes the
+    neighbouring entry ids it displayed. `playlist_reorder`'s index stays
+    for the desktop. The move is rebased onto the server's order by those
+    ids. If they are gone, it is
     reported to the user.
   - A conflicting rename takes the server's revision and is reported.
 - **Offline.** Pending edits wait in `UserDefaults`, within a fixed share
