@@ -289,8 +289,10 @@ never replace an unreadable document with defaults, explicit recovery):
   (`config.json`, `recents.rs`) and in playlists (`playlists.rs`) carry
   artwork URLs. For Jellyfin and Emby those URLs include
   `api_key=<token>` (`source/jellyfin.rs`). The tvOS backend saves every
-  such URL without its credential, as the source id with the path and the
-  rest of the query. The core adds the credential back when it hands the
+  such URL without its credential, as the id of the connection that
+  issued it, with the path and the rest of the query. The provider
+  attaches that id when it builds the reference, because a merged card's
+  poster can come from a different server from the one it plays from. The core adds the credential back when it hands the
   URL out. A test saves every document and every history copy with a
   synthetic token, and checks the token appears in none of them.
 - **`config.json` and `playlists.json`** are stored as the same JSON
