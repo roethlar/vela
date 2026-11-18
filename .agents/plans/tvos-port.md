@@ -253,6 +253,11 @@ the page:
   SwiftUI's image loader through the same bounded, authenticated
   resolver, and the credentials stay in Rust. A test renders a Plex
   poster from a cold cache against the mock Plex.
+- **Media reads.** `vela_core_media_read` (a session id, a part or URL,
+  and a byte range, answered with exactly those bytes) serves the
+  engine's reads through the playback HTTP client (`ipados-port.md`,
+  A-2, transport). Reads are bounded in size and cancelled when their
+  session ends, and the buffer belongs to the caller once returned.
 - **The other direction, core to engine.** A play can start in the core,
   not only from a button: a playlist advance, or an Automatic quality
   step-down. Continue Playing stays the screen's choice, with the
