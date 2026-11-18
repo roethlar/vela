@@ -306,6 +306,9 @@ Inside:
     parameter is removed, the rest of the query kept, and the request
     sent with the header. Any other credential-bearing URI is refused.
     No token ever leaves in a URL;
+  - FFmpeg sees playlist URIs only after cleaning, and its log goes
+    through a sink that drops any URL query and header, so a refusal or
+    an error cannot write a credential to a log;
   - the desktop's recorded Jellyfin and Emby boundary
     (`.agents/decisions.md` 2026-07-23) is unchanged.
 - **Video:** compressed HEVC, H.264, AV1 (where the device has a
