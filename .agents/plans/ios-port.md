@@ -88,10 +88,11 @@ detail pages, top-tab Settings, the player's single sheet):
   `env(safe-area-inset-*)` in both orientations. An end-to-end check in
   the iPhone simulator venue reads each element's position against the
   simulator's safe areas.
-- **Small heights:** a landscape phone (up to 932 x 430 pt) is wider
+- **Small heights:** a landscape phone (up to 956 x 440 pt) is wider
   than both the drawer's threshold (about 700 pt) and the player's compact
   form (about 900 px). So the drawer and the compact player also switch
-  on compact height, not only on width. A test at 932 x 430 checks that
+  on compact height, not only on width. Tests at 932 x 430 (the regression case) and 956 x 440 (the
+  boundary of the scope) check that
   the navigation I2 settled on (the drawer, or the bottom bar if the
   reach check chose it) and the compact player controls are what shows,
   and that every destination and control is reachable. Below about 500 pt of height, the header
