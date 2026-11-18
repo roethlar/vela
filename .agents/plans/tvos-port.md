@@ -254,10 +254,12 @@ the page:
   poster from a cold cache against the mock Plex.
 - **The other direction, core to engine.** A play can start in the core,
   not only from a button: a playlist advance, or an Automatic quality
-  step-down. Continue Playing stays the screen's choice, as on the
-  desktop: the core sends `continue-playing`, and the tvOS Home picks the
-  next title from the carousel the user saw and calls `play_item` with
-  the finished session (`App.svelte`). So the host callback given to
+  step-down. Continue Playing stays the screen's choice, with the
+  desktop's three branches (`App.svelte`; `.agents/decisions.md`): `off`
+  stops; `only-tv`, the default, plays the next episode in series order
+  and stops after a movie or a final episode; `on` picks the next title
+  from the carousel the user saw. Each calls `play_item` with the
+  finished session. So the host callback given to
   `vela_core_start` also receives:
   - `play`: a session id and a `PlayRequest`;
   - `command`: a session id and a `PlayerCommand`. Stopping is
