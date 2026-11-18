@@ -465,14 +465,13 @@ Inside:
     3. Coming back after that, the player view shows the play paused at
        the resume point, which is settled on return and again when the
        user presses Play.
-       - The newer of Vela's saved position and the server's state wins,
-         judged by when each was observed. The checkpoint keeps its own
-         time. The server's comes from the item's last-played time
-         (Plex `lastViewedAt`, Jellyfin and Emby
-         `UserData.LastPlayedDate`, which the core maps for this). A
-         watched mark newer than the checkpoint wins too.
-       - Where the server gives no time, its state wins, unless the user
-         has sought.
+       - The checkpoint also records the server's position and watched
+         state as they were when it was written. At Play, the server is
+         read again. If its position or watched state has changed since,
+         the server wins, because another device moved it. If not, Vela's
+         position wins. If the server has no resume state, Vela's wins.
+         No clocks are compared.
+       - A seek the user made in the paused view wins over both.
        - Playing starts a fresh session there.
 
     Proof: whether the app comes back, is suspended or is ended, the
