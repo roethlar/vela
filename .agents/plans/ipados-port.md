@@ -407,9 +407,12 @@ Inside:
     2. UIKit may grant no background time, and sends no termination
        callback to a suspended app. So, while a play runs, its position
        and any server transcode still to be torn down are kept in a
-       playback checkpoint of its own. The checkpoint is coalesced and
-       written on lifecycle transitions, never into `config.json`, whose
+       playback checkpoint of its own, never in `config.json`, whose
        three-version history ordinary playback would otherwise use up.
+       What a teardown needs is written before the request that can
+       start a transcode. The position is written every few seconds
+       while playing, coalesced, and again at every lifecycle
+       transition.
        Recents are updated at finalization.
        - Finalization starts as soon as the task's remaining time falls
          below what finalizing needs, not at expiry. It reports the final
