@@ -140,15 +140,30 @@ Each slice is one or more commits with tests and red-proofs, a
   release workflow's iOS job, if O2 made one, ships the universal app.
 - **I4, the engine's memory and thermal response**, with XCTests that
   inject memory warnings and thermal states.
-- **I5, the owner's by-eye checks** on the iPhone (HDR10, Dolby Vision,
-  rotation during play), then docs and release notes.
+- **I5, the owner's by-eye checks** on the iPhone, one by one from a
+  checklist, each recorded with what was seen:
+  - HDR10, HLG, and Dolby Vision profiles 5 and 8.1;
+  - an original profile 7 file, converted live. A file converted
+    beforehand would bypass the converter.
+  - a Dolby Vision negative control: the reference clip of
+    `tvos-port.md` (one base layer with two RPUs that look visibly
+    different, and one with the RPU stripped);
+  - each audio format of the iPadOS plan's row 17, with the route named:
+    speaker, headphones, AirPods or an HDMI adapter;
+  - rotation during play.
+
+  If the owner's iPhone has no HDR screen, tone-mapped playback is
+  checked there, and the HDR rows stay pending until an HDR iPhone is
+  used. An iPad's result does not stand in for the phone. Then docs and
+  release notes.
 
 ## Risks
 
 - **Phone layout changes can disturb the iPad's compact layout and the
   desktop.** Every page slice runs the iPad and desktop venues as well.
 - **The owner's iPhone may not have an HDR screen.** Rows 15 and 16
-  would then be checked on the iPad only, and the record says so.
+  would then stay pending on the phone, with tone-mapped playback checked
+  instead, and the record says so.
 
 ## Verification before claiming completion
 
