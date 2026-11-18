@@ -325,6 +325,9 @@ Inside:
     changed.
   - FFmpeg's HLS demuxer runs with its HTTP persistence off, since it
     expects its own HTTP context when that is on.
+  - FFmpeg's protocol whitelist admits only the engine's own I/O, so no
+    demuxer can open a connection itself (the SDP demuxer would open RTP
+    directly). Streams that need another transport are not played.
 
   The client applies the policy to each request and to each redirect
   before it is followed:
