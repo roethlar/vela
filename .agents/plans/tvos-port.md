@@ -91,7 +91,8 @@ are rebuilt in SwiftUI, not dropped:
 
 ## Assumptions (each proven or overturned by a probe before product code)
 
-- **B1 (T0).** Vela's Rust core builds for `aarch64-apple-tvos` and
+- **B1 (T0, then T1).** Vela's Rust core, once split from Tauri (T1),
+  builds for `aarch64-apple-tvos` and
   `aarch64-apple-tvos-sim` and works there: tokio, reqwest with
   native-tls (Security.framework), and `if-addrs`. These targets have
   been Rust's tier 2 since 1.95 (2026-04-16; rust-lang/rust PR 152021),
@@ -389,14 +390,20 @@ Each slice is one or more commits with tests and red-proofs, a
 `codereview codex` hunt and a push.
 
 - **T0, probes (throwaway; results in the Log).**
-  - The Rust core, as it stands, built for the tvOS simulator and an
-    owner's Apple TV, with TLS to the mock Plex (B1).
+  - A throwaway crate with the core's pinned dependencies (tokio,
+    reqwest with native-tls, `if-addrs`, serde and the rest of the core's
+    list in `Cargo.lock`), built and run on the tvOS simulator and on an
+    owner's Apple TV, with TLS to the mock Plex (B1). The real crate
+    carries Tauri's runtime and build dependencies, which do not build for
+    tvOS, so it cannot be the probe.
   - Keychain and `UserDefaults` persistence across a restart, a reboot
     and a storage-pressure purge, if one can be caused (B2).
   - Whether tvOS has a bitstream output path at all, with receiver
     evidence that names the codec (B4).
   - The focus engine and remote events in a minimal SwiftUI player.
 - **T1, the core split (V-1).** In steps, each with every suite green.
+  Its exit condition includes the extracted `vela-core` building for
+  `aarch64-apple-tvos` and `aarch64-apple-tvos-sim` in CI.
 - **T2, the Swift interface and its contract tests (V-2).**
 - **T3, the tvOS storage backend (V-3)**, with the budget test and
   red-proofs for refusal and recovery.
