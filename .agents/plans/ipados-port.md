@@ -383,19 +383,28 @@ Inside:
     go through `MPNowPlayingInfoCenter` and `MPRemoteCommandCenter`.
   - Leaving the foreground follows one contract:
     1. The play pauses, and a background task starts. If the app comes
-       back before the task's time runs out, the same session continues;
-       nothing was finalized.
+       back before finalization has begun, the same session continues.
+       Once finalization has begun, a return always starts a fresh
+       session at the saved position.
     2. UIKit may grant no background time, and sends no termination
        callback to a suspended app. So, while a play runs, its position
-       and any server transcode still to be torn down are saved in the
-       durable stores as they change.
+       and any server transcode still to be torn down are kept in a
+       playback checkpoint of its own. The checkpoint is coalesced and
+       written on lifecycle transitions, never into `config.json`, whose
+       three-version history ordinary playback would otherwise use up.
+       Recents are updated at finalization.
        - Finalization starts as soon as the task's remaining time falls
          below what finalizing needs, not at expiry. It reports the final
          position (Plex timeline `stopped`, Jellyfin and Emby `Stopped`),
          tears down any server transcode as the desktop does
          (`playback.rs`), and keeps the play resumable.
-       - A finalization that did not complete is finished at the next
-         launch, from what was saved.
+       - A finalization that did not complete is finished when the app
+         next comes to the foreground or launches, from the checkpoint.
+       - Transcode teardown and progress are tracked apart. A teardown
+         stays pending until the server confirms it, and is retried.
+         Progress from an old play is written only if the server has
+         nothing newer for that item, so it never moves a resume point
+         backwards after the owner watched elsewhere.
     3. Coming back after that, the player view shows the play paused at
        the saved position, and playing again starts a fresh session
        there.
