@@ -8,7 +8,7 @@ review them with codex gpt-6.2-astra xhigh").
 |------|-------|--------|
 | tvOS plan | `b00acd50..a06b5568` | **findings**: 19 candidates, 19 admitted |
 | iPhone plan | `09c58efb..b00acd50` | **findings**: 11 candidates, 11 admitted |
-| iPadOS plan, with the decision it rests on | `a7d01475..09c58efb` | in progress |
+| iPadOS plan, with the decision it rests on | `a7d01475..09c58efb` | **findings**: 20 candidates, 20 admitted |
 
 The reviewers' reports, verbatim, are kept beside this file in
 `codereview-2026-11-18-apple-plans/` (`tvos.md`, `ios.md`, `ipados.md`).
@@ -36,7 +36,8 @@ report under the same number.
   the plans and no candidate risks.
 - Runs:
   - tvOS: 13:30:31Z to 13:36:46Z, exit 0, 22 web searches.
-  - iPhone: 13:30:31Z to 13:37:27Z, exit 0.
+  - iPhone: 13:30:31Z to 13:37:27Z, exit 0, 14 web searches.
+  - iPadOS: 13:30:31Z to 13:41:31Z, exit 0, 130 web searches.
 
 ## Intake
 
@@ -96,6 +97,37 @@ fresh hunt over the repair range closes the round.
 | iph-10 | MEDIUM | The width breakpoints miss landscape phones (932 x 430) | `[ ]` | |
 | iph-11 | LOW | "A push" per slice contradicts the push-after-each-commit policy | `[ ]` | |
 
-### iPadOS plan (`ipados-port.md`)
+### iPadOS plan (`ipados-port.md`, and the decision of 2026-11-18)
 
-Pending its hunt.
+Run 13:30:31Z to 13:41:31Z, exit 0, 130 web searches. The working agent
+checked two claims: the fallback `cfg` of `rename_noreplace`
+(`storage.rs`, ipd-13), and `check_mpv` inside Settings' load
+(`Settings.svelte`, ipd-10). Both hold.
+
+| ID | Severity | Finding (one line) | Status | Commit |
+|----|----------|--------------------|--------|--------|
+| ipd-1 | HIGH | Profile 5 conversion and the profile 5 test fixture omit the base layer's pixel conversion | `[ ]` | |
+| ipd-2 | HIGH | P2 can pass without the engine displaying Dolby Vision metadata | `[ ]` | |
+| ipd-3 | HIGH | Profiles and minimum OS tested are narrower than the support promised (8.4, HLS on iPadOS 18) | `[ ]` | |
+| ipd-4 | HIGH | Loopback HLS leaves software-decoded video and LPCM audio no presentation path | `[ ]` | |
+| ipd-5 | HIGH | The media build omits AAC and HLS input, both of which Vela already plays | `[ ]` | |
+| ipd-6 | HIGH | A Jellyfin transcode URL already carries `api_key`, so row 7 fails | `[ ]` | |
+| ipd-7 | MEDIUM | SRT, WebVTT and mov_text need converting to ASS events before libass | `[ ]` | |
+| ipd-8 | MEDIUM | Cropping has no frame source on the hardware sample-buffer path | `[ ]` | |
+| ipd-9 | HIGH | The seam drops the desktop's window and screen state from launches and events | `[ ]` | |
+| ipd-10 | HIGH | Compiling out `check_mpv` breaks Settings' whole load; crop settings live in mpv commands | `[ ]` | |
+| ipd-11 | HIGH | Backgrounding sends a terminal report for a play the plan only pauses | `[ ]` | |
+| ipd-12 | MEDIUM | Rows 12b (exit stops playback) and 14 (ends at end of file) dropped from the parity list | `[ ]` | |
+| ipd-13 | MEDIUM | Widening only the macOS rename branch leaves the fallback returning failure after the move | `[ ]` | |
+| ipd-14 | HIGH | A third player cannot produce the two-player parity verdict; the driver and waits are mpv's | `[ ]` | |
+| ipd-15 | MEDIUM | A6 proves the step-down notice before A9 builds Automatic quality | `[ ]` | |
+| ipd-16 | MEDIUM | By-eye checks cannot tell stereo, multichannel LPCM and Atmos apart | `[ ]` | |
+| ipd-17 | MEDIUM | The signing recipe covers neither channel O2 offers | `[ ]` | |
+| ipd-18 | MEDIUM | `dvh` does not give a keyboard-safe layout on iPad WebKit | `[ ]` | |
+| ipd-19 | LOW | The device gate excludes iPads that have EDR headroom | `[ ]` | |
+| ipd-20 | LOW | The decision record says mpv always outputs HDR10 from Dolby Vision; macOS EDR does not | `[ ]` | |
+
+The tvOS hunt's tvp-19 (privacy manifest) applies to the iPad app too.
+The iPadOS hunt did not raise it. The iOS app also uses required-reason
+APIs (UserDefaults, and file timestamps through `stat`), so the same
+repair is made in `ipados-port.md` under tvp-19.
