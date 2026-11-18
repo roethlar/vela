@@ -158,8 +158,10 @@ each pushed to `origin` and `github` as it lands
   in the tracked configuration first. Apple's device family `2` alone
   prevents installing on an iPhone, and every later slice needs the app
   on the phone and in the iPhone simulator. CI builds the iPhone
-  simulator app, and the app is installed on the owner's iPhone through
-  O2's channel.
+  simulator app, and the app is installed on the owner's iPhone by a
+  development install or an internal TestFlight build, whichever O2
+  allows. It is never an App Store release: publishing stays the
+  owner's, after I5.
 - **I1, probes (throwaway; Log).** C1 on the owner's iPhone with the
   owner's 4K HDR10, Dolby Vision 8.1 and converted profile 7 files. C2
   in the iPhone simulator.
