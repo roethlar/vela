@@ -148,8 +148,10 @@ detail pages, top-tab Settings, the player's single sheet):
 
 ## Slices
 
-Each slice is one or more commits with tests and red-proofs, a
-`codereview codex` hunt and a push.
+Each slice is one or more commits, each with its tests and red-proofs,
+each pushed to `origin` and `github` as it lands
+(`.agents/push-policy.md`). Each slice that lands repo code gets a
+`codereview codex` hunt.
 
 - **I0, the iPhone family.** Device family 1,2 and the orientations go
   in the tracked configuration first. Apple's device family `2` alone

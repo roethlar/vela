@@ -397,8 +397,10 @@ uses.
 
 ## Slices
 
-Each slice is one or more commits with tests and red-proofs, a
-`codereview codex` hunt and a push.
+Each slice is one or more commits, each with its tests and red-proofs,
+each pushed to `origin` and `github` as it lands
+(`.agents/push-policy.md`). Each slice that lands repo code gets a
+`codereview codex` hunt.
 
 - **T0, probes (throwaway; results in the Log).**
   - A throwaway crate with the core's pinned dependencies (tokio,

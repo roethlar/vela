@@ -522,8 +522,10 @@ New rows, for every Apple device:
 
 ## Slices
 
-Each slice is one or more commits. Each commit carries its tests and its
-red-proofs, gets a `codereview codex` hunt, and is pushed. The Log
+Each slice is one or more commits, each with its tests and red-proofs,
+each pushed to `origin` and `github` as it lands
+(`.agents/push-policy.md`). Each slice that lands repo code gets a
+`codereview codex` hunt. The Log
 records what landed.
 
 - **S0, probes.** Throwaway code outside the repo, with results in the
