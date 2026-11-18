@@ -434,10 +434,11 @@ This follows the libmpv set's recipe (`packaging/libmpv/versions.txt`;
     `--disable-gpl --disable-nonfree --disable-version3
     --disable-autodetect`. The script asserts the licence string and the
     expected `CONFIG_*` features afterwards, as the macOS script does.
-    The enabled set is only what A-2 names: those demuxers, parsers,
-    decoders, swresample and swscale, the HLS demuxer with MPEG-TS and
-    fragmented-MP4 segments, the mp4 and HLS muxers only if P2 needs the
-    loopback, and HTTP(S).
+    Every decoder, demuxer and parser FFmpeg's LGPL configuration
+    provides is enabled, with swresample and swscale. Any codec Apple's
+    hardware does not take is then decoded in software, and the engine
+    falls back to software whenever VideoToolbox refuses a stream.
+    FFmpeg's own network protocols are not used (A-2, transport).
   - libass, with FreeType, HarfBuzz and FriBidi, and CoreText on.
   - dav1d.
   - libdovi: the C interface of the `dolby_vision` crate, built with
