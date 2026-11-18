@@ -80,6 +80,18 @@ absence.
 - **V3. The distribution channel** is ruled once, as O2 of
   `ipados-port.md`. tvOS uses the same channel; TestFlight covers Apple
   TV.
+- **V4. Where playlists live on tvOS (a decision).** Apple TV keeps only
+  `UserDefaults` (and the Keychain) persistent, and terminates an app
+  whose defaults reach 1 MB. The two choices:
+  - **`UserDefaults`:** works with no account or network, but bounds
+    playlists. That limit needs the owner's approval, and a save that
+    would cross it is refused visibly, well before the 1 MB termination.
+  - **The CloudKit private database:** no such bound, but it needs the
+    owner's iCloud account signed in on each Apple TV. The plan must then
+    also say what happens to edits already made while the account or the
+    network is missing.
+
+  T0 measures the owner's real documents to inform the choice.
 
 ## Differences that need the owner's approval (none approved yet)
 
@@ -298,12 +310,8 @@ never replace an unreadable document with defaults, explicit recovery):
     recency fields durably (`recents.rs`), because a server may hold an
     older position or none. Only their fetchable metadata may move to
     Caches.
-  - T0 measures the owner's real desktop documents and the cost of one
-    reference. T3 shows the documents and their history fit with room to
-    grow far beyond the owner's use.
-  - If references could still outgrow the space, playlists move to the
-    CloudKit private database. That needs the owner's iCloud account on
-    each Apple TV, and the owner is told before it lands.
+  - Playlists still grow with every entry, so where they live durably is
+    the owner's decision, V4. Until it is ruled, T3 does not land.
   - No save is refused for size unless the owner approves that limit. A
     store that is unexpectedly full fails closed, visibly, and is never
     truncated.
