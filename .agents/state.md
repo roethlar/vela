@@ -42,8 +42,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     for a verdict.
 
   NEXT, the owner's: whether a further codex round runs, scoped to
-  design and excluding tests. Then the plans' owner inputs, one at a
-  time, starting with O1 (which iPads and Apple TV generations).
+  design and excluding tests. O1 is answered (devices in
+  `.agents/machines.md`, "Apple test devices"); the next owner input is
+  O2, the distribution channel.
 
 - PLATFORM PARITY, OWNER RULING 2026-11-16 (`.agents/decisions.md`, last
   entry; read it first). Vela works the same on Linux, macOS and Windows;
