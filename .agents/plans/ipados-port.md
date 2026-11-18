@@ -163,7 +163,10 @@ hardware keyboard.
     with DTS-HD MA.
   - **If a Dolby Vision profile does not engage that way**, P2 tries a
     throwaway remux of it to AVPlayer, to see whether that path engages
-    it. A production remux path would then be designed for those
+    it. The result counts only if the remux is shown to carry the
+    profile's sample entry, its `dvcC`/`dvvC` box and the per-frame
+    RPUs; FFmpeg's MP4 writer can drop the box under its default
+    settings. A production remux path would then be designed for those
     profiles and devices only, in an amendment reviewed before any code.
     Its known requirements are in the review findings ipd-38, ipd-39 and
     ipd-43 to ipd-46 (`.agents/review/codereview-2026-11-18-apple-plans.md`).
