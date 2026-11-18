@@ -429,9 +429,9 @@ each pushed to `origin` and `github` as it lands
 `codereview codex` hunt.
 
 - **T0, probes (throwaway; results in the Log).**
-  - A throwaway crate with the core's pinned dependencies (tokio,
-    reqwest with native-tls, `if-addrs`, serde and the rest of the core's
-    list in `Cargo.lock`), built and run on the tvOS simulator and on an
+  - A throwaway crate with the core's dependency declarations copied from
+    `src-tauri/Cargo.toml`, features included (reqwest without defaults,
+    with `native-tls-no-alpn`), and versions from `Cargo.lock`, built and run on the tvOS simulator and on an
     owner's Apple TV, with TLS to the mock Plex (B1). The real crate
     carries Tauri's runtime and build dependencies, which do not build for
     tvOS, so it cannot be the probe.
