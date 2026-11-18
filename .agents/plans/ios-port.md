@@ -106,11 +106,17 @@ detail pages, top-tab Settings, the player's single sheet):
 - **Buffer limits** are set from C1's measurements. When iOS sends a
   memory warning, the engine shrinks its buffers rather than being
   ended by the system.
-- **Thermal state** (`ProcessInfo.thermalState`, at serious or worse)
-  feeds the Automatic quality health signal as dropped frames already
-  do. So a phone that is overheating steps down quality instead of
-  dropping frames. This is the iPadOS plan's parity row 10 working on a
-  phone, not a new feature.
+- **Thermal state** (`ProcessInfo.thermalState`) is measured and
+  recorded (I1, I4). It is not a step-down trigger.
+  - The owner approved two triggers: sustained decoder frame drops and a
+    repeatedly starving cache (`.agents/decisions.md` 2026-07-25,
+    implemented by `AutomaticDetector` in `automatic.rs`). They were
+    chosen because a step-down interrupts the play and can lose HDR.
+  - A phone that overheats and starts dropping frames already steps down
+    through the first trigger.
+  - Heat as a trigger of its own would be a third. That needs the
+    owner's ruling, asked only if the measurements show plays failing
+    from heat without drops.
 
 ## Slices
 
