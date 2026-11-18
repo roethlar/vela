@@ -207,8 +207,12 @@ never replace an unreadable document with defaults, explicit recovery):
 - **`config.json` and `playlists.json`** are stored as the same JSON
   documents in `UserDefaults`, one key each. A key's write is atomic.
   Only one process exists, so there is no cross-process lock.
-- **The valid-history copies** (up to three per store on the desktop)
-  become one copy per document on tvOS, to fit the budget.
+- **The valid-history copies** are kept as on the desktop: the three
+  newest distinct valid versions of `config.json` and of
+  `connections.json` (`.agents/decisions.md` 2026-07-23). Each is a
+  version of its own in the backend, with the same dated recovery
+  choices. A test restores each of the three, and checks that the
+  damaged bytes are preserved.
 - **The budget:** all documents plus their copies must stay under
   400 KB, measured on save. A save that would exceed it is refused with a
   visible error, never truncated. The slice measures the owner's real
