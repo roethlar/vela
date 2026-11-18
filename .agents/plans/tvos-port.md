@@ -238,8 +238,9 @@ the page:
   Automatic quality step-down. So the host callback given to
   `vela_core_start` also receives:
   - `play`: a session id and a `PlayRequest`;
-  - `command`: a session id and a `PlayerCommand`;
-  - `stop`.
+  - `command`: a session id and a `PlayerCommand`. Stopping is
+    `PlayerCommand::Stop` through it, so a stop meant for an earlier
+    session cannot end a later one.
 
   The Swift side answers each with success or failure. A command for a
   session that is no longer current is refused, as `control.rs` refuses
