@@ -219,6 +219,16 @@ portable and may at most point here.
   `mpx-1-fable-cli-r1` at accepted head `c32a59b`. They were not removed
   because cleanup is destructive and has not been separately authorized.
 
+- Xcode (checked 2026-11-18): `/Applications/Xcode.app` 27.2 (build
+  27B52) and `/Applications/Xcode-beta.app` 27.0. The SDKs are iOS 27.2,
+  tvOS 27.2 and macOS 27.2, with iOS and tvOS simulator runtimes. The
+  active developer directory is `/Library/Developer/CommandLineTools`, so
+  Xcode commands need
+  `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`. Switching
+  globally (`sudo xcode-select -s`) is the owner's. Code-signing
+  identities in the login keychain: "Developer ID Application" and "Apple
+  Development", both team 27R2KCAHN7.
+
 ## Windows dev host (`F:\dev\vela`)
 
 Relocated out of `.agents/state.md` 2026-07-14 (drift pass). Recorded

@@ -99,9 +99,15 @@ therefore built here; `ios-port.md` adds what is specific to the phone.
   - Before the App Store Connect record is created, the owner confirms
     the bundle identifier (today `com.michael.vela`) and the App Store
     name. Both are fixed once the record exists.
-- **O3. Xcode on `nagatha` (an action).** This Mac has only the Command
-  Line Tools, with no Xcode and no iOS or tvOS SDK. Installing Xcode
-  needs the owner's Apple ID. Until then, every iOS build runs only in CI.
+- **O3. Xcode on `nagatha`: NOT NEEDED (corrected 2026-11-18).** Xcode
+  27.2 is installed, with the iOS 27.2 and tvOS 27.2 SDKs and simulators,
+  as is Xcode-beta 27.0. The earlier note that it was missing was the
+  agent's error. `xcode-select` points to the Command Line Tools, so a
+  bare `xcodebuild` fails; commands set
+  `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`, which needs
+  no `sudo`. An Apple Development certificate for the owner's team is in
+  the keychain, so development signing needs only the devices registered
+  and paired.
 - **O4. The differences below**, one at a time, before the slice they
   affect. Each question names both the iPad and the iPhone, because one
   app runs on both (`ios-port.md`, P2).

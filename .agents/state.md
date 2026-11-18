@@ -43,9 +43,10 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
   NEXT, the owner's: whether a further codex round runs, scoped to
   design and excluding tests. O1 is answered (devices in
-  `.agents/machines.md`, "Apple test devices"); the next owner input is
-  O3, Xcode on `nagatha` (O2 is ruled:
-  TestFlight and development signing now, the App Store later).
+  `.agents/machines.md`, "Apple test devices"); no owner input is
+  waiting. O2 is ruled (TestFlight and development signing now, the App
+  Store later), and O3 needs nothing, since Xcode 27.2 is installed. O4
+  comes before A9. Next is the owner's approval of the plans.
 
 - PLATFORM PARITY, OWNER RULING 2026-11-16 (`.agents/decisions.md`, last
   entry; read it first). Vela works the same on Linux, macOS and Windows;
