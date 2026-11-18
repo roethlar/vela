@@ -246,3 +246,45 @@ same model and effort, 15:28Z to 15:35Z, exit 0 each. Reports, verbatim:
   - ipd-35, the loopback's HLS attributes, `a80b148`.
 
 Open: this round's repairs have no verdict yet.
+
+## Design round 3 (2026-11-18, `16c787e..510a619`)
+
+Design only. Three codex sessions, the same model and effort, 17:19Z to
+17:27Z, exit 0 each. Reports, verbatim: `ios-r3.md`, `ipados-r3.md`,
+`tvos-r3.md`.
+
+Verdicts on round 2's repairs:
+- iPhone: iph-20 and iph-21 closed.
+- iPadOS: 7 closed. ipd-11 and ipd-32 were reopened and repaired again
+  (`51c64f2`, `f71f3c1`).
+- tvOS: tvp-22, tvp-34, tvp-38 and tvp-40 closed. Six were reopened and
+  repaired again:
+  - tvp-4, `ac56470`;
+  - tvp-33, `5cd14bc`;
+  - tvp-35 and tvp-39, `1fdc860`;
+  - tvp-36, `8795422`;
+  - tvp-37, `d81091a` and `fc0f1f1`.
+
+New findings, numbered in the iPadOS report's order (the iPhone and tvOS
+reports raised the same engine defects; their duplicates are not numbered
+again):
+- **ipd-36**, the build's codec allowlist: repaired at `37cf11c`, which
+  enables every LGPL decoder and demuxer.
+- **ipd-37, ipd-38, ipd-39, ipd-43 to ipd-46**, routing, and the remux
+  fallback's encoder, Dolby Vision box, profile 5 signalling, seeking,
+  display and Now Playing, and subtitle clock: withdrawn with the
+  fallback's design (`463ce85`). The engine uses the sample-buffer
+  renderer for everything. A remux path for Dolby Vision is designed in
+  an amendment only if P2 shows it is needed, and these findings are its
+  known requirements.
+- **ipd-40, ipd-41, ipd-42**, App Transport Security, cookies, and the
+  base URL of a redirected playlist: repaired at `eb7e59e`, which fetches
+  media through the core's HTTP client. The iPhone report's FFmpeg HLS
+  persistence and byte-range findings are covered by the same repair.
+- **ipd-47**, the stale approval text: repaired at `3e26860`.
+- **tvp-41**, an edit called saved before it is on disk: repaired at
+  `267210d`.
+- **tvp-42**, two rules for a return after finalization: repaired at
+  `839e218`.
+
+Open: this round's repairs have no verdict yet.
