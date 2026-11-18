@@ -416,8 +416,10 @@ never replace an unreadable document with defaults, explicit recovery):
   only after `CFPreferencesAppSynchronize` reports the journal written to
   permanent storage; until then the edit shows as not yet saved.
 - **Quota.** A request over CloudKit's per-request limit is split and
-  sent again. An exhausted iCloud quota is shown to the user, and the
-  edit stays pending, not lost.
+  sent again. Online edits go straight to CloudKit. If an exhausted
+  iCloud quota refuses one, it waits in the journal when there is room.
+  If there is none, it is reported as not saved. The quota is shown to
+  the user either way.
 - **Setup.** Both iCloud entitlements are in the tracked XcodeGen spec
   and the provisioning: the container identifier, and
   `com.apple.developer.icloud-services` with `CloudKit`. The production
