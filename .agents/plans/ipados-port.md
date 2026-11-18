@@ -305,9 +305,16 @@ Inside:
   - Bitmap formats (PGS, VobSub, DVB) come from FFmpeg's decoders and are
     drawn as images, scaled with the picture.
 - **Cropping:** off, manual or auto, rebuilt for the engine. The engine
-  detects black bars on sampled frames (decoded frames on the software
-  path, `AVPlayerItemVideoOutput` frames with the loopback). It crops by
-  the layer's geometry, never by decoding again. It reports the same crop
+  detects black bars on sampled frames.
+  - On the software path, the frames are the decoded ones.
+  - On the hardware sample-buffer path, the display layer gives no frame
+    access, so the engine decodes a sampled keyframe now and then with a
+    `VTDecompressionSession` of its own, used only for detection.
+  - With the loopback, the frames come from `AVPlayerItemVideoOutput`.
+
+  It crops by the layer's geometry, never by decoding the shown picture
+  again. P2 covers frame access on the chosen renderer, and A9 tests a
+  letterboxed, hardware-decoded clip on the minimum OS. It reports the same crop
   states `vela-crop.lua` reports today.
 - **Health:** dropped frames and buffered seconds feed Automatic quality
   as `PlayerEvent`s.
