@@ -334,8 +334,23 @@ Inside:
     interruptions.
   - Now Playing information and remote commands (play/pause, seek, skip)
     go through `MPNowPlayingInfoCenter` and `MPRemoteCommandCenter`.
-  - When the app leaves the foreground, the engine pauses and Vela's
-    final report is sent inside a background task.
+  - Leaving the foreground follows one contract:
+    1. The play pauses, and a background task starts. If the app comes
+       back before the task's time runs out, the same session continues;
+       nothing was finalized.
+    2. When the task's time is about to run out, or iPadOS signals
+       termination, the session is finalized as a quit. The final
+       position is reported (Plex timeline `stopped`, Jellyfin and Emby
+       `Stopped`), any server transcode is torn down as the desktop does
+       (`playback.rs`), and the play is remembered as resumable.
+    3. Coming back after that, the player view shows the play paused at
+       the saved position, and playing again starts a fresh session
+       there.
+
+    Tests against the mock servers, judged by the reports they receive:
+    a return within the task's time; a return after finalization; and
+    termination while in the background, where the mock sees the
+    transcode torn down.
 
 Tests: XCTest in the simulator (A7), with test media generated as in
 A-3. They include an AAC direct play (the harness's standard clip,
