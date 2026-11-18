@@ -163,8 +163,9 @@ each pushed to `origin` and `github` as it lands
   allows. It is never an App Store release: publishing stays the
   owner's, after I5.
 - **I1, probes (throwaway; Log).** C1 on the owner's iPhone with the
-  owner's 4K HDR10, Dolby Vision 8.1 and converted profile 7 files. C2
-  in the iPhone simulator.
+  owner's 4K HDR10 and Dolby Vision 8.1 files, and an original profile 7
+  remux, so the live converter runs for the whole play. C2 in the iPhone
+  simulator.
 - **I2, the page on a phone.** Safe areas, small heights, the player in
   both orientations, and the forms with the keyboard up. The iPhone
   simulator venue runs, at two phone sizes, every end-to-end scenario
@@ -180,8 +181,10 @@ each pushed to `origin` and `github` as it lands
 - **I4, the engine's memory and thermal response.** XCTests check the
   bounds and inject memory warnings and thermal states. The proof is on
   the phone: after I4's changes, the sustained hardware and software
-  plays of I1 are repeated on the owner's iPhone, recording peak
-  footprint, the queue bounds reached, and that the play continued.
+  plays of I1 are repeated on the owner's iPhone, the original profile 7
+  remux among them, with the converter confirmed active throughout. Each
+  records peak footprint, the queue bounds reached, and that the play
+  continued.
 - **I5, the owner's by-eye checks** on the iPhone, one by one from a
   checklist, each recorded with what was seen. The checklist is the
   iPadOS plan's rows 15 to 17, run on the phone:
