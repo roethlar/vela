@@ -364,12 +364,14 @@ never replace an unreadable document with defaults, explicit recovery):
 - **Account binding.** The cached copy and the pending edits carry the
   CloudKit account they came from. When the account changes, they are
   hidden and their uploads suspended until the same account returns.
-- **Records and merging.** One record per playlist (name, order) and one
-  per entry, each with a stable id, so records stay within CloudKit's
-  limits and two TVs' edits merge by id. Adds and removals merge. A
-  rename or reorder that conflicts takes the server's revision, and the
-  other TV's change is re-applied where it still fits, otherwise
-  reported to the user.
+- **Records and merging.** One small record per playlist (its name) and
+  one per entry, each with a stable id. Each entry record carries its own
+  sortable position key, so no record grows with the playlist.
+  - Adds and removals merge by id.
+  - A move names the entries it goes between, not an index, and is
+    rebased onto the server's order by those ids. If they are gone, it is
+    reported to the user.
+  - A conflicting rename takes the server's revision and is reported.
 - **Offline.** Pending edits wait in `UserDefaults`, within a fixed share
   that leaves settings and recovery their space. When the share is full,
   further offline edits are refused visibly until the queue drains; that
@@ -381,8 +383,9 @@ never replace an unreadable document with defaults, explicit recovery):
   with the durable stores' atomic save and `fsync`, not in
   `UserDefaults`, whose writes reach disk later. It stays inside the same
   share of persistent space.
-- **Quota.** A CloudKit quota or limit error is shown to the user, and
-  the edit stays pending, not lost.
+- **Quota.** A request over CloudKit's per-request limit is split and
+  sent again. An exhausted iCloud quota is shown to the user, and the
+  edit stays pending, not lost.
 - **Setup.** The iCloud container entitlement is in the tracked XcodeGen
   spec and the provisioning, and the production schema is deployed
   before the first TestFlight build that uses it.
