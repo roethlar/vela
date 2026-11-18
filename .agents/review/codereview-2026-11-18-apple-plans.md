@@ -326,3 +326,32 @@ tvOS:
 
 Open: these repairs have no verdict yet. The owner decides whether a
 fifth round runs.
+
+## Design round 5 (2026-11-18, `1f560b1..2ffdd13`)
+
+Design only. Two codex sessions, 18:57Z to 19:08Z, exit 0. Reports,
+verbatim: `ipados-r5.md` and `tvos-r5.md`.
+
+iPadOS:
+- Closed: ipd-37, ipd-39, ipd-40, ipd-48 to ipd-51.
+- Reopened and repaired again: ipd-32 (`3566faf`), ipd-36 (`1dbb1d6`),
+  ipd-52 (`3285093`).
+- New:
+  - ipd-53, reads at end of file: `facab84`;
+  - ipd-54, AVS2's GPL-only decoder: the owner's question O5;
+  - ipd-55, demuxers opening the network: `fd4461e`;
+  - ipd-56, uavs3d's 10-bit build: `1dbb1d6`;
+  - ipd-57, one representation per open: `facab84`;
+  - ipd-58, redirect loops: `24cf277`.
+
+tvOS:
+- Closed: tvp-4, tvp-35, tvp-41, tvp-43, tvp-44, tvp-46.
+- Reopened and repaired again: tvp-45 (`2d0709a`).
+- New:
+  - tvp-47, tied position keys: `2d0709a`;
+  - tvp-48, both stores full: `5c9b18d`;
+  - tvp-49, buffer ownership: `23d1c71`;
+  - tvp-50, playlist base URL on the bridge: `23d1c71`.
+- The others duplicate the iPadOS findings.
+
+Open: these repairs have no verdict; O5 waits for the owner.

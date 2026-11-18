@@ -42,7 +42,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     for a verdict.
 
   Rounds 3 and 4 ran and every finding is repaired; V5 (a full offline
-  playlist queue on tvOS) was approved by the owner on 2026-11-18. Earlier note:
+  playlist queue on tvOS) was approved by the owner on 2026-11-18. Round 5
+  ran and is repaired; O5 (AVS2, whose only decoder is GPL) waits for the
+  owner. Earlier note:
   a design-only codex round over the updated plans (owner,
   2026-11-18: "review with codex is fine once you have the updated
   plans"). It gives the 33 repaired rows their verdicts. No go to start
