@@ -71,9 +71,14 @@ therefore built here; `ios-port.md` adds what is specific to the phone.
 ## Owner inputs needed (one at a time, in this order)
 
 - **O1. Devices (a fact, not a choice).** Which iPads (model and iPadOS
-  version) and which Apple TV 4K generations the owner can test on. Only
-  iPad Pro screens show HDR: the 12.9-inch mini-LED models (M1, M2) and
-  the OLED models (M4 and later). Probe P2 runs on an HDR iPad and on
+  version) and which Apple TV 4K generations the owner can test on.
+  Whether an iPad can take part in the HDR checks is decided by its
+  measured EDR headroom (`UIScreen.potentialEDRHeadroom`, B-1) and its
+  playback capability, not by a model list. Apple documents EDR headroom
+  on conventional backlit iPads too, though lower. Reference-quality
+  checks name an XDR screen separately: the 12.9-inch mini-LED iPad Pros
+  (M1, M2) and the OLED ones (M4 and later). Probe P2 runs on an iPad
+  with EDR headroom and on
   every Apple TV generation the owner has, with its LG OLED. The owner has
   said (2026-11-18): "several apple tv 4ks all connected to LG OLEDs with
   hdr and dv support". Generation and audio chain (receiver or soundbar)
