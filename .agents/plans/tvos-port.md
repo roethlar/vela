@@ -444,12 +444,11 @@ each pushed to `origin` and `github` as it lands
     the UI tests in the tvOS simulator against the mock servers, and
     builds the app.
   - The release workflow gets the TestFlight job if O2 is ruled that way.
-  - A tracked privacy manifest (`PrivacyInfo.xcprivacy`) goes into the
-    tvOS target. It declares every required-reason API the app and its
-    libraries use: `UserDefaults` (app-only, reason CA92.1), and file
-    timestamps (`stat`, through Rust's `std::fs::metadata`). The archived
-    app is checked for it, because App Store Connect rejects uploads,
-    TestFlight's included, without one.
+  - Privacy manifests, as in `ipados-port.md` B-4. The tvOS target's
+    tracked manifest covers the app binary and the Rust core, with
+    `UserDefaults` (app-only, reason CA92.1) and file timestamps (`stat`,
+    through `std::fs::metadata`). Each shipped framework carries its own
+    manifest, and packaging checks each one in the archive.
   - Docs, the release notes, the owner's checklist, and the
     repo-guidance rule of V-6.
 

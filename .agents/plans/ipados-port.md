@@ -599,13 +599,18 @@ of any new layout logic.
   Tauri's iOS signing requirements are the reference. The slice proves
   its channel end to end: a build from a fresh runner installs and starts
   on the owner's iPad.
-- **Privacy manifest:** a tracked `PrivacyInfo.xcprivacy` is merged into
-  the generated project from tracked files (B-2's rule). It declares
-  every required-reason API the app, its plugin and its libraries use:
-  `UserDefaults`, and file timestamps (`stat`, through Rust's
-  `std::fs::metadata` in the durable stores). The archived app is checked
-  for it, because App Store Connect rejects uploads, TestFlight's
-  included, without one (review finding tvp-19).
+- **Privacy manifests:** Apple requires the bundle that contains a
+  binary to declare the required-reason APIs that binary calls, and App
+  Store Connect rejects uploads, TestFlight's included, without them
+  (review findings tvp-19, ipd-23).
+  - The app's tracked `PrivacyInfo.xcprivacy` is merged into the
+    generated project from tracked files (B-2's rule). It covers what
+    the app binary calls, the Rust core included: `UserDefaults`, and
+    file timestamps (`stat`, through `std::fs::metadata`).
+  - Each dynamic framework of A-3 carries its own manifest for what it
+    calls, written when the framework is built.
+  - Packaging inventories the archive's executables and frameworks, and
+    checks each one's manifest.
 - **Version and tags:** the version is Vela's one version. Tags and
   publishing stay the owner's.
 - **Repo guidance:** the iOS commands join "Verification" in
