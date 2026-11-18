@@ -145,6 +145,16 @@ The split:
   the Tauri crate. The core keeps an opaque per-shell extension where
   config must round-trip them, because the compatibility rails forbid
   dropping fields (`.agents/repo-guidance.md`).
+- **The two playback workers started in `lib.rs` `.setup` move into the
+  core**, and start and stop with it on every shell:
+  - the Automatic quality step-down loop (`commands::apply_step_down`);
+  - the playback sequence dispatcher, which admits a clean end, advances
+    playlists, sends `continue-playing`, marks the item watched on the
+    servers and sends `playback-ended`.
+
+  A test drives a clean end of file and a step-down through the native
+  entry points (`vela_core_start`, `vela_core_player_event`), and sees
+  the playlist advance, the watched mark and the replacement play.
 - **`src-tauri` keeps the Tauri commands, as thin wrappers with unchanged
   names, arguments and results** (the page does not change). It also
   keeps the mpv players, `display.rs`, the embedded hosts, and the
