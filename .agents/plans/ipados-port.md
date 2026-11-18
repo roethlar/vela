@@ -145,31 +145,39 @@ hardware keyboard.
   Apple TV, and plays Dolby Vision on an HDR iPad. It does this for
   profiles 5 and 8.1 from MKV, and for profile 7 converted to 8.1 live
   with libdovi, through the engine's renderer.
-  - **The renderer is the sample-buffer path.** FFmpeg demuxes into
-    compressed `CMSampleBuffer`s whose format description carries the
-    Dolby Vision configuration (`dvcC`/`dvvC`). They go to
-    `AVSampleBufferDisplayLayer` and `AVSampleBufferAudioRenderer`, with
-    one `AVSampleBufferRenderSynchronizer` as the clock for both.
-  - **Why it must be the base for every combination:** only it can show
-    software-decoded video (`CVPixelBuffer`s) and play multichannel LPCM.
-    An `AVPlayerLayer` cannot take enqueued frames, and Apple's HLS
-    audio codecs exclude multichannel LPCM.
-  - **The loopback is only a fallback for Dolby Vision.** In it, FFmpeg
-    repackages the stream as HLS with fragmented MP4 and serves it from
-    inside the app to AVPlayer. P2 tries it only if Dolby Vision does not
-    reach the TV and the iPad through sample buffers. Its master playlist
-    is written by the engine with the attributes Apple requires:
-    `CODECS`, `SUPPLEMENTAL-CODECS` with the Dolby Vision compatibility
-    brand, and `VIDEO-RANGE`. FFmpeg's playlist writer omits these, and
-    without them a working route would look unsupported. Its segment
-    producer has byte and retention limits of its own, and stops
-    producing when it reaches them.
-  - **If Dolby Vision works only through the loopback, the plan stops.**
-    The common pairing of Dolby Vision with TrueHD or DTS-HD MA (UHD
-    Blu-ray remuxes) would then need lossless audio beside AVPlayer on one
-    clock, and that design goes to the owner before engine code lands.
-  - **P2 plays mixed combinations:** Dolby Vision with TrueHD decoded to
-    LPCM, software-decoded video with E-AC-3, and HDR10 with DTS-HD MA.
+  - **Which renderer is P2's decision** (owner, 2026-11-18: "add the
+    player decision to the list of things the apple tv probe will
+    decide"). The two are compared on equal terms, on the Apple TV and
+    on the iPad Pro.
+  - **Loopback:** FFmpeg remuxes the stream into HLS with fragmented MP4,
+    and the engine serves it from inside the app to AVPlayer. AVPlayer
+    then does buffering, seeking, sync, display matching and Now Playing
+    itself, so there is less engine code.
+    - Its master playlist is written by the engine with the attributes
+      Apple requires: `CODECS`, `SUPPLEMENTAL-CODECS` with the Dolby
+      Vision compatibility brand, and `VIDEO-RANGE`. FFmpeg's writer
+      omits these.
+    - Its segment producer has byte and retention limits of its own, and
+      stops producing when it reaches them.
+    - It cannot show video Vela decodes itself, and Apple's HLS audio
+      codecs exclude multichannel LPCM.
+  - **Sample buffers:** FFmpeg demuxes into compressed `CMSampleBuffer`s
+    whose format description carries the Dolby Vision configuration
+    (`dvcC`/`dvvC`). They go to `AVSampleBufferDisplayLayer` and
+    `AVSampleBufferAudioRenderer`, with one
+    `AVSampleBufferRenderSynchronizer` as the clock for both. It shows
+    software-decoded video and plays multichannel LPCM, at the cost of
+    more engine code.
+  - **The rule:** the loopback wins if, on the owner's devices, Dolby
+    Vision engages through it, and lossless multichannel audio decoded
+    from TrueHD or DTS-HD plays through it, re-encoded as ALAC or FLAC in
+    fragmented MP4. If the loopback wins, the owner is asked one
+    question: whether codecs Apple cannot decode go to the server's
+    transcode, since the loopback cannot show software-decoded video.
+    Otherwise sample buffers win. The comparison and the choice are
+    recorded in the Log.
+  - **P2 plays mixed combinations through both:** Dolby Vision with
+    TrueHD, software-decoded video with E-AC-3, and HDR10 with DTS-HD MA.
 - **A3 (P2).** The TV's Dolby Vision mode is triggered by
   `AVDisplayManager.preferredDisplayCriteria`, built with
   `AVDisplayCriteria(refreshRate:formatDescription:)` (tvOS 17), from a
@@ -318,12 +326,13 @@ Inside:
   - the desktop's recorded Jellyfin and Emby boundary
     (`.agents/decisions.md` 2026-07-23) is unchanged.
 - **Video:** compressed HEVC, H.264, AV1 (where the device has a
-  hardware decoder) and VP9 go to Apple's pipeline as compressed sample
-  buffers (A2). Codecs Apple does not decode are decoded by FFmpeg in
-  software into `CVPixelBuffer`s: MPEG-2, VC-1, H.264 10-bit, and AV1 on
-  devices without a hardware decoder (dav1d). Those go to the same
-  `AVSampleBufferDisplayLayer`, on the same synchronizer clock as the
-  audio.
+  hardware decoder) and VP9 go to Apple's pipeline by the renderer P2
+  chose (A2). Codecs Apple does not decode, such as MPEG-2, VC-1, H.264
+  10-bit, and AV1 on devices without a hardware decoder:
+  - with sample buffers, FFmpeg decodes them in software into
+    `CVPixelBuffer`s (dav1d for AV1), shown by the same display layer on
+    the same clock;
+  - with the loopback, they go as the owner rules at that point.
 - **HDR and Dolby Vision:**
   - The engine tags colour primaries, transfer, matrix, mastering
     display and content light level.
