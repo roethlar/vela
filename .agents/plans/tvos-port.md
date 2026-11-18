@@ -344,9 +344,10 @@ Each slice is one or more commits with tests and red-proofs, a
 - **Two kinds of screens can drift.** V-6's guards catch a missing
   command, not a missing behaviour. Each T slice's review checks the
   behaviour against the page's.
-- **The `UserDefaults` budget.** A library with very many playlists
-  could outgrow 400 KB. The refusal is visible and fails closed. Whether
-  that ever happens to the owner is measured in T3.
+- **The `UserDefaults` space.** If T0 shows that playlist references
+  could outgrow it, playlists need the CloudKit private database. That
+  depends on the owner's iCloud account, and the owner is told before it
+  lands (V-3).
 - **Display criteria depend on the owner's Apple TV settings.** The
   owner's checklist names them, and the player shows when the box
   refused a switch, if the API reports it.
