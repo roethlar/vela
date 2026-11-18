@@ -417,8 +417,17 @@ list is completed by P3, and the slice lands what P3 finds:
   - the Linux mpv paths in `external.rs`.
 - **Settings stored under mpv's name.** `get_mpv_advanced` and
   `set_mpv_advanced` carry portable settings beside mpv's: the skip
-  policies for intros, credits and commercials, and the playback quality.
-  The portable ones move to commands of their own, so iOS keeps them.
+  policies for intros, credits and commercials, the playback quality,
+  and the cropping mode, whose getter and setter also live in the mpv
+  commands. The portable ones move to commands of their own, so iOS
+  keeps them.
+- **Settings must still load.** The page loads Settings with one
+  `Promise.all` that includes `check_mpv` (`Settings.svelte`). A command
+  compiled out on iOS would reject that whole load before the servers or
+  any portable setting appear. So, in the same slice that removes any
+  command, the load becomes capability-aware: it asks only for what the
+  backend says exists. A test on the iOS build opens Settings, sees the
+  existing servers, and saves the crop mode.
 - **The display's HDR capability.** `get_playback_preferences` and
   source selection (`selection.rs`, `display::HdrState`) learn it from
   the desktop's monitors through the window. On iOS it comes from the
