@@ -26,6 +26,19 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   (`.agents/decisions.md`, 2026-11-17 entries). Still owner's: the slow-runner
   plan (`.agents/plans/e2e-slow-runner.md`, draft), tagging.
 
+- APPLE PORTS, PLANS DRAFTED 2026-11-18, NOT APPROVED. Owner rulings of
+  that day (`.agents/decisions.md`): iPadOS first, then iOS, then tvOS;
+  on all three, video plays through one engine built on Apple's own
+  pipeline, never mpv, so Apple TV shows real Dolby Vision. Plans:
+  `.agents/plans/ipados-port.md` (its Part A holds what all three share:
+  the player seam, the engine, the media libraries, the probes),
+  `.agents/plans/ios-port.md`, `.agents/plans/tvos-port.md`. NEXT: the
+  owner's review round, `codereview codex gpt-6.2-astra xhigh` over each
+  plan's commit (model and effort named by the owner for this dispatch
+  only); record in `.agents/review/codereview-2026-11-18-apple-plans.md`.
+  Then the plans' owner inputs, one at a time, starting with O1 (which
+  iPads and Apple TV generations).
+
 - PLATFORM PARITY, OWNER RULING 2026-11-16 (`.agents/decisions.md`, last
   entry; read it first). Vela works the same on Linux, macOS and Windows;
   a feature missing on one platform is a defect, and "by design" is never
