@@ -312,10 +312,16 @@ Inside:
   - Each playlist's references are resolved against the URL it was
     finally served from, after redirects, and cleaned, before FFmpeg
     sees them.
-  - A read returns exactly the bytes asked for: a `206` whose
-    `Content-Range` matches, or, when the server sends the whole
-    resource, the interval cut from it as it streams. Anything else is a
-    read error.
+  - A read returns up to the bytes asked for, with a count and an end of
+    file flag. A `206` must start at the requested offset; when the server
+    sends the whole resource instead, the interval is cut from it as it
+    streams. An HLS segment with a declared `BYTERANGE` must come back at
+    exactly that length. Anything else is a read error.
+  - One logical open is one representation. A playlist is fetched whole,
+    resolved and cleaned, and served from that snapshot. Media read in
+    several ranges carries the first response's validator (`If-Range`
+    with its ETag or Last-Modified), and restarts if the resource
+    changed.
   - FFmpeg's HLS demuxer runs with its HTTP persistence off, since it
     expects its own HTTP context when that is on.
 
