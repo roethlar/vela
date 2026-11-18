@@ -305,7 +305,8 @@ Inside:
     no cookie store.
   - It follows no redirect by itself (`Policy::none`). Each `Location` is
     checked against the origin rule below, and the next request's headers
-    are built for its own origin.
+    are built for its own origin. A chain stops at 10 hops or a repeated
+    URL, with a playback error that names no credential.
   - It has a connection timeout and a stall timeout that resets while
     bytes arrive, with no deadline on the whole response. It is cancelled
     when the play ends.
