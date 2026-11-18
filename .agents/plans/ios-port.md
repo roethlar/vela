@@ -57,12 +57,12 @@ iPhone, and the page is usable:
 
 ## Assumptions (each proven or overturned by a probe)
 
-- **C1 (I0).** The engine plays 4K HDR10 and Dolby Vision on the owner's
+- **C1 (I1).** The engine plays 4K HDR10 and Dolby Vision on the owner's
   iPhone within its memory limit: the demux and loopback buffers, or the
   sample-buffer queue, whichever P2 chose. It also does so on the
   software-decode path for a codec the phone has no decoder for.
   Measured: peak memory, and thermal state over a 30-minute play.
-- **C2 (I0).** With the on-screen keyboard up in landscape (about half
+- **C2 (I1).** With the on-screen keyboard up in landscape (about half
   the height), the page's forms (the server address, sign-in, search,
   playlist names) scroll their focused field into view.
 
@@ -85,7 +85,7 @@ detail pages, top-tab Settings, the player's single sheet):
   third, with the controls below it, reachable with one hand. Turning to
   landscape fills the screen. Rotation does not interrupt the play, and
   the engine's layer follows the rectangle the page reports.
-- **Navigation:** the iPadOS plan's drawer, unless I1's check on the
+- **Navigation:** the iPadOS plan's drawer, unless I2's check on the
   owner's phone shows it is hard to reach with one hand. Then the same
   destinations move to a bottom bar at phone sizes. That is a layout
   change, not a feature difference.
@@ -123,19 +123,24 @@ detail pages, top-tab Settings, the player's single sheet):
 Each slice is one or more commits with tests and red-proofs, a
 `codereview codex` hunt and a push.
 
-- **I0, probes (throwaway; Log).** C1 on the owner's iPhone with the
-  owner's 4K HDR10, Dolby Vision 8.1 and converted profile 7 files.
-  C2 in the iPhone simulator.
-- **I1, the page on a phone.** Safe areas, small heights, the player in
+- **I0, the iPhone family.** Device family 1,2 and the orientations go
+  in the tracked configuration first. Apple's device family `2` alone
+  prevents installing on an iPhone, and every later slice needs the app
+  on the phone and in the iPhone simulator. CI builds the iPhone
+  simulator app, and the app is installed on the owner's iPhone through
+  O2's channel.
+- **I1, probes (throwaway; Log).** C1 on the owner's iPhone with the
+  owner's 4K HDR10, Dolby Vision 8.1 and converted profile 7 files. C2
+  in the iPhone simulator.
+- **I2, the page on a phone.** Safe areas, small heights, the player in
   both orientations, and the forms with the keyboard up. The iPhone
   simulator venue runs every end-to-end scenario at two phone sizes. The
   desktop suites run too, to show the desktop is unchanged.
-- **I2, the app for iPhone.** Device family, orientations and icons. CI
-  builds the iPhone simulator app, and the release workflow's iOS job,
-  if O2 made one, ships the universal app.
-- **I3, the engine's memory and thermal response**, with XCTests that
+- **I3, icons and release packaging.** The iPhone icon sizes. The
+  release workflow's iOS job, if O2 made one, ships the universal app.
+- **I4, the engine's memory and thermal response**, with XCTests that
   inject memory warnings and thermal states.
-- **I4, the owner's by-eye checks** on the iPhone (HDR10, Dolby Vision,
+- **I5, the owner's by-eye checks** on the iPhone (HDR10, Dolby Vision,
   rotation during play), then docs and release notes.
 
 ## Risks
