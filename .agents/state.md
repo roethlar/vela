@@ -32,12 +32,18 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   pipeline, never mpv, so Apple TV shows real Dolby Vision. Plans:
   `.agents/plans/ipados-port.md` (its Part A holds what all three share:
   the player seam, the engine, the media libraries, the probes),
-  `.agents/plans/ios-port.md`, `.agents/plans/tvos-port.md`. NEXT: the
-  owner's review round, `codereview codex gpt-6.2-astra xhigh` over each
-  plan's commit (model and effort named by the owner for this dispatch
-  only); record in `.agents/review/codereview-2026-11-18-apple-plans.md`.
-  Then the plans' owner inputs, one at a time, starting with O1 (which
-  iPads and Apple TV generations).
+  `.agents/plans/ios-port.md`, `.agents/plans/tvos-port.md`. Review
+  (`codereview codex gpt-6.2-astra xhigh`, owner-named for these
+  dispatches; record `.agents/review/codereview-2026-11-18-apple-plans.md`):
+  - first hunt: 50 findings, all repaired;
+  - repair hunt: 39 closed, 10 reopened, 30 new;
+  - after the owner's ruling of 2026-11-18 (no tests designed or reviewed
+    for unwritten code), 9 declined and the rest repaired. 33 rows wait
+    for a verdict.
+
+  NEXT, the owner's: whether a further codex round runs, scoped to
+  design and excluding tests. Then the plans' owner inputs, one at a
+  time, starting with O1 (which iPads and Apple TV generations).
 
 - PLATFORM PARITY, OWNER RULING 2026-11-16 (`.agents/decisions.md`, last
   entry; read it first). Vela works the same on Linux, macOS and Windows;
