@@ -133,7 +133,20 @@ find by name):
   and source choices.
 
 The split:
-- **A workspace crate `crates/vela-core`, with no Tauri dependency.** It
+- **A workspace crate `src-tauri/crates/vela-core`, with no Tauri
+  dependency.** `src-tauri/Cargo.toml` becomes the workspace root, so the
+  lockfile and the rule that Cargo runs from `src-tauri/` stay as they
+  are. CI and the repo-guidance Verification commands change in the same
+  commit:
+  - `cargo test --workspace --locked` and `cargo clippy --workspace
+    --all-targets`, because a plain `cargo test` from the Tauri package
+    would build the core without running its tests;
+  - `cargo audit` reads the workspace's one lockfile.
+
+  An injected failing `vela-core` test proves CI runs those tests, and is
+  then taken out.
+
+  The crate
   holds the servers (`source/`, `plex_library.rs`, `plex_api.rs`), the
   stores (`storage.rs`, `durable.rs`, `config.rs`, `connections.rs`,
   `playlists.rs`, `recents.rs`), `selection.rs`, `automatic.rs` and
