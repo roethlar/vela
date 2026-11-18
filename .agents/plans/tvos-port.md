@@ -308,7 +308,8 @@ never replace an unreadable document with defaults, explicit recovery):
 - **Display criteria:** for each play,
   `AVDisplayManager.preferredDisplayCriteria` is set from the content's
   frame rate and from a format description that names Dolby Vision
-  (`dvh1`/`dvhe`), HDR10 or HLG. It is cleared when the play ends.
+  (`dvh1`/`dvhe` for HEVC; for profile 10, the AV1 Dolby Vision subtype P2
+  identifies, on boxes that decode AV1), HDR10 or HLG. It is cleared when the play ends.
   - The owner's Apple TV settings must allow it ("Match Content: Dynamic
     Range" and "Frame Rate"). The owner's checklist says so.
   - The criteria are set only if the box's own format choice leaves that
