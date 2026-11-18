@@ -460,8 +460,12 @@ Inside:
        - A server's play session (Jellyfin and Emby `Started` with no
          `Stopped`) is tracked apart from encoder cleanup and from
          progress. It is closed later only by a request that writes no
-         item progress. Where a provider has none, the server's own
-         expiry closes it, which the Log records for that provider.
+         item progress, and only before this device starts another play.
+         Jellyfin's `Stopped` clears the device's current session, so a
+         close still pending when a new play starts is dropped. Where a
+         provider has no such close, the server's own expiry closes it.
+         The Log records, per provider, what that expiry does to the
+         position (Jellyfin's can report the old one).
     3. Coming back after that, the player view shows the play paused at
        the resume point, which is settled on return and again when the
        user presses Play.
