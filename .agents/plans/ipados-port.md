@@ -510,7 +510,13 @@ Lowest effort first:
 1. **Viewport and input:**
    - `viewport-fit=cover`, with safe-area insets on the header, the
      fixed footer and the player bar.
-   - `dvh` in place of `100vh`, so heights follow the on-screen keyboard.
+   - `dvh` in place of `100vh` for the page's own height. The on-screen
+     keyboard is handled by the visual viewport, because iPad WebKit can
+     shrink or pan the visual viewport while `dvh` layout keeps its size.
+     Dialogs, Settings, the fixed footer and form actions are sized and
+     scrolled by `window.visualViewport` (height and offset). A test opens
+     the server form at compact width with the software keyboard up, and
+     checks that the field and its action are both reachable.
    - Inputs at 16px or more, so iPadOS does not zoom, with fitting
      `autocapitalize`, `autocorrect` and `inputmode`. The server URL
      field becomes `type=url`.
