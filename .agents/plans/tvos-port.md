@@ -165,8 +165,18 @@ Proof:
 - Both Linux end-to-end suites pass in full with the parity verdict
   PASS, the Windows suite in CI, and the iOS simulator venue.
 - `scripts/check-other-platforms.sh` passes.
-- A test lists every registered command and checks that it reaches the
-  core function it wraps. This guards the wiring, not just the units.
+- Commands are classified in one table:
+  - **shared commands**, wrappers over the core, each checked by a test
+    that it reaches the core function it wraps (this guards the wiring,
+    not just the units);
+  - **shell operations**, which belong to Tauri or the desktop and are
+    never wrapped for their own sake: `exit_vela`, `player_window_ready`,
+    `player_set_rect`, `player_fullscreen` and the mpv commands;
+  - **events**.
+
+  Features that live only in the page, such as the theme
+  (`Settings.svelte`), are listed apart. Each is checked through the
+  interface that owns it.
 
 ### V-2. The core's Swift interface
 
@@ -323,10 +333,11 @@ From the day this app lands, every user-visible feature must exist in
 both the Svelte page and the tvOS app (the parity ruling). Two guards:
 - the parity table below is the canonical list, and a feature is added
   to it in the commit that adds it to either side;
-- a Node test (`tests/tvos-coverage.test.mjs`) checks that every
-  portable command registered in `src-tauri/src/lib.rs` is called by the
-  tvOS app's sources, or is listed in the table as desktop-only with the
-  owner's approval.
+- a Node test (`tests/tvos-coverage.test.mjs`) checks that every shared
+  command of V-1's table is called by the tvOS app's sources. Shell
+  operations are exempt; each is either mapped to a tvOS equivalent or
+  approved as absent. The test also checks that every page-only feature
+  in the parity table has a tvOS row.
 
 When this plan lands, the rule also goes into
 `.agents/repo-guidance.md`.
