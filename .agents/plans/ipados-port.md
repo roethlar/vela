@@ -202,6 +202,17 @@ The seam:
 
    `build_launch_for` becomes the mpv adapter that turns a
    `PlayRequest` into today's `LaunchPlan`, byte for byte.
+
+   The desktop's own launch inputs stay beside it, in a desktop launch
+   context the mpv adapter takes with the `PlayRequest`: the inherited
+   window state and the assigned screen (`commands.rs` passes them into
+   the launch today, and `launch.rs` turns them into mpv options).
+   Likewise, the position reader's window and display observations
+   (fullscreen, maximized, display names and size, OSD dimensions) stay
+   in the mpv adapter's own path, which keeps feeding the window-state
+   memory. They are not `PlayerEvent`s. A test runs consecutive plays on
+   different screens, including an embedded play that falls back to
+   external, and checks each reopens where it should.
 2. **`PlayerEvent`, player-neutral.**
    - Position (at least 4 Hz), duration, paused, volume, muted.
    - Audio and subtitle tracks (id, title, language, selected).
