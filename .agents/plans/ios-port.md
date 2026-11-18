@@ -48,9 +48,12 @@ iPhone, and the page is usable:
 
 ## Owner inputs needed (one at a time)
 
-- **P1. The owner's iPhone (a fact):** model and iOS version. Only
-  iPhones from the 12 on have HDR screens. iPhones without one play
-  through Apple's tone mapping; Vela writes no SDR path of its own (the
+- **P1. The owner's iPhone (a fact):** model and iOS version. Which
+  iPhones have HDR screens comes from Apple's list (support.apple.com
+  109039), which includes the iPhone X, XS and 11 Pro as well as the
+  12 and later, and from the screen's measured EDR headroom at run time
+  (the iPadOS plan's B-1), never from a model cutoff. iPhones without one
+  play through Apple's tone mapping; Vela writes no SDR path of its own (the
   HDR rule).
 - **P2. Differences that need approval:** none new. The four of
   `ipados-port.md`, as ruled there, apply to the phone.
