@@ -63,8 +63,11 @@ iPhone, and the page is usable:
 - **C1 (I1).** The engine plays 4K HDR10 and Dolby Vision on the owner's
   iPhone within its memory limit: the demux and loopback buffers, or the
   sample-buffer queue, whichever P2 chose. It also does so on the
-  software-decode path for a codec the phone has no decoder for.
-  Measured: peak memory, and thermal state over a 30-minute play.
+  software-decode path, with a fixture chosen to need it on the owner's
+  model: VC-1 or MPEG-2, 10-bit H.264, or AV1 on a phone without an AV1
+  decoder. The engine reports which decoder is active, and the probe
+  asserts it. Measured separately for the hardware and software paths:
+  peak memory, and thermal state over a 30-minute play.
 - **C2 (I1).** With the on-screen keyboard up in landscape (about half
   the height), the page's forms (the server address, sign-in, search,
   playlist names) scroll their focused field into view.
