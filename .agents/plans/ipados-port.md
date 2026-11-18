@@ -281,11 +281,18 @@ Inside:
   Multi-part items play as one timeline. Server transcodes arrive as HLS
   (the quality tiers of `plex_library.rs` and `source/jellyfin.rs`), so
   FFmpeg's HLS demuxer reads the master and child playlists and their
-  MPEG-TS or fragmented-MP4 segments. Every nested request and redirect
-  is opened through the engine's own `io_open` callback. The callback
-  sends the auth headers only to the connection's own origin (scheme,
-  host and port), as Plex part URLs are already pinned to it
-  (`plex_library.rs`), and sends no credential anywhere else.
+  MPEG-TS or fragmented-MP4 segments.
+- **Every network request is the engine's own.** FFmpeg never opens a
+  connection. Its built-in HTTP follows redirects and reuses connections
+  without asking the engine. Instead, every playlist and segment is
+  fetched by the engine's HTTP client (`URLSession`), and FFmpeg reads
+  the bytes through a custom I/O context. The client applies the policy
+  to each request and to each redirect before it is followed:
+  - auth headers go only to the connection's own origin (scheme, host
+    and port), as Plex part URLs are already pinned to it
+    (`plex_library.rs`);
+  - no credential goes anywhere else;
+  - the TLS-verify setting holds on every request.
 - **Credential-free stream requests.** Today a Jellyfin transcode URL
   carries `api_key` in its query (`source/jellyfin.rs`,
   `transcode_url`), and the play command passes that URL on beside the
