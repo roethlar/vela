@@ -467,7 +467,11 @@ This follows the libmpv set's recipe (`packaging/libmpv/versions.txt`;
     --disable-autodetect`. The script asserts the licence string and the
     expected `CONFIG_*` features afterwards, as the macOS script does.
     Every decoder, demuxer and parser FFmpeg's LGPL configuration
-    provides is enabled, with swresample and swscale. Any codec Apple's
+    provides is enabled, and so is every external decoder library FFmpeg
+    can use whose licence the licensing rule of 2026-11-12 permits: dav1d
+    (AV1) and uavs3d (AVS3), both BSD and both pinned like the rest. A
+    codec whose only decoder that rule excludes is listed in the Log,
+    and is not claimed. The build is with swresample and swscale. Any codec Apple's
     hardware does not take is then decoded in software, and the engine
     falls back to software whenever VideoToolbox refuses a stream.
     FFmpeg's HTTP and HTTPS protocols are compiled in, because its HLS
