@@ -259,7 +259,10 @@ never replace an unreadable document with defaults, explicit recovery):
   1. write any new Keychain items;
   2. write the connections document, which is the commit point;
   3. delete the items that no current or retained history document
-     names.
+     names, but only at the next launch. `UserDefaults` reaches disk
+     asynchronously, so step 2's document may not be on disk when the
+     app ends. At launch the backend reads back every current and
+     history document, and deletes only the items none of them names.
 
   An interruption at any step leaves at most some unreferenced items,
   which are removed at the next start. So a rollback to any retained
