@@ -444,11 +444,23 @@ Inside:
          position is never sent to the server later, because the
          servers' progress writes cannot be made conditional on nothing
          newer having happened. The position stays in Vela's recents.
-    3. Coming back after that, the resume point is settled first: the
-       newer of Vela's saved position and the server's current progress
-       and watched state for the item. The player view shows the play
-       paused there, and playing again starts a fresh session
-       there.
+       - A server's play session (Jellyfin and Emby `Started` with no
+         `Stopped`) is tracked apart from encoder cleanup and from
+         progress. It is closed later only by a request that writes no
+         item progress. Where a provider has none, the server's own
+         expiry closes it, which the Log records for that provider.
+    3. Coming back after that, the player view shows the play paused at
+       the resume point, which is settled on return and again when the
+       user presses Play.
+       - The newer of Vela's saved position and the server's state wins,
+         judged by when each was observed. The checkpoint keeps its own
+         time. The server's comes from the item's last-played time
+         (Plex `lastViewedAt`, Jellyfin and Emby
+         `UserData.LastPlayedDate`, which the core maps for this). A
+         watched mark newer than the checkpoint wins too.
+       - Where the server gives no time, its state wins, unless the user
+         has sought.
+       - Playing starts a fresh session there.
 
     Proof: whether the app comes back, is suspended or is ended, the
     servers see one final report and the transcode torn down.
