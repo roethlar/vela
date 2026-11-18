@@ -289,13 +289,23 @@ Inside:
 - **Every network request is the engine's own.** FFmpeg never opens a
   connection. Its built-in HTTP follows redirects and reuses connections
   without asking the engine. Instead, every playlist and segment is
-  fetched by Vela's core HTTP client (reqwest with native-tls, the
-  client that already talks to the servers), called across the bridge
-  as a read of a byte range. FFmpeg reads those bytes through a custom
+  fetched in the core, by a playback HTTP client built for each play
+  from the `PlayRequest`'s policy, and called across the bridge as a
+  read of a byte range. It is not the provider clients, which ignore the
+  player's certificate setting, follow redirects themselves and end a
+  request after 15 s. FFmpeg reads those bytes through a custom
   I/O context.
   - The core's client is not Apple's URL Loading System, so App
-    Transport Security does not govern it (P3 confirms). It already
-    honours the TLS-verify setting, and keeps no cookie store.
+    Transport Security does not govern it (P3 confirms).
+  - It uses reqwest with native-tls. It verifies certificates unless the
+    user's certificate setting for playback says otherwise, and it keeps
+    no cookie store.
+  - It follows no redirect by itself (`Policy::none`). Each `Location` is
+    checked against the origin rule below, and the next request's headers
+    are built for its own origin.
+  - It has a connection timeout and a stall timeout that resets while
+    bytes arrive, with no deadline on the whole response. It is cancelled
+    when the play ends.
   - Each playlist's references are resolved against the URL it was
     finally served from, after redirects, and cleaned, before FFmpeg
     sees them.
