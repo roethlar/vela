@@ -89,15 +89,16 @@ therefore built here; `ios-port.md` adds what is specific to the phone.
   - All run the latest release, 27.x (owner, 2026-11-18). The TVs'
     audio chain is still unknown, and is asked when the slice needing it
     comes.
-- **O2. Distribution channel (a decision).** How builds reach the owner's
-  devices. Recommendation: TestFlight, internal testing. Builds install
-  over the air on every device the owner signs into, Apple TVs included.
-  They need no device registration and no review by Apple, and CI can
-  upload them with an App Store Connect key. Costs: the owner creates the
-  app's record in App Store Connect, and each build expires after 90
-  days. Alternatives: development-signed builds (each device registered
-  to the team, installed from a Mac, profiles renewed yearly), or the App
-  Store.
+- **O2. Distribution channel: RULED 2026-11-18** (`.agents/decisions.md`,
+  that date).
+  - While Vela is being built: TestFlight internal testing for the builds
+    the owner uses, which CI uploads, and development-signed builds from
+    a Mac with Xcode for probes and debugging.
+  - Later, the App Store, publicly. Possibly as a paid app with free
+    desktop versions, a door that must not be closed.
+  - Before the App Store Connect record is created, the owner confirms
+    the bundle identifier (today `com.michael.vela`) and the App Store
+    name. Both are fixed once the record exists.
 - **O3. Xcode on `nagatha` (an action).** This Mac has only the Command
   Line Tools, with no Xcode and no iOS or tvOS SDK. Installing Xcode
   needs the owner's Apple ID. Until then, every iOS build runs only in CI.
@@ -512,6 +513,10 @@ list is completed by P3, and the slice lands what P3 finds:
   configuration. CI makes it on every build; it is never committed or
   edited (repo-guidance: `src-tauri/gen/` is generated).
   - Device family: iPad only in this plan.
+  - Bundle: the iOS app's bundle carries no mpv scripts, which are
+    desktop resources (`tauri.conf.json` `bundle.resources`). A tracked
+    `tauri.ios.conf.json` overlay leaves them out (decisions
+    2026-11-12, licensing, and 2026-11-18, the App Store).
   - Minimum iPadOS: 27. The owner's devices run the latest release and
     are updated as each one ships (owner, 2026-11-18), and the owner is
     Vela's only user. So P2 and every check run on the 27.x the devices

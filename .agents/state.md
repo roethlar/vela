@@ -44,7 +44,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   NEXT, the owner's: whether a further codex round runs, scoped to
   design and excluding tests. O1 is answered (devices in
   `.agents/machines.md`, "Apple test devices"); the next owner input is
-  O2, the distribution channel.
+  O3, Xcode on `nagatha` (O2 is ruled:
+  TestFlight and development signing now, the App Store later).
 
 - PLATFORM PARITY, OWNER RULING 2026-11-16 (`.agents/decisions.md`, last
   entry; read it first). Vela works the same on Linux, macOS and Windows;

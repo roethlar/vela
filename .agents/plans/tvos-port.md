@@ -86,9 +86,11 @@ absence.
     soundbar is on eARC, ARC, or the Apple TV directly.
 - **V2. The differences that need approval**, one at a time, before
   slice T8. See the list below.
-- **V3. The distribution channel** is ruled once, as O2 of
-  `ipados-port.md`. tvOS uses the same channel; TestFlight covers Apple
-  TV.
+- **V3. The distribution channel: RULED 2026-11-18** as O2 of
+  `ipados-port.md`: TestFlight internal testing and development-signed
+  builds now, the App Store later. The tvOS app shares the iOS app's
+  bundle identifier and App Store Connect record, so one purchase can
+  cover iPad, iPhone and Apple TV (`.agents/decisions.md`, that date).
 - **V4. Where playlists live on tvOS (a decision).** Apple TV keeps only
   `UserDefaults` (and the Keychain) persistent, and terminates an app
   whose defaults reach 1 MB. The two choices:

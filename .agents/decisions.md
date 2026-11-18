@@ -2707,3 +2707,37 @@ How to apply:
   of that kind is declined with this ruling as its reason.
 - Probes are experiments on the platform, not tests of Vela's code. They
   stay in plans, as briefly as they can be stated.
+
+## 2026-11-18 - Apple builds: TestFlight and development signing now, the App Store later; a paid App Store release stays possible
+
+Status: OWNER RULING (2026-11-18). O2 of `.agents/plans/ipados-port.md`.
+
+Decision:
+Offered every channel to the owner's devices, the agent recommended a
+pair: TestFlight internal testing for the builds the owner uses, and
+development-signed builds for probes and debugging. The owner, verbatim:
+"yes for development phase, eventually app store public. if this works
+well, I'll want to sell it on the app store with free desktop versions.
+do not close that door."
+
+How to apply (agent's reading, not the owner's words):
+- While Vela is being built, Apple builds reach the owner's devices by
+  TestFlight internal testing (CI uploads) and by development-signed
+  builds from a Mac with Xcode. Publishing on the App Store, and when, is
+  the owner's.
+- Nothing may close the door to a paid App Store app with free desktop
+  versions:
+  - The Apple apps use public API only, with no entitlement that Apple
+    grants only on request, and nothing App Review rejects.
+  - The iPadOS and iOS app and the tvOS app share one bundle identifier
+    and one App Store Connect record, so a single purchase can cover
+    iPad, iPhone and Apple TV (universal purchase). The identifier and
+    the App Store name are fixed once that record exists, so the owner
+    confirms both before it is created.
+  - The Apple bundles ship only what the licensing rule of 2026-11-12
+    allows. The desktop's GPL mpv scripts never go into them.
+  - The desktop stays free on its own distribution. The macOS app uses
+    Tauri's `macos-private-api`, which matters only if the Mac app ever
+    goes to the Mac App Store.
+  - The 27 floor suits the owner's devices. A public release may want an
+    older floor, which is a later decision.
