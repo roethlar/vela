@@ -169,6 +169,19 @@ the page:
     through a callback with JSON);
   - `vela_core_player_event` (the engine's `PlayerEvent`s);
   - `vela_core_stop`.
+- **The other direction, core to engine.** A play can start in the core,
+  not only from a button: a playlist advance, Continue Playing, or an
+  Automatic quality step-down. So the host callback given to
+  `vela_core_start` also receives:
+  - `play`: a session id and a `PlayRequest`;
+  - `command`: a session id and a `PlayerCommand`;
+  - `stop`.
+
+  The Swift side answers each with success or failure. A command for a
+  session that is no longer current is refused, as `control.rs` refuses
+  one today. Tests: a play the core starts (a playlist advance, a
+  step-down) reaches the engine, and a stale session's command is
+  refused.
 - **Swift `Codable` types for the DTOs.** A contract test serializes
   every DTO's Rust fixtures to JSON, and the Swift tests decode them, so
   a field changed on one side fails the other.
