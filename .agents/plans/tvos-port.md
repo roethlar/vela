@@ -169,6 +169,13 @@ the page:
     through a callback with JSON);
   - `vela_core_player_event` (the engine's `PlayerEvent`s);
   - `vela_core_stop`.
+- **Plex artwork.** It reaches the page as a `vela-artwork:` marker that
+  Tauri's custom protocol resolves (`artwork.rs`, registered in
+  `lib.rs`). tvOS has no such protocol. So a further call,
+  `vela_core_artwork` (a marker, answered with the image bytes), serves
+  SwiftUI's image loader through the same bounded, authenticated
+  resolver, and the credentials stay in Rust. A test renders a Plex
+  poster from a cold cache against the mock Plex.
 - **The other direction, core to engine.** A play can start in the core,
   not only from a button: a playlist advance, Continue Playing, or an
   Automatic quality step-down. So the host callback given to
