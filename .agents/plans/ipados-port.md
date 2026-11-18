@@ -558,11 +558,21 @@ of any new layout logic.
 - **Type-check from Linux:** `scripts/check-other-platforms.sh` gains
   `aarch64-apple-ios`, with a fake compiler like its macOS one where
   needed.
-- **Release workflow:** an iOS job builds a signed IPA, and uploads it to
-  TestFlight if O2 rules for it. It only runs when its secrets are
-  present, and partial secrets are an error, as for macOS. The secrets
-  are a distribution certificate and an App Store Connect API key, which
-  may be the existing one if its role allows uploads.
+- **Release workflow:** an iOS job builds a signed IPA for the channel O2
+  rules. It only runs when its secrets are present, and partial secrets
+  are an error, as for macOS. The signing follows the channel:
+  - **TestFlight:** an Apple Distribution certificate and an App Store
+    provisioning profile for the app's bundle id. These are either stored
+    as secrets, or fetched by automatic provisioning with an App Store
+    Connect API key whose role allows it. The same key, or one with
+    upload rights, uploads the build.
+  - **Development builds:** an Apple Development certificate and a
+    development profile listing the owner's devices. No distribution
+    certificate is used.
+
+  Tauri's iOS signing requirements are the reference. The slice proves
+  its channel end to end: a build from a fresh runner installs and starts
+  on the owner's iPad.
 - **Privacy manifest:** a tracked `PrivacyInfo.xcprivacy` is merged into
   the generated project from tracked files (B-2's rule). It declares
   every required-reason API the app, its plugin and its libraries use:
