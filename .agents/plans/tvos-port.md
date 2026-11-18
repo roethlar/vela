@@ -162,8 +162,8 @@ The split:
   lockfile and the rule that Cargo runs from `src-tauri/` stay as they
   are. CI and the repo-guidance Verification commands change in the same
   commit:
-  - `cargo test --workspace --locked` and `cargo clippy --workspace
-    --all-targets`, because a plain `cargo test` from the Tauri package
+  - `cargo test --workspace --locked` and `cargo +stable clippy
+    --workspace --all-targets --locked -- -D warnings`, because a plain `cargo test` from the Tauri package
     would build the core without running its tests;
   - `cargo audit` reads the workspace's one lockfile.
 
