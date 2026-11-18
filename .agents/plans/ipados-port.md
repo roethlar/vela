@@ -250,8 +250,14 @@ Inside:
   - For Dolby Vision it carries the configuration record and the RPU of
     each frame. Profile 7 (MEL or FEL) becomes 8.1 live through
     libdovi's conversion mode 2.
-  - If a device takes profile 5 but not 8.1, the engine converts 8.1 to 5
-    there. P2 finds out per Apple TV generation.
+  - Native 8.1 is used wherever the device takes it. P2 checks that per
+    device and per Apple TV generation.
+  - Converting 8.1 to 5 for a device that takes only 5 needs the picture
+    converted as well as the metadata. Profile 5's base layer is
+    IPT-PQ-c2, encoded differently from 8.1's HDR10-compatible one, and
+    dovi_tool's conversion modes convert metadata only. So it is adopted
+    only if a probe shows a real-time conversion of both, checked against
+    a reference (`tvos-port.md`, V-4).
   - On tvOS the engine sets display criteria per play and clears them at
     the end (`tvos-port.md` owns that part).
 - **Audio:**
@@ -312,7 +318,11 @@ This follows the libmpv set's recipe (`packaging/libmpv/versions.txt`;
 Test media: `tests/e2e/helpers.mjs` `makeClips` is extended to make HDR10,
 HLG and Dolby Vision clips. The video is 10-bit HEVC from
 `hevc_videotoolbox` on macOS. dovi_tool (pinned, test-only, never shipped)
-generates and injects the RPU of profiles 5 and 8.1. Test-only mkvtoolnix
+generates and injects the RPU of profile 8.1 into that HDR10-compatible
+video. Profile 5 cannot be made this way, because its base layer must
+itself be encoded as IPT-PQ-c2. Its fixture is an independently validated
+profile 5 sample, published, with its source and checksum pinned
+(test-only). Test-only mkvtoolnix
 (pinned) muxes the Dolby Vision mapping into MKV. Profile 7 test media
 cannot be made this way, so P2 and the owner's checks use real files from
 the owner's servers.
