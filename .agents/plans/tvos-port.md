@@ -185,6 +185,14 @@ never replace an unreadable document with defaults, explicit recovery):
 - **Connection secrets** (tokens) go in the Keychain, one item per
   connection. The connection records without secrets go in
   `UserDefaults`.
+- **Credentials inside other documents.** Item snapshots saved in recents
+  (`config.json`, `recents.rs`) and in playlists (`playlists.rs`) carry
+  artwork URLs. For Jellyfin and Emby those URLs include
+  `api_key=<token>` (`source/jellyfin.rs`). The tvOS backend saves every
+  such URL without its credential, as the source id with the path and the
+  rest of the query. The core adds the credential back when it hands the
+  URL out. A test saves every document and every history copy with a
+  synthetic token, and checks the token appears in none of them.
 - **`config.json` and `playlists.json`** are stored as the same JSON
   documents in `UserDefaults`, one key each. A key's write is atomic.
   Only one process exists, so there is no cross-process lock.
