@@ -437,6 +437,12 @@ Each slice is one or more commits with tests and red-proofs, a
     the UI tests in the tvOS simulator against the mock servers, and
     builds the app.
   - The release workflow gets the TestFlight job if O2 is ruled that way.
+  - A tracked privacy manifest (`PrivacyInfo.xcprivacy`) goes into the
+    tvOS target. It declares every required-reason API the app and its
+    libraries use: `UserDefaults` (app-only, reason CA92.1), and file
+    timestamps (`stat`, through Rust's `std::fs::metadata`). The archived
+    app is checked for it, because App Store Connect rejects uploads,
+    TestFlight's included, without one.
   - Docs, the release notes, the owner's checklist, and the
     repo-guidance rule of V-6.
 
