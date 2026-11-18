@@ -60,7 +60,8 @@ iPhone, and the page is usable:
   iPad and the iPhone together, since one app runs on both. A ruling
   whose words cover the iPhone carries over. One that names only the
   iPad leaves that difference open for the phone, and it is asked before
-  I2.
+  I0. I0 puts the same build on the iPhone, so anything the iPad ruling
+  hid would otherwise already be missing there.
 
 ## Assumptions (each proven or overturned by a probe)
 
