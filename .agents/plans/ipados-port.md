@@ -470,7 +470,9 @@ This follows the libmpv set's recipe (`packaging/libmpv/versions.txt`;
     provides is enabled, with swresample and swscale. Any codec Apple's
     hardware does not take is then decoded in software, and the engine
     falls back to software whenever VideoToolbox refuses a stream.
-    FFmpeg's own network protocols are not used (A-2, transport).
+    FFmpeg's HTTP and HTTPS protocols are compiled in, because its HLS
+    demuxer checks a URL's protocol before it calls the custom I/O. Every
+    read still goes through the core (A-2, transport).
   - libass, with FreeType, HarfBuzz and FriBidi, and CoreText on.
   - dav1d.
   - libdovi: the C interface of the `dolby_vision` crate, built with
