@@ -389,9 +389,8 @@ never replace an unreadable document with defaults, explicit recovery):
   edit stays pending, not lost.
 - **Setup.** Both iCloud entitlements are in the tracked XcodeGen spec
   and the provisioning: the container identifier, and
-  `com.apple.developer.icloud-services` with `CloudKit`. Together with
-  that, and the production schema is deployed
-  before the first TestFlight build that uses it.
+  `com.apple.developer.icloud-services` with `CloudKit`. The production
+  schema is deployed before the first TestFlight build that uses it.
 
 ### V-4. The engine on tvOS (additions to `apple/VelaEngine`)
 
