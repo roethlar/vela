@@ -464,6 +464,13 @@ of any new layout logic.
   present, and partial secrets are an error, as for macOS. The secrets
   are a distribution certificate and an App Store Connect API key, which
   may be the existing one if its role allows uploads.
+- **Privacy manifest:** a tracked `PrivacyInfo.xcprivacy` is merged into
+  the generated project from tracked files (B-2's rule). It declares
+  every required-reason API the app, its plugin and its libraries use:
+  `UserDefaults`, and file timestamps (`stat`, through Rust's
+  `std::fs::metadata` in the durable stores). The archived app is checked
+  for it, because App Store Connect rejects uploads, TestFlight's
+  included, without one (review finding tvp-19).
 - **Version and tags:** the version is Vela's one version. Tags and
   publishing stay the owner's.
 - **Repo guidance:** the iOS commands join "Verification" in
