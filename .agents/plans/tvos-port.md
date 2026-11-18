@@ -65,8 +65,8 @@ absence.
   General, About, Model: A1842 is the first generation (2017), A2169 the
   second (2021), A2737 or A2843 the third (2022), or a later model.
   - Apple's current specifications list Dolby Vision profiles 5 and 8.1;
-    older pages listed only 5. So the generation decides whether the
-    engine converts 8.1 to 5 on that box.
+    older pages listed only 5. So the generation decides whether 8.1
+    plays natively on that box (V-4).
   - Also the LG models, and the audio chain: TV speakers, eARC to a
     receiver, or a soundbar.
   - The ruling of O1 in `ipados-port.md` may already have answered
@@ -309,8 +309,19 @@ never replace an unreadable document with defaults, explicit recovery):
     Range" and "Frame Rate"). The owner's checklist says so.
   - The criteria are set only if the box's own format choice leaves that
     switch to the content.
-- **Profile 8.1 on generations that take only profile 5:** converted to
-  5 by the engine, if P2 or T0 shows it is needed (V1).
+- **Profile 8.1 on generations that take only profile 5.** Native 8.1
+  is probed first, on every generation (V1).
+  - Converting 8.1 to 5 is not a metadata change. Profile 5's base
+    layer is encoded differently (IPT-PQ-c2), while 8.1's is
+    HDR10-compatible, and dovi_tool's conversion modes convert metadata
+    only. Relabelling, or converting only the RPU, can give a stream the
+    box accepts with visibly wrong colours. The same goes for profile 7
+    first converted to 8.1.
+  - So a box that takes only profile 5 gets Dolby Vision from 8.1 only
+    if a probe shows a real-time conversion of the picture and the
+    metadata together, checked against a reference.
+  - If no such conversion can be shown, that finding goes to the owner
+    before the box is claimed to support those files.
 - **Audio:** TrueHD, DTS and DTS-HD MA are decoded to LPCM, unless B4
   finds a real bitstream path. E-AC-3 with Atmos passes to Apple, which sends
   Dolby MAT.
