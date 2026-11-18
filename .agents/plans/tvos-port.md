@@ -384,11 +384,10 @@ never replace an unreadable document with defaults, explicit recovery):
   bound is part of the owner's design (V4), not a limit on playlists. The list shown offline is the cached
   copy in Caches. If that was purged, the screen says the playlists are
   unavailable offline, never an empty library. Each edit shows whether it
-  is saved on this TV or accepted by iCloud. "Saved on this TV" is shown
-  only after the queue's write has returned from disk: the queue is kept
-  with the durable stores' atomic save and `fsync`, not in
-  `UserDefaults`, whose writes reach disk later. It stays inside the same
-  share of persistent space.
+  is saved on this TV or accepted by iCloud. The queue is one journal in
+  `UserDefaults`, the only store tvOS keeps. "Saved on this TV" is shown
+  only after `CFPreferencesAppSynchronize` reports the journal written to
+  permanent storage; until then the edit shows as not yet saved.
 - **Quota.** A request over CloudKit's per-request limit is split and
   sent again. An exhausted iCloud quota is shown to the user, and the
   edit stays pending, not lost.
