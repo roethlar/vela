@@ -111,15 +111,13 @@ therefore built here; `ios-port.md` adds what is specific to the phone.
   no `sudo`. An Apple Development certificate for the owner's team is in
   the keychain, so development signing needs only the devices registered
   and paired.
-- **O4. The differences below**, one at a time, before the slice they
-  affect. Each question names both the iPad and the iPhone, because one
-  app runs on both (`ios-port.md`, P2).
+- **O4. The differences below: APPROVED 2026-11-18**, for iPad, iPhone
+  and Apple TV.
 
-## Differences that need the owner's approval (none approved yet)
+## Differences the owner approved (2026-11-18)
 
-Each is something the desktop has that cannot exist on iPad. Each is
-asked separately (O4) before slice A9. Until it is ruled, the slice that
-would hide it does not land.
+Each is something the desktop has that cannot exist on iPad. The owner approved all four as absent on iPad, iPhone and Apple TV
+(2026-11-18, `.agents/decisions.md`).
 
 1. External mpv as a player, the "Videos play in" choice, mpv's path and
    the automatic mpv installer: iPadOS cannot start another program.

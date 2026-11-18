@@ -84,8 +84,7 @@ absence.
       shows (B4).
   - Still unknown, asked before T7: the LG models, and whether the
     soundbar is on eARC, ARC, or the Apple TV directly.
-- **V2. The differences that need approval**, one at a time, before
-  slice T8. See the list below.
+- **V2. The differences: APPROVED 2026-11-18** (see the list below).
 - **V3. The distribution channel: RULED 2026-11-18** as O2 of
   `ipados-port.md`: TestFlight internal testing and development-signed
   builds now, the App Store later. The tvOS app shares the iOS app's
@@ -106,7 +105,10 @@ absence.
   Vela's playlists being absent without iCloud is a difference approved
   by the owner's own design.
 
-## Differences that need the owner's approval (none approved yet)
+## Differences the owner approved (2026-11-18)
+
+The owner approved all four as absent on iPad, iPhone and Apple TV
+(2026-11-18, `.agents/decisions.md`).
 
 These are the same four as `ipados-port.md` (external mpv and its
 installer, the user's mpv options, window modes and screens, "Exit

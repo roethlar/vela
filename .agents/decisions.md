@@ -2760,3 +2760,24 @@ How to apply:
   summary.
 - The "Owner Gates" rule of one decision at a time still governs how the
   questions are put.
+
+## 2026-11-18 - Four desktop features are absent on iPad, iPhone and Apple TV
+
+Status: OWNER RULING (2026-11-18). An approval under the parity ruling of
+2026-11-16, for these features only.
+
+Decision:
+Asked whether these may be absent on iPad, iPhone and Apple TV:
+- external mpv and its installer;
+- the user's own mpv options and mpv.conf;
+- player window modes and remembered screens;
+- "Exit Vela".
+
+The owner, verbatim: "yes I know these are not available in the mobile
+apps."
+
+How to apply:
+- These four are not defects on Apple mobile and TV devices, and their
+  controls are hidden there.
+- Every other desktop feature is rebuilt for those devices, unless the
+  owner approves its absence the same way.
