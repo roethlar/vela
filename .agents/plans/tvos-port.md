@@ -79,9 +79,10 @@ absence.
     HomePods, or the TV's speakers. T7 covers each one.
     - On HomePods, which are wireless, picture and sound stay in sync
       only if the synchronizer accounts for the route's output latency.
-    - On the soundbar, multichannel PCM and Dolby MAT arrive only over
-      eARC, so lossless and Atmos claims are limited to what that link
-      shows (B4).
+    - On the soundbar, multichannel PCM and Dolby MAT arrive over a
+      direct HDMI connection from the Apple TV, or over the TV's eARC,
+      but not over plain ARC. Lossless and Atmos claims are limited to
+      what the actual connection shows (B4).
   - Still unknown, asked before T7: the LG models, and whether the
     soundbar is on eARC, ARC, or the Apple TV directly.
 - **V2. The differences: APPROVED 2026-11-18** (see the list below).
