@@ -182,9 +182,20 @@ the page:
 Desktop and iPad keep the files of `durable.rs` unchanged. On tvOS the
 core uses a second backend behind the same durable rules (fail closed,
 never replace an unreadable document with defaults, explicit recovery):
-- **Connection secrets** (tokens) go in the Keychain, one item per
-  connection. The connection records without secrets go in
-  `UserDefaults`.
+- **Connection secrets** (tokens) go in the Keychain as immutable
+  versions. A token that changes gets a new item with a new id, and each
+  saved connections document names the ids it uses. The connection
+  records without secrets go in `UserDefaults`. The save order:
+  1. write any new Keychain items;
+  2. write the connections document, which is the commit point;
+  3. delete the items that no current or retained history document
+     names.
+
+  An interruption at any step leaves at most some unreferenced items,
+  which are removed at the next start. So a rollback to any retained
+  version finds its own secrets. Tests: an interruption at each step, a
+  removal, and a token rotation followed by a rollback to each retained
+  version, each through a relaunch.
 - **Credentials inside other documents.** Item snapshots saved in recents
   (`config.json`, `recents.rs`) and in playlists (`playlists.rs`) carry
   artwork URLs. For Jellyfin and Emby those URLs include
