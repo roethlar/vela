@@ -305,6 +305,8 @@ Inside:
   - TrueHD, DTS, DTS-HD MA, FLAC, Opus, Vorbis and PCM variants are
     decoded by FFmpeg into multichannel LPCM.
   - Track switching happens without restarting the play.
+  - The engine reports the format and channel layout it hands to Apple,
+    so tests can assert them (row 17).
 - **Subtitles:**
   - Text formats (SRT, ASS/SSA, WebVTT, mov_text) are rendered by libass,
     which uses its CoreText font provider, into a layer above the video.
@@ -632,7 +634,16 @@ New rows, for every Apple device:
 15. HDR10 and HLG tagged and shown in HDR.
 16. Dolby Vision profiles 5, 8.1, 8.4, 7 (converted) and 10 (where the
     device decodes AV1) shown as Dolby Vision, each on the minimum OS.
-17. Each audio format listed in A-2, decoded or passed as A-2 says.
+17. Each audio format listed in A-2, decoded or passed as A-2 says. The
+    ear cannot tell stereo, multichannel LPCM and Atmos apart, so the
+    proof is threefold:
+    - XCTests assert the format and channel layout the engine hands to
+      Apple for each source format;
+    - channel-identification clips (a voice per channel) are played on
+      the device;
+    - the actual route is recorded with what it showed: speaker,
+      headphones, or an HDMI adapter to a receiver, whose display names
+      the format, and Atmos on equipment that can show it.
 18. Text and bitmap subtitles, chosen and turned off.
 19. Multi-part items play as one timeline.
 20. The TLS-verify setting is honoured.
