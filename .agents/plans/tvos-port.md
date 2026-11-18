@@ -371,6 +371,9 @@ never replace an unreadable document with defaults, explicit recovery):
   is saved on this TV or accepted by iCloud.
 - **Quota.** A CloudKit quota or limit error is shown to the user, and
   the edit stays pending, not lost.
+- **Setup.** The iCloud container entitlement is in the tracked XcodeGen
+  spec and the provisioning, and the production schema is deployed
+  before the first TestFlight build that uses it.
 
 ### V-4. The engine on tvOS (additions to `apple/VelaEngine`)
 
