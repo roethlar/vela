@@ -180,16 +180,24 @@ each pushed to `origin` and `github` as it lands
   plays of I1 are repeated on the owner's iPhone, recording peak
   footprint, the queue bounds reached, and that the play continued.
 - **I5, the owner's by-eye checks** on the iPhone, one by one from a
-  checklist, each recorded with what was seen:
-  - HDR10, HLG, and Dolby Vision profiles 5 and 8.1;
-  - an original profile 7 file, converted live. A file converted
+  checklist, each recorded with what was seen. The checklist is the
+  iPadOS plan's rows 15 to 17, run on the phone:
+  - HDR10 and HLG (row 15);
+  - Dolby Vision profiles 5, 8.1 and 8.4, profile 10 if the phone
+    decodes AV1, and an original profile 7 file converted live, each on
+    the minimum iOS as well as the current one (row 16). A file converted
     beforehand would bypass the converter.
-  - a Dolby Vision negative control: the reference clip of
-    `tvos-port.md` (one base layer with two RPUs that look visibly
-    different, and one with the RPU stripped);
-  - each audio format of the iPadOS plan's row 17, with the route named:
-    speaker, headphones, AirPods or an HDMI adapter;
+  - the Dolby Vision reference clip of `tvos-port.md` and its
+    stripped-RPU control;
+  - each audio format, proved as row 17 says: the layout the engine
+    reports, the channel-identification clips, and the route recorded with
+    what it showed. Multichannel and Atmos results are recorded only from
+    a route that can show them, such as an HDMI adapter to a receiver; a
+    speaker or headphones prove only that sound plays.
   - rotation during play.
+
+  A row with no device, OS or route that can prove it on the phone stays
+  pending, named as such.
 
   If the owner's iPhone has no HDR screen, tone-mapped playback is
   checked there, and the HDR rows stay pending until an HDR iPhone is
