@@ -55,8 +55,12 @@ iPhone, and the page is usable:
   (the iPadOS plan's B-1), never from a model cutoff. iPhones without one
   play through Apple's tone mapping; Vela writes no SDR path of its own (the
   HDR rule).
-- **P2. Differences that need approval:** none new. The four of
-  `ipados-port.md`, as ruled there, apply to the phone.
+- **P2. Differences that need approval:** none new, but none carries
+  over by itself. The iPadOS plan asks its four differences (O4) for the
+  iPad and the iPhone together, since one app runs on both. A ruling
+  whose words cover the iPhone carries over. One that names only the
+  iPad leaves that difference open for the phone, and it is asked before
+  I2.
 
 ## Assumptions (each proven or overturned by a probe)
 

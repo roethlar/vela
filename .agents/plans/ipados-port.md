@@ -90,7 +90,8 @@ therefore built here; `ios-port.md` adds what is specific to the phone.
   Line Tools, with no Xcode and no iOS or tvOS SDK. Installing Xcode
   needs the owner's Apple ID. Until then, every iOS build runs only in CI.
 - **O4. The differences below**, one at a time, before the slice they
-  affect.
+  affect. Each question names both the iPad and the iPhone, because one
+  app runs on both (`ios-port.md`, P2).
 
 ## Differences that need the owner's approval (none approved yet)
 
