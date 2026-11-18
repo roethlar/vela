@@ -89,8 +89,14 @@ detail pages, top-tab Settings, the player's single sheet):
   viewport (`dvh`).
 - **The player in portrait:** the picture is letterboxed at the top
   third, with the controls below it, reachable with one hand. Turning to
-  landscape fills the screen. Rotation does not interrupt the play, and
-  the engine's layer follows the rectangle the page reports.
+  landscape fills the screen. Rotation does not interrupt the play.
+  - The page reports the rectangle of a dedicated picture element, and
+    the engine's layer follows it. Today `PlayerView.svelte` reports the
+    whole player view (`player_set_rect`), which on the desktop is also
+    the picture, so `embeddedcontrols`' full-page check still holds there.
+  - A scenario checks the native layer's frame against that element in
+    portrait and again after rotating, while the same session keeps
+    playing.
 - **Navigation:** the iPadOS plan's drawer, unless I2's check on the
   owner's phone shows it is hard to reach with one hand. Then the same
   destinations move to a bottom bar at phone sizes. That is a layout
@@ -142,7 +148,13 @@ Each slice is one or more commits with tests and red-proofs, a
   in the iPhone simulator.
 - **I2, the page on a phone.** Safe areas, small heights, the player in
   both orientations, and the forms with the keyboard up. The iPhone
-  simulator venue runs every end-to-end scenario at two phone sizes. The
+  simulator venue runs, at two phone sizes, every end-to-end scenario
+  that applies to the Apple engine.
+  - The list of applicable scenarios is kept with the iPadOS plan's Apple
+    run set (`tests/e2e/parity.mjs`).
+  - Each excluded scenario names its reason: mpv's own behaviour
+    (`mpvargs`, the mpv lifecycle and window-state scenarios), or, for a
+    feature difference, the owner's ruling. The
   desktop suites run too, to show the desktop is unchanged.
 - **I3, icons and release packaging.** The iPhone icon sizes. The
   release workflow's iOS job, if O2 made one, ships the universal app.
