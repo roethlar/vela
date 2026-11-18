@@ -2636,3 +2636,47 @@ How to apply:
 - Ask only when the correct way itself is genuinely unclear, or when a
   decision is the owner's for another reason (cost, accounts, by-eye
   judgment, tagging and publishing).
+## 2026-11-18 - Apple devices play through an Apple-pipeline engine; iPadOS first, then iOS, then tvOS
+
+Status: OWNER RULING (2026-11-18). Plans drafted the same day, not
+approved: `.agents/plans/ipados-port.md`, `.agents/plans/ios-port.md`,
+`.agents/plans/tvos-port.md`.
+
+Decision:
+- Order of the ports, owner verbatim: "agreed on the initial order.
+  ipados, ios, then tvos."
+- Apple TV must show real Dolby Vision, owner verbatim: "tv will need
+  dolby vision". On tvOS only Apple's own pipeline (VideoToolbox decoding,
+  AVFoundation display) puts the TV into Dolby Vision mode; mpv, on every
+  platform, converts Dolby Vision to an HDR10 signal itself. So Apple TV
+  plays through a player built on Apple's pipeline, with FFmpeg unpacking
+  containers Apple does not take (MKV) and decoding audio Apple cannot
+  output (TrueHD, DTS), and with Vela drawing subtitles.
+- Asked whether iPad and iPhone use that same engine or mpv's library in
+  Vela's window (the direction of 2026-11-12), the owner chose "Apple
+  engine on all three": one engine for iPadOS, iOS and tvOS, real Dolby
+  Vision on iPad and iPhone HDR screens, no libmpv build for Apple mobile
+  devices.
+
+Agent's reading (not the owner's words):
+- The option the owner chose stated its costs: iPad playback arrives only
+  after the engine exists, and mpv-only features (mpv arguments, the
+  autocrop script) must be rebuilt for the engine or approved as absent.
+  Under the ruling of 2026-11-16 each such difference still needs the
+  owner's explicit approval, feature by feature; this ruling approves none.
+- The desktop is unchanged: external mpv is the default and the embedded
+  libmpv player is offered as experimental on Linux (Wayland), macOS and
+  Windows.
+- On iPadOS and iOS the Svelte page stays in Tauri's web view, with the
+  engine's video layer beneath it. Apple ships no web view on tvOS, so
+  Apple TV's screens are a native SwiftUI app over Vela's Rust core.
+- D1 of `.agents/plans/embedded-player.md` ("embedded by default on ios
+  ... no experimental tag in ios") carries over to the Apple engine: on
+  iPadOS, iOS and tvOS it is the only player and carries no label.
+- The licensing rule of 2026-11-12 is unchanged and binds every library
+  the engine ships.
+
+Supersedes:
+The libmpv half of 2026-11-12 "Embedded playback through libmpv is the
+direction" for Apple mobile devices ("iOS/iPadOS is a stated porting
+goal" of an in-process libmpv player). The desktop half stands.

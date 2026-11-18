@@ -21,6 +21,14 @@
   offered in Settings (Player, "Video player"), marked experimental, by the
   owner's ruling of that day (`.agents/decisions.md`): the owner is Vela's
   only user, and what is built is to be usable from the app.
+- Apple devices (owner, 2026-11-18, `.agents/decisions.md`): Vela is being
+  ported to iPadOS, then iOS, then tvOS (`.agents/plans/ipados-port.md`,
+  `.agents/plans/ios-port.md`, `.agents/plans/tvos-port.md`). On those
+  devices video plays through an engine built on Apple's own pipeline,
+  never mpv, because Apple TV must show real Dolby Vision. iPad and iPhone
+  keep the Svelte page in Tauri's web view; Apple TV, which has no web
+  view, gets a native SwiftUI app over the Rust core. External mpv and the
+  embedded libmpv player stay the desktop's.
 - Vela exists for HDR video playback; on Linux that means Wayland. The
   owner, verbatim (2026-11-17, restating what the README, the embedded
   player plan's Non-goals and `.agents/decisions.md` 2026-11-12 already
