@@ -213,10 +213,23 @@ never replace an unreadable document with defaults, explicit recovery):
   version of its own in the backend, with the same dated recovery
   choices. A test restores each of the three, and checks that the
   damaged bytes are preserved.
-- **The budget:** all documents plus their copies must stay under
-  400 KB, measured on save. A save that would exceed it is refused with a
-  visible error, never truncated. The slice measures the owner's real
-  desktop documents to show the budget is enough.
+- **Space.** Besides the Keychain, `UserDefaults` is the only persistent
+  store on tvOS (Apple: 500 KB; a warning at 512 kB and termination at
+  1 MB). tvOS must not get a limit the desktop does not have. So:
+  - Playlists persist item references (source and item id), not full
+    snapshots. The snapshots are cached in Caches and fetched again from
+    the servers after a purge. Recents, whose snapshots sit in
+    `config.json`, are handled the same way if T0's measurement shows
+    they need it.
+  - T0 measures the owner's real desktop documents and the cost of one
+    reference. T3 shows the documents and their history fit with room to
+    grow far beyond the owner's use.
+  - If references could still outgrow the space, playlists move to the
+    CloudKit private database. That needs the owner's iCloud account on
+    each Apple TV, and the owner is told before it lands.
+  - No save is refused for size unless the owner approves that limit. A
+    store that is unexpectedly full fails closed, visibly, and is never
+    truncated.
 - **Artwork and library caches** go in Caches, which the system may
   purge; losing them costs only a reload.
 
