@@ -2781,3 +2781,30 @@ How to apply:
   controls are hidden there.
 - Every other desktop feature is rebuilt for those devices, unless the
   owner approves its absence the same way.
+
+## 2026-11-18 - Apple devices play every codec locally; no server transcode unless the user chooses one
+
+Status: OWNER RULING (2026-11-18).
+
+Decision:
+Told that a remuxing engine could not show video Vela decodes itself,
+so files Apple cannot decode would need the server's transcode, the
+owner, verbatim: "absolutely not. no server transcodes unless the user
+explicitly chooses that option. infuse has no issue playing files locally
+regardless of codec."
+
+How to apply:
+- On iPad, iPhone and Apple TV, every codec plays on the device. What
+  Apple's hardware does not decode, Vela decodes in software. A server
+  transcode happens only when the user picks a quality other than
+  Original, as on the desktop (`.agents/decisions.md` 2026-07-25).
+- So the engine always has Apple's sample-buffer renderer, the only one
+  that shows video Vela decodes itself.
+- Reference, read 2026-11-18 from the linked libraries of the owner's
+  Infuse 8.5.10 for macOS, a Mac Catalyst build that shares its iOS
+  code. It links FFmpeg (avformat, avcodec, avfilter, swscale,
+  swresample), dav1d, VideoToolbox decompression sessions,
+  `AVSampleBufferDisplayLayer`, `AVSampleBufferAudioRenderer` and
+  `AVSampleBufferRenderSynchronizer`. It demuxes and decodes on the
+  device and presents through those renderers. AVPlayer is linked too,
+  for purposes not known.

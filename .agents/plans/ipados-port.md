@@ -168,14 +168,20 @@ hardware keyboard.
     `AVSampleBufferRenderSynchronizer` as the clock for both. It shows
     software-decoded video and plays multichannel LPCM, at the cost of
     more engine code.
-  - **The rule:** the loopback wins if, on the owner's devices, Dolby
-    Vision engages through it, and lossless multichannel audio decoded
-    from TrueHD or DTS-HD plays through it, re-encoded as ALAC or FLAC in
-    fragmented MP4. If the loopback wins, the owner is asked one
-    question: whether codecs Apple cannot decode go to the server's
-    transcode, since the loopback cannot show software-decoded video.
-    Otherwise sample buffers win. The comparison and the choice are
-    recorded in the Log.
+  - **The rule** (owner, 2026-11-18: every codec plays locally, and no
+    server transcode unless the user chooses one; `.agents/decisions.md`):
+    - The sample-buffer renderer is needed in every outcome, since only
+      it shows video Vela decodes itself. Infuse is built the same way,
+      by the libraries it links.
+    - P2 decides one thing: whether Dolby Vision also goes through the
+      sample-buffer renderer, which gives one renderer for everything,
+      or whether a loopback must be added beside it for Dolby Vision
+      alone.
+    - The loopback is added only if Dolby Vision cannot engage through
+      sample buffers. Then lossless multichannel audio must also reach
+      AVPlayer, as ALAC or FLAC in fragmented MP4, or the design goes to
+      the owner.
+    - The comparison and the choice are recorded in the Log.
   - **P2 plays mixed combinations through both:** Dolby Vision with
     TrueHD, software-decoded video with E-AC-3, and HDR10 with DTS-HD MA.
 - **A3 (P2).** The TV's Dolby Vision mode is triggered by
@@ -329,10 +335,10 @@ Inside:
   hardware decoder) and VP9 go to Apple's pipeline by the renderer P2
   chose (A2). Codecs Apple does not decode, such as MPEG-2, VC-1, H.264
   10-bit, and AV1 on devices without a hardware decoder:
-  - with sample buffers, FFmpeg decodes them in software into
-    `CVPixelBuffer`s (dav1d for AV1), shown by the same display layer on
-    the same clock;
-  - with the loopback, they go as the owner rules at that point.
+  FFmpeg decodes them on the device, in software, into `CVPixelBuffer`s
+  (dav1d for AV1). They are shown by the sample-buffer display layer on
+  the same clock as the audio, whatever P2 decides for Dolby Vision.
+  They never go to a server transcode unless the user picked one.
 - **HDR and Dolby Vision:**
   - The engine tags colour primaries, transfer, matrix, mastering
     display and content light level.
