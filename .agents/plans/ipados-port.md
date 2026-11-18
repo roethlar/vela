@@ -600,10 +600,17 @@ inventory", and each must pass with the Apple engine:
 9. Cropping off, manual and auto.
 10. The Automatic quality step-down.
 11. The unrequested-play notice.
-12. A new play stops the previous one.
+12. A new play stops the previous one (12a), and the app's end stops
+    playback (12b). On iPad the app's end is the lifecycle contract of
+    A-2: finalization when the background task runs out, or when iPadOS
+    terminates the app.
+14. A play ends at the end of the file rather than idling. With nothing
+    queued and Continue Playing off, the player view closes at the end
+    of file; it does not stay on the last frame. A test plays a natural
+    end with nothing queued.
 
-Row 13 (the user's mpv options) and row 14 (mpv's end-of-file behaviour)
-are mpv's own. Row 13 is difference 2.
+Rows 13a and 13b (the user's mpv options and own-config mode) are mpv's
+own; they are difference 2, and stay open until it is ruled.
 
 New rows, for every Apple device:
 
