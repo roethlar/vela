@@ -317,8 +317,9 @@ never replace an unreadable document with defaults, explicit recovery):
   poster can come from a different server from the one it plays from. The core adds the credential back when it hands the
   URL out. A test saves every document and every history copy with a
   synthetic token, and checks the token appears in none of them.
-- **`config.json` and `playlists.json`** are stored as the same JSON
-  documents in `UserDefaults`, one key each. A key's write is atomic.
+- **`config.json`** is stored as the same JSON document in
+  `UserDefaults`, under one key. Playlists are never stored there; they
+  live in CloudKit (V-3b). A key's write is atomic.
   Only one process exists, so there is no cross-process lock.
 - **The valid-history copies** are kept as on the desktop: the three
   newest distinct valid versions of `config.json` and of
@@ -367,8 +368,9 @@ never replace an unreadable document with defaults, explicit recovery):
   other TV's change is re-applied where it still fits, otherwise
   reported to the user.
 - **Offline.** Pending edits wait in `UserDefaults`, within a fixed share
-  that leaves settings and recovery their space; an edit that would
-  exceed it is refused visibly. The list shown offline is the cached
+  that leaves settings and recovery their space. When the share is full,
+  further offline edits are refused visibly until the queue drains; that
+  bound is part of the owner's design (V4), not a limit on playlists. The list shown offline is the cached
   copy in Caches. If that was purged, the screen says the playlists are
   unavailable offline, never an empty library. Each edit shows whether it
   is saved on this TV or accepted by iCloud.
