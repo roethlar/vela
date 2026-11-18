@@ -260,10 +260,12 @@ the page:
   resolver, and the credentials stay in Rust. A test renders a Plex
   poster from a cold cache against the mock Plex.
 - **Media reads.** `vela_core_media_read` (a session id, a part or URL,
-  and a byte range, answered with exactly those bytes) serves the
-  engine's reads through the playback HTTP client (`ipados-port.md`,
-  A-2, transport). Reads are bounded in size and cancelled when their
-  session ends, and the buffer belongs to the caller once returned.
+  a byte offset, and a buffer with its capacity supplied by Swift) fills
+  that buffer and returns the count and an end of file flag, by the read
+  rules of `ipados-port.md`, A-2, transport. Rust never hands Swift an
+  allocation to free. Reads are cancelled when their session ends. A
+  playlist is returned with its references already resolved against the
+  URL it was finally served from, and cleaned.
 - **The other direction, core to engine.** A play can start in the core,
   not only from a button: a playlist advance, or an Automatic quality
   step-down. Continue Playing stays the screen's choice, with the
