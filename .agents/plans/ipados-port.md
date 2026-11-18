@@ -341,8 +341,11 @@ Inside:
   detects black bars on sampled frames.
   - On the software path, the frames are the decoded ones.
   - On the hardware sample-buffer path, the display layer gives no frame
-    access, so the engine decodes a sampled keyframe now and then with a
-    `VTDecompressionSession` of its own, used only for detection.
+    access. So the engine decodes, with a `VTDecompressionSession` of its
+    own used only for detection, the frames at the presentation times it
+    measures, starting from the random-access point before them. It
+    measures the picture being shown, not the last keyframe, which in a
+    long group of pictures can have different bars.
   - With the loopback, the frames come from `AVPlayerItemVideoOutput`.
 
   It crops by the layer's geometry, never by decoding the shown picture
