@@ -49,9 +49,6 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
   Pending with the owner:
   - O4, the four features absent on Apple devices;
-  - V4, playlists on tvOS. The owner's idea: Vela playlists in CloudKit
-    when the Apple TV is signed into iCloud, and server playlists only
-    when it is not.
   - the bundle identifier. The owner rejected the `com.michael` prefix;
     songr-mobile's owner signing uses `com.roethlar.Songr`, so the agent
     proposed `com.roethlar.Vela` for the Apple apps. O1 is answered (devices in

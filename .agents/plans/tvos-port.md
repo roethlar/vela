@@ -335,13 +335,20 @@ never replace an unreadable document with defaults, explicit recovery):
     recency fields durably (`recents.rs`), because a server may hold an
     older position or none. Only their fetchable metadata may move to
     Caches.
-  - Playlists still grow with every entry, so where they live durably is
-    the owner's decision, V4. Until it is ruled, T3 does not land.
+  - Vela's own playlists live in CloudKit when the Apple TV is signed
+    into iCloud, and are absent when it is not (V4, the owner's design;
+    V-3b). Nothing writes `playlists.json` to `UserDefaults`.
   - No save is refused for size unless the owner approves that limit. A
     store that is unexpectedly full fails closed, visibly, and is never
     truncated.
 - **Artwork and library caches** go in Caches, which the system may
   purge; losing them costs only a reload.
+
+### V-3b. Vela playlists in CloudKit (V4)
+
+- **Authority.** While the Apple TV is signed into iCloud, the CloudKit
+  private database is the only durable home of Vela's playlists on tvOS.
+  Signed out, only server playlists show.
 
 ### V-4. The engine on tvOS (additions to `apple/VelaEngine`)
 
@@ -497,10 +504,6 @@ each pushed to `origin` and `github` as it lands
 - **Two kinds of screens can drift.** V-6's guards catch a missing
   command, not a missing behaviour. Each T slice's review checks the
   behaviour against the page's.
-- **The `UserDefaults` space.** If T0 shows that playlist references
-  could outgrow it, playlists need the CloudKit private database. That
-  depends on the owner's iCloud account, and the owner is told before it
-  lands (V-3).
 - **Display criteria depend on the owner's Apple TV settings.** The
   owner's checklist names them, and the player shows when the box
   refused a switch, if the API reports it.
