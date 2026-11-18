@@ -25,8 +25,8 @@ all three share. The other two plans point here instead of repeating it.
 - Parity: `.agents/decisions.md` 2026-11-16. A feature that works on one
   platform and not another is a defect unless the owner has approved that
   difference explicitly, for that feature. The differences this port
-  cannot avoid are listed under "Differences that need the owner's
-  approval". None is approved yet.
+  cannot avoid are listed under "Differences the owner approved"; all four
+  were approved on 2026-11-18.
 - Always do it the proper way: `.agents/decisions.md` 2026-11-17. A
   defect that can be fixed is fixed correctly. Removing a feature, a
   workaround or a shortcut is never offered instead.
@@ -736,7 +736,7 @@ inventory", and each must pass with the Apple engine:
     end with nothing queued.
 
 Rows 13a and 13b (the user's mpv options and own-config mode) are mpv's
-own; they are difference 2, and stay open until it is ruled.
+own; they are difference 2, approved as absent on 2026-11-18.
 
 New rows, for every Apple device:
 
