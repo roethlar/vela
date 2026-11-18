@@ -297,6 +297,11 @@ Inside:
 - **Subtitles:**
   - Text formats (SRT, ASS/SSA, WebVTT, mov_text) are rendered by libass,
     which uses its CoreText font provider, into a layer above the video.
+    libass consumes ASS events only, so FFmpeg's subtitle decoders
+    (`subrip`, `webvtt`, `mov_text`, `ass`) decode each format into ASS
+    dialogue events. The engine hands them to libass with their start
+    and end times on the synchronizer's clock. A test shows a visible cue
+    and then its removal for each listed format.
   - Bitmap formats (PGS, VobSub, DVB) come from FFmpeg's decoders and are
     drawn as images, scaled with the picture.
 - **Cropping:** off, manual or auto, rebuilt for the engine. The engine
