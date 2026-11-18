@@ -109,9 +109,11 @@ detail pages, top-tab Settings, the player's single sheet):
 ### The engine on a phone
 
 - No engine features are added.
-- **Buffer limits** are set from C1's measurements. When iOS sends a
-  memory warning, the engine shrinks its buffers rather than being
-  ended by the system.
+- **Buffer limits** are set from C1's measurements and enforced before
+  anything is allocated or enqueued: a byte and frame bound on every
+  queue, checked on entry. A large allocation can end the app before a
+  memory-warning handler runs, so the handler only shrinks the bounds
+  further; it is not what keeps the app alive.
 - **Thermal state** (`ProcessInfo.thermalState`) is measured and
   recorded (I1, I4). It is not a step-down trigger.
   - The owner approved two triggers: sustained decoder frame drops and a
@@ -144,8 +146,11 @@ Each slice is one or more commits with tests and red-proofs, a
   desktop suites run too, to show the desktop is unchanged.
 - **I3, icons and release packaging.** The iPhone icon sizes. The
   release workflow's iOS job, if O2 made one, ships the universal app.
-- **I4, the engine's memory and thermal response**, with XCTests that
-  inject memory warnings and thermal states.
+- **I4, the engine's memory and thermal response.** XCTests check the
+  bounds and inject memory warnings and thermal states. The proof is on
+  the phone: after I4's changes, the sustained hardware and software
+  plays of I1 are repeated on the owner's iPhone, recording peak
+  footprint, the queue bounds reached, and that the play continued.
 - **I5, the owner's by-eye checks** on the iPhone, one by one from a
   checklist, each recorded with what was seen:
   - HDR10, HLG, and Dolby Vision profiles 5 and 8.1;
