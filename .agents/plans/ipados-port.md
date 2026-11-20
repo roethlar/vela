@@ -147,15 +147,33 @@ hardware keyboard.
 ## Assumptions (each proven or overturned by a probe before product code)
 
 Where each stands after the probes of 2026-11-20 (the Log has the
-evidence): A1 holds, on the simulator and on the iPad Pro. A2 holds on
-the iPad Pro for profiles 5 and 8.1 and for profile 7 MEL converted, by
-the route A-2 now describes (the engine decodes; the layer presents);
-profiles 8.4 and 10 had no file; the Apple TV is not probed yet. A3 is
-not probed (Apple TV). A4 holds on the iPad's speakers for sound
-decoded to PCM and for AC-3 and E-AC-3 passed on; what a surround route
-shows is not probed. A5 holds, simulator and device. A6 holds for
-scripts, finding, clicks, typing and screenshots, with adapters for
-pointer coordinates and keys.
+evidence). Each line says what was shown and what was not:
+- A1 holds, on the simulator and on the iPad Pro.
+- A2, on the iPad Pro, by the route A-2 now describes (the engine
+  decodes; the layer presents):
+  - profiles 5 and 8.1 (CMv2.9 and CMv4.0): shown, by the owner's eye;
+  - profile 7: files converted to 8.1 beforehand play as Dolby Vision.
+    The live conversion A2 names is not built or shown, and the look of
+    a converted FEL title is the open point the Log records;
+  - profiles 8.4 and 10: not shown, no file;
+  - a picture the app made, with the decoder's own RPU attached, is
+    presented as Dolby Vision (a copy of a decoded profile 5 picture).
+    A picture composed from two layers with a converted RPU is not
+    shown; that is P5's question;
+  - seeking, track switching and memory: measured on the Mac or the
+    iPad as the Log says; exact seeking on the iPad itself was not run.
+  - On the Apple TVs: nothing yet.
+- A3 is not probed (Apple TV).
+- A4 holds on the iPad's speakers for sound decoded to PCM and for AC-3
+  and E-AC-3 passed on. What a surround route shows is not probed.
+- A5 holds, simulator and device.
+- A6 holds for scripts, finding, clicks, typing and screenshots, with
+  adapters for pointer coordinates and keys; Escape has no route yet.
+
+What P2 left open is decided in the slice that owns it, never taken as
+settled: the live conversion and profiles 8.4 and 10 in A7 (each with the
+check P2 would have made: the decoder's attachment, then the owner's
+eye), the FEL composition in P5, the Apple TV in `tvos-port.md`.
 
 - **A1 (P1).** A Tauri 2 iOS app shows the page in WKWebView, and a
   native layer can sit beneath a transparent web view, with touches on the
@@ -1116,8 +1134,10 @@ records what landed.
   - Before P2, Probe P2's media plan names which of the owner's files it
     uses: "Probe P2's media plan", below, written 2026-11-20, with what
     the owner's test library lacks.
-  - Done on 2026-11-20 (Log): P1, P3 and P4, and P2 on the iPad Pro. P2
-    on the Apple TVs waits for the owner (the order of work, Status).
+  - Run on 2026-11-20 (Log): P1, P3 and P4, and the parts of P2 that
+    Assumptions lists as shown on the iPad Pro. P2 is not finished: what
+    Assumptions lists as not shown stays open, and P2 on the Apple TVs
+    waits for the owner (the order of work, Status).
 - **T0, Tauri 2.12 on the desktop.** Tauri 2.12.7 with what it brings
   (tao 0.37, wry 0.57, swift-rs 1.0.9; 72 crates in `Cargo.lock` in P1's
   trial) and the npm packages its CLI requires at the same minor
