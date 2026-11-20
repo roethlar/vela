@@ -360,12 +360,13 @@ Inside:
     finally served from, after redirects, and cleaned, before FFmpeg
     sees them.
   - A read returns up to the bytes asked for, with a count and an end of
-    file flag. A `206` must start at the requested offset; when the server
-    sends the whole resource instead, the interval is cut from it as it
-    streams. A `206` may hold less than was asked: its `Content-Range`
-    says what it holds, and the engine asks for the bytes after it under
-    the same validator until the range is complete or the resource
-    ends. A read that begins exactly at the end of the resource is
+    file flag. A `206` says in its `Content-Range` which bytes it holds.
+    They must lie inside what was asked for, and may be fewer: a server
+    may send the first part of a range, or a later part first. The
+    engine asks for whatever is missing, before or after, under the same
+    validator, until the range is complete or the resource ends, and
+    gives FFmpeg the bytes in order. When the server sends the whole
+    resource instead, the interval is cut from it as it streams. A read that begins exactly at the end of the resource is
     the end of the file, not an error: a `416` whose `Content-Range`
     gives a total equal to the requested offset, or an offset equal to a
     total already known, returns no bytes and the end-of-file flag. An
