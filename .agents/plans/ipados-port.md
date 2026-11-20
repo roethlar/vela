@@ -616,6 +616,11 @@ Inside:
     In software there is no Dolby Vision for it, as for any profile
     (above); FFmpeg's dav1d path would not supply a raw RPU in any case,
     only the parsed metadata.
+  - The pinned FFmpeg's MP4 demuxer knows the `av01` sample entry and
+    not `dav1`, the registered entry for AV1 with Dolby Vision: a track
+    named that way comes out with its Dolby Vision configuration and no
+    codec. The engine recognises the entry itself and treats the track
+    as AV1, keeping the configuration and the metadata OBUs.
   - Native 8.1 is used wherever the device takes it. P2 checks that per
     device and per Apple TV generation.
   - Converting 8.1 to 5 for a device that takes only 5 needs the picture
