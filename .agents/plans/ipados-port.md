@@ -455,8 +455,11 @@ Inside:
     case. Software-decoded fields go through FFmpeg's `bwdif` (LGPL; A-3
     builds libavfilter for it and asserts the licence). For streams
     VideoToolbox decodes, the session's field mode asks it to
-    deinterlace. A test plays an interlaced clip on each path and checks
-    the picture rate and that no combing is left on a moving edge.
+    deinterlace. That property is optional for a decoder: the engine
+    checks whether the session took it, and when it did not, the
+    session's pictures go through `bwdif` like the software ones. A test
+    plays an interlaced clip on each path and checks the picture rate
+    and that no combing is left on a moving edge.
   - Only a Dolby Vision profile and device named in a reviewed amendment
     may be presented any other way (the AVPlayer remux that P2 would try
     on an Apple TV if a profile does not engage there).
