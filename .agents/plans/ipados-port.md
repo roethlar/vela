@@ -1064,12 +1064,25 @@ records what landed.
   (tao 0.37, wry 0.57, swift-rs 1.0.9; 72 crates in `Cargo.lock` in P1's
   trial) and the npm packages its CLI requires at the same minor
   (`@tauri-apps/api`, `@tauri-apps/cli`, `@tauri-apps/plugin-dialog`).
-  Nothing of iOS is in it. It lands by itself and is proved as any
-  desktop change is: the whole verification set, both Linux end-to-end
-  suites with the parity verdict PASS, the Windows suite and the macOS
-  jobs in CI, and a codex hunt. P1's trial compiled Vela against 2.12.7
-  with no source change, on macOS and iOS, and the macOS unit tests gave
-  what `main` gives.
+  Nothing of iOS is in it.
+  - **It raises Vela's declared Rust floor from 1.89 to 1.90**, in the
+    same change. Tauri 2.12 declares 1.90 (`tauri`, `tauri-build` and
+    `tauri-runtime-wry`; tao 0.37 and wry 0.57 declare 1.85), and Cargo
+    refuses a dependency above the building compiler's version, so the
+    1.89 check that CI runs cannot pass with it. There is no Tauri
+    release with the scene lifecycle below that floor. So the manifest's
+    `rust-version` and its comment, CI's floor job and its toolchain pin,
+    the commands in `.agents/repo-guidance.md` (Verification) and the
+    documents that name the floor move together, and
+    `.agents/decisions.md` records the new number under the rule of
+    2026-07-15, which stands: a declared floor, tested.
+  - It lands by itself and is proved as any desktop change is: the whole
+    verification set at the new floor and on stable, both Linux
+    end-to-end suites with the parity verdict PASS, the Windows suite and
+    the macOS jobs in CI, and its review.
+  - P1's trial compiled Vela against 2.12.7 with no source change, on
+    macOS and iOS, and the macOS unit tests gave what `main` gives. It
+    built with Rust 1.99, which is why it did not meet the floor.
 - **A1, the media library build.** Scripts, pins, CI job, licence texts,
   and the dependency-policy test.
 - **A2, the player seam (A-1).** It lands in steps, each with the desktop
