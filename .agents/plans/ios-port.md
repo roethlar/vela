@@ -153,11 +153,20 @@ detail pages, top-tab Settings, the player's single sheet):
     The budget reserves an upper bound for each picture before it is
     decoded or allocated and settles to the buffer's real size when it
     exists (the iPadOS plan's Footprint), and C1 budgets what Vela holds
-    for demuxing, decoding and presenting together. On the phone the queue is the stream's reorder
-    depth plus the smallest lead that plays without drops, which C1
-    finds; a stream whose reorder depth alone exceeds the phone's budget
-    is reported in the Log with its numbers, not played badly in
-    silence. Apple's renderers
+    for demuxing, decoding and presenting together.
+  - On the phone, what is held depends on the decoder, and is counted
+    once:
+    - VideoToolbox gives pictures in decode order, so its output waits
+      in the reorder queue, whose depth is the stream's reorder depth;
+    - a software decoder gives pictures in the order they are shown and
+      holds its delayed pictures itself. Those are counted as the
+      decoder's, and there is no reorder queue for them;
+    - either way, the lead of pictures waiting for the layer is the
+      smallest that plays without drops, which C1 finds.
+
+    A stream whose own reordering exceeds the phone's budget is reported
+    in the Log with its numbers, not played badly in silence.
+  - Apple's renderers
   keep their own internal queue, which Vela cannot count. So the engine
   enqueues only while the renderer reports it is ready for more
   (`isReadyForMoreMediaData`). The phone runs measure the memory charged
