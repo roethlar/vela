@@ -1,0 +1,16 @@
+You are the reviewer in a `codereview` repair review of this repository. It is read-only work.
+
+Repository: /Users/michael/Dev/vela
+Pins: base bee0c0003a8d27efcf25733782449a49b580785e, head ebe57737bea9bcb3f10265092f19a7a605937e5c.
+
+Capability proof first: read AGENTS.md in the repository, and run `git rev-parse ebe57737bea9bcb3f10265092f19a7a605937e5c`. Report whether both succeeded.
+
+Scope: the plan `.agents/plans/ipados-port.md`, a design for code that is not written yet. Between base and head, each finding of the previous review round was repaired in a commit of its own. The findings are in `.agents/review/codereview-2026-11-20-apple-plans-amendment/ipados.md` and `.agents/review/codereview-2026-11-20-apple-plans-amendment/ios.md`, and the record with their identifiers is `.agents/review/codereview-2026-11-20-apple-plans-amendment.md`. The repairs that touch this plan:
+
+ipd-59 in 675d6cd; ipd-60 in 0e73e0b; ipd-61 in c8cc601; ipd-62 in 3c6fc64; ipd-63 in 152d26a; ipd-64 in acefe81; ipd-65 in f8895f9; ipd-66 in 33deafa; ipd-67 in 9fc7392; ipd-68 in 787c2c9; ipd-32 in f266d93; ipd-36 in 2cb5d51; ipd-52 in 1c59006; ipd-53 in 56b3b76; ipd-57 in 696c8a4; iph-22 in 9e51f31; iph-24 in c5065a3; iph-25 in 6f96695; iph-26 in 39b3e74; iph-28 in ebe5773.
+
+For each of these, read the finding and the repair's diff yourself with git, and give a verdict: closed, or reopened with the reason. Judge whether the predicted failure is closed in the plan as it stands at head, and whether the repair introduced a defect in the text it touched. Check technical claims against primary sources where you can.
+
+You may also report a new design defect in the text these repairs touched, with: a title; a severity (CRITICAL, HIGH, MEDIUM or LOW) with the impact that justifies it; file and line evidence at head; the triggering input or condition; the predicted observable failure; and a better approach.
+
+Design only: by the owner's ruling (`.agents/decisions.md`, 2026-11-18, "No tests are designed for code that has not been written"), do not raise findings that ask only for tests, test designs or coverage. A clean result is a valid outcome. Report nothing you cannot support with evidence. Do not edit any file, create commits, change refs or contact a Git remote.

@@ -79,35 +79,38 @@ that report.
 ## Findings
 
 Status: `[ ]` admitted and open; `[~]` repaired, no verdict yet; `[x]`
-closed by a reviewer's verdict.
+closed by a reviewer's verdict. "r2" is the round of verdicts on the
+first repairs (below).
 
 ### iPadOS plan
 
 | ID | Severity | Finding (one line) | Status | Commit |
 |----|----------|--------------------|--------|--------|
-| ipd-59 | HIGH | T0's Tauri 2.12.7 needs Rust 1.90; Vela's floor and CI are 1.89 | `[ ]` | |
-| ipd-60 | HIGH | A Dolby Vision stream that falls back to software decoding loses its RPU (profile 5 turns green) | `[ ]` | |
-| ipd-61 | HIGH | The picture budget counts a 2160p 10-bit picture at 12 MB; uncompressed it is 24.9 MB | `[ ]` | |
-| ipd-62 | MEDIUM | Counting each E-AC-3 syncframe advances the clock twice when a dependent substream is present | `[ ]` | |
-| ipd-63 | MEDIUM | A format change later in the stream (an HLS discontinuity) has no decoder recovery | `[ ]` | |
-| ipd-64 | MEDIUM | "Exact" seek skips the picture that covers the target | `[ ]` | |
-| ipd-65 | MEDIUM | A gap in the sound's time flushes sound that was still to be heard | `[ ]` | |
-| ipd-66 | MEDIUM | A hardware session may decode and still refuse to deinterlace | `[ ]` | |
-| ipd-67 | MEDIUM | A track's display rotation is lost (portrait iPhone recordings play sideways) | `[ ]` | |
-| ipd-68 | MEDIUM | The plan says P2 is done on the iPad and A2 holds, beyond what the Log shows | `[ ]` | |
+| ipd-59 | HIGH | T0's Tauri 2.12.7 needs Rust 1.90; Vela's floor and CI are 1.89 | `[x]` closed in r2 | `675d6cd` |
+| ipd-60 | HIGH | A Dolby Vision stream that falls back to software decoding loses its RPU (profile 5 turns green) | `[ ]` reopened in r2 | `0e73e0b` |
+| ipd-61 | HIGH | The picture budget counts a 2160p 10-bit picture at 12 MB; uncompressed it is 24.9 MB | `[ ]` reopened in r2 | `c8cc601` |
+| ipd-62 | MEDIUM | Counting each E-AC-3 syncframe advances the clock twice when a dependent substream is present | `[ ]` reopened in r2 | `3c6fc64` |
+| ipd-63 | MEDIUM | A format change later in the stream (an HLS discontinuity) has no decoder recovery | `[x]` closed in r2 | `152d26a` |
+| ipd-64 | MEDIUM | "Exact" seek skips the picture that covers the target | `[ ]` reopened in r2 | `acefe81` |
+| ipd-65 | MEDIUM | A gap in the sound's time flushes sound that was still to be heard | `[ ]` reopened in r2 | `f8895f9` |
+| ipd-66 | MEDIUM | A hardware session may decode and still refuse to deinterlace | `[ ]` reopened in r2 | `33deafa` |
+| ipd-67 | MEDIUM | A track's display rotation is lost (portrait iPhone recordings play sideways) | `[x]` closed in r2 | `9fc7392` |
+| ipd-68 | MEDIUM | The plan says P2 is done on the iPad and A2 holds, beyond what the Log shows | `[x]` closed in r2 | `787c2c9` |
+| ipd-69 | MEDIUM | (r2) An unchanged file restarts on every seek when the server answers a ranged request with the whole file | `[ ]` | |
+| ipd-70 | MEDIUM | (r2, both reports) The software path expects a raw RPU from dav1d for profile 10; FFmpeg gives parsed metadata there | `[ ]` | |
 
 Round 5's repairs (findings in `codereview-2026-11-18-apple-plans.md`):
 
-| ID | Verdict | What is still wrong | Status | Commit |
-|----|---------|---------------------|--------|--------|
+| ID | Verdict | What was still wrong | Status | Commit |
+|----|---------|----------------------|--------|--------|
 | ipd-55 | closed | | `[x]` | `fd4461e` |
 | ipd-56 | closed | | `[x]` | `1dbb1d6` |
 | ipd-58 | closed | | `[x]` | `24cf277` |
-| ipd-32 | reopened | A reset on another device (an offset, then none) is both "the server changed" and "no resume state, Vela wins" | `[ ]` | |
-| ipd-36 | reopened | "Every permitted external decoder" cannot be built: `libxevd` and `libxevdb` exclude each other | `[ ]` | |
-| ipd-52 | reopened | A close already sent, whose answer was lost, can still clear the next play | `[ ]` | |
-| ipd-53 | reopened | A read that starts exactly at the end can get 416, which the plan calls an error | `[ ]` | |
-| ipd-57 | reopened | `If-Range` needs a strong validator; with a weak one or none, two versions can still be spliced | `[ ]` | |
+| ipd-32 | reopened | A reset on another device (an offset, then none) is both "the server changed" and "no resume state, Vela wins" | `[x]` closed in r2 | `f266d93` |
+| ipd-36 | reopened | "Every permitted external decoder" cannot be built: `libxevd` and `libxevdb` exclude each other | `[x]` closed in r2 | `2cb5d51` |
+| ipd-52 | reopened | A close already sent, whose answer was lost, can still clear the next play | `[ ]` reopened again in r2 | `1c59006` |
+| ipd-53 | reopened | A read that starts exactly at the end can get 416, which the plan calls an error | `[x]` closed in r2 | `56b3b76` |
+| ipd-57 | reopened | `If-Range` needs a strong validator; with a weak one or none, two versions can still be spliced | `[ ]` reopened again in r2 | `696c8a4` |
 
 ### iPhone plan
 
@@ -117,12 +120,37 @@ Its own:
 
 | ID | Severity | Finding (one line) | Status | Commit |
 |----|----------|--------------------|--------|--------|
-| iph-22 | HIGH | The iOS overlay's `"resources": {}` does not remove the desktop's GPL mpv scripts from the app | `[ ]` | |
-| iph-23 | MEDIUM | FEL composition, once landed for the iPads, would run on the iPhone without a phone's own measurement | `[ ]` | |
-| iph-24 | MEDIUM | Software decoders already give pictures in display order; a second reorder queue doubles delay and memory | `[ ]` | |
-| iph-25 | MEDIUM | The renderer's dropped count includes display misses, which could trigger an Automatic step-down the owner did not approve | `[ ]` | |
-| iph-26 | MEDIUM | The exact-length rule for HLS byte ranges rejects FFmpeg's read across adjacent segments | `[ ]` | |
-| iph-27 | LOW | I2 keeps row 13a open for a ruling the owner already gave | `[ ]` | |
-| iph-28 | LOW | "Every slice gets a `codereview codex`" contradicts the 2026-11-20 rule when codex writes the slice | `[ ]` | |
+| iph-22 | HIGH | The iOS overlay's `"resources": {}` does not remove the desktop's GPL mpv scripts from the app | `[x]` closed in r2 | `9e51f31` |
+| iph-23 | MEDIUM | FEL composition, once landed for the iPads, would run on the iPhone without a phone's own measurement | `[x]` closed in r2 | `2aaedf8` |
+| iph-24 | MEDIUM | Software decoders already give pictures in display order; a second reorder queue doubles delay and memory | `[ ]` closed for the iPadOS plan, reopened for the phone's own queue rule in r2 | `c5065a3` |
+| iph-25 | MEDIUM | The renderer's dropped count includes display misses, which could trigger an Automatic step-down the owner did not approve | `[x]` closed in r2 | `6f96695` |
+| iph-26 | MEDIUM | The exact-length rule for HLS byte ranges rejects FFmpeg's read across adjacent segments | `[x]` closed in r2 | `39b3e74` |
+| iph-27 | LOW | I2 keeps row 13a open for a ruling the owner already gave | `[x]` closed in r2 | `f1ca934` |
+| iph-28 | LOW | "Every slice gets a `codereview codex`" contradicts the 2026-11-20 rule when codex writes the slice | `[x]` closed in r2 | `ebe5773` |
+| iph-29 | MEDIUM | (r2) A server may answer a ranged request with a shorter `206`; the "whole range or error" rule breaks on it | `[ ]` | |
 
-Nothing was declined.
+Nothing was declined. iph-28's repair also corrects the same sentence in
+`tvos-port.md`, which was outside the round's scope.
+
+## Round 2: verdicts on the repairs (2026-11-20, `bee0c00..ebe5773`)
+
+Two codex sessions, called the same way, 23:20:07Z to 23:25:04Z (iPhone)
+and to 23:29:00Z (iPadOS), exit 0 each. Each read `AGENTS.md` and ran
+`git rev-parse` on the head. Reports, verbatim: `ipados-r2.md` and
+`ios-r2.md`; prompts beside them. The prompts named each finding's
+repair commit and no more.
+
+- iPadOS: 12 closed, 8 reopened (ipd-60, ipd-61, ipd-62, ipd-64, ipd-65,
+  ipd-66, ipd-52, ipd-57), 2 new (ipd-69, ipd-70).
+- iPhone: 7 closed, 3 reopened (ipd-60, ipd-61, and iph-24 for the
+  phone's own rule), 2 new (iph-29, and ipd-70 again).
+- What the working agent checked: FFmpeg's AV1 path attaches only parsed
+  Dolby Vision metadata (`itut35.c`), its HEVC decoder the raw RPU as
+  well (`hevc/hevcdec.c`); the owner's Plex answers a ranged request for
+  a media part with a strong ETag and a Last-Modified date.
+- ipd-60's reopening turns on the rule that the Apple apps use public API
+  only (`.agents/decisions.md`, 2026-11-18, the agent's reading of "do
+  not close that door"): the attachment that carries the RPU has no
+  declared key. The second repair stops the engine writing it at all,
+  which also changes how a composed FEL picture could be shown; that
+  choice is the owner's, after probe P5.
