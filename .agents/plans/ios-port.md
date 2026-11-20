@@ -164,6 +164,16 @@ detail pages, top-tab Settings, the player's single sheet):
   memory evidence, and what cannot be attributed stays unknown. A large allocation can end the
   app before a memory-warning handler runs, so the handler only shrinks
   the budgets further; it is not what keeps the app alive.
+- **Composing a FEL picture is decided for the phone by the phone.**
+  The iPadOS plan's P5 shows it on two iPads. It takes two decoders at
+  once and a composed picture besides, so a phone that sustains the
+  conversion may not sustain it. Which route a FEL title takes
+  (composed, or converted and said to be) is set per device class, and
+  on the phone composition stays off until I4 has run a sustained FEL
+  play composed on the owner's iPhone, within the phone's budget and
+  without drops, with its footprint and thermal state recorded. If the
+  phone cannot sustain it, that goes to the owner, as P5 says for an
+  iPad.
 - **Thermal state** (`ProcessInfo.thermalState`) is measured and
   recorded (I1, I4). It is not a step-down trigger.
   - The owner approved two triggers: sustained decoder frame drops and a
@@ -227,9 +237,8 @@ each pushed to `origin` and `github` as it lands
     decodes AV1, and an original profile 7 file converted live, each on
     the minimum iOS as well as the current one (row 16). A file converted
     beforehand would bypass the converter. Profile 7 is checked with a
-    MEL file and with a FEL file: the FEL one as the iPadOS plan's row 16
-    stands when this slice runs (composed from both layers if that has
-    landed; converted, and said to be, if not).
+    MEL file and with a FEL file. How a FEL file plays on the phone is
+    the phone's own decision, below ("The engine on a phone").
   - the Dolby Vision reference clip of `tvos-port.md` and its
     stripped-RPU control;
   - each audio format, proved as row 17 says: the layout the engine
