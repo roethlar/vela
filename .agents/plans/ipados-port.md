@@ -725,12 +725,20 @@ This follows the libmpv set's recipe (`packaging/libmpv/versions.txt`;
     --disable-autodetect`. The script asserts the licence string and the
     expected `CONFIG_*` features afterwards, as the macOS script does.
     Every decoder, demuxer and parser FFmpeg's LGPL configuration
-    provides is enabled, and so is every external decoder library FFmpeg
-    can use whose licence the licensing rule of 2026-11-12 permits. The
-    list is made from the pinned FFmpeg release codec by codec, and each
-    library is pinned like the rest. Known today: dav1d (AV1), uavs3d
-    (AVS3, built with `COMPILE_10BIT=1` so 10-bit plays) and XEVD (MPEG-5
-    EVC). AVS2, whose only decoder (davs2) is GPL, is not supported, by
+    provides is enabled. External decoder libraries are chosen for
+    coverage, by codec and profile: every codec and profile that only an
+    external library decodes, and whose library the licensing rule of
+    2026-11-12 permits, has one. That is not every library: where FFmpeg
+    offers two for one codec that cannot be built together, the one that
+    covers more is built and the other is written down as its
+    alternative. The inventory is made from the pinned FFmpeg release
+    codec by codec, says for each library which codecs and profiles it
+    covers, and each library is pinned like the rest. Known today: dav1d
+    (AV1), uavs3d (AVS3, built with `COMPILE_10BIT=1` so 10-bit plays)
+    and, for MPEG-5 EVC, the full decoder `libxevd`, not the
+    baseline-only `libxevdb`: the pinned `configure` stops when both are
+    enabled. If the inventory finds a profile the chosen library does
+    not decode, that gap goes to the owner like any other. AVS2, whose only decoder (davs2) is GPL, is not supported, by
     the owner's approval (O5). Any other codec whose only decoder that
     rule excludes goes to the owner the same way. swresample and
     swscale are built too, and libavfilter for the deinterlacer (`bwdif`,
