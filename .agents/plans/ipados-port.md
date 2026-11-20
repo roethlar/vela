@@ -1431,3 +1431,39 @@ no Dolby Vision box).
     the iPad's run of it was not made). Not done: profiles 8.4 and 10 (no
     file), the live profile 7 conversion (libdovi in the player), and
     everything on an Apple TV.
+
+- 2026-11-20, P2, **profile 7 with a full enhancement layer is not right
+  once that layer is thrown away.**
+  - The owner compared with Infuse on the same iPad: "mockingjay in Infuse
+    looks like the brighter clip, C". C is the probe's plain HDR10
+    rendering of the disc's base layer; B, the 8.1 conversion, is the
+    darker one. So the probe's HDR10 path matches the player the owner
+    trusts, and the conversion of this FEL title does not.
+  - What the disc says (dovi_tool): its RPU is for a 4000-nit master
+    (`0.0050/4000 nits`, trims for a 1000-nit target), where the MEL disc
+    (The Fifth Element) is a 1000-nit master. The conversion keeps that
+    metadata and discards the layer that, with the base layer, makes the
+    picture it describes. ASSUMPTION, fitting both facts and not proven:
+    the display mapping then treats a base layer that stands by itself as
+    HDR10 as if it were the brighter composite, and darkens it.
+  - **So A-2's "profile 7 (MEL or FEL) becomes 8.1 through libdovi's
+    conversion" holds for MEL at most.** For FEL the picture the disc
+    means needs both layers put together.
+  - **Whether the layer would show such a picture: yes, on the Mac.** The
+    probe copied each decoded profile 5 picture into a pixel buffer of
+    its own making (plain 10-bit, `xf20`), with the decoder's attachments,
+    and gave the layer that: the window measures exactly as with the
+    decoder's own buffer (mean Y 25.66, U 126.92, V 128.50). The same copy
+    without the `DolbyVisionRPUData` attachment measures as the
+    unprocessed picture (33.89, 122.16, 120.85). So the layer's Dolby
+    Vision is driven by that attachment and works on pictures the app
+    makes. A picture the engine composes from a base and an enhancement
+    layer, with an RPU attached, is therefore something the layer can
+    present. The same two clips are on the iPad for the owner's eyes.
+  - Not built or shown: decoding the enhancement layer beside the base
+    layer and putting the two together (the residual and its scaling are
+    in the RPU; open implementations exist for offline use), at 2160p in
+    real time, and at what bit depth the result is handed over. That is a
+    probe of its own before A-2 promises it.
+  - MEL converted (The Fifth Element) has not been compared with a
+    reference by eye.

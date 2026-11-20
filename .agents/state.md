@@ -67,10 +67,14 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     (Mac). Sound tests, paused by the owner for a meeting, are allowed
     again (2026-11-20, "you can resume audio testing if necessary"): keep
     them to the iPad, where the owner's ears judge. The iPad Pro half of P2 is done
-    but for three things (the Log's last entry of 2026-11-20): whether
-    profile 7 FEL converted to 8.1 LOOKS right (the owner saw the plain
-    HDR10 rendering of the same pictures "much brighter"; a reference
-    player on the same iPad is needed; asked of the owner), profiles 8.4
+    but for three things (the Log's last entry of 2026-11-20): profile 7
+    FEL, which converted to 8.1 does NOT look right (darker than Infuse
+    on the same iPad, which looks like the probe's plain HDR10; the disc
+    is a 4000-nit master whose enhancement layer the conversion throws
+    away). The layer does apply Dolby Vision to pictures the app makes
+    itself when the RPU is attached (Mac), so putting both layers
+    together in the engine is possible on the presenting side; decoding
+    and composing them is unbuilt and needs its own probe. Profiles 8.4
     and 10 (no file), and the live profile 7 conversion (libdovi in the
     player, not built). NEXT: the Apple TV half, which has not started
     and needs the owner: an Apple TV paired with `nagatha`, and a tvOS
