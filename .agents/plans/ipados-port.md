@@ -1314,3 +1314,16 @@ no Dolby Vision box).
     track switching, memory, E-AC-3 with Atmos and DTS-HD MA (no file),
     and which channel description sound needs. The Apple TV half has not
     begun.
+
+- 2026-11-20, P2, seeking, on the Mac (`240-1000nits-pattern.mp4`, HEVC
+  2160p, six minutes, silent, the engine's own session): six seeks, two
+  seconds apart, to 30, 200, 10, 340, 95.5 and 180 s. Each showed its
+  first picture within one frame after the target, 86 to 225 ms after it
+  was asked, having decoded and thrown away the 16 to 72 pictures between
+  the keyframe before the target and the target. No picture dropped; the
+  process's footprint peaked at 22.6 MB. Seeking to the exact picture
+  falls out of the engine doing the decoding: with compressed samples
+  given to the layer, the pictures before the target cannot be held back.
+  The same test and a one-minute memory run are in the iPad build
+  (silent); not run there yet (locked). Track switching has no file: the
+  library has none with two audio tracks.
