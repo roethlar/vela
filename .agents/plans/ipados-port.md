@@ -1222,3 +1222,58 @@ two visibly different RPUs, and the same layer with its RPU stripped).
     the Mac its greys came out a little darker than the Apple path's;
     the cause was not found, and the engine's software path has to match
     the hardware path's tagging exactly.
+
+- 2026-11-20, P2 continued (the iPad Pro and the Mac):
+  - **The silent TrueHD was the timestamps, and it is repaired in the
+    probe.** A TrueHD frame is 40 samples (0.83 ms), and Matroska stamps
+    packets to the millisecond, so the stamps repeat and overlap (0, 38,
+    38, 39, ... 43, 43). The probe gave Apple's audio renderer 1,200 tiny
+    buffers a second with those stamps: it reported "rendering", no
+    error, and played "a couple of ms of static at load" (the owner),
+    whichever way the channels were described, a stereo downmix included.
+    The decoded sound was right all along: the probe's PCM is identical,
+    sample for sample, to FFmpeg's own decode of the file. Repaired by
+    counting time in samples from the first stamp, in buffers of 50 ms,
+    and believing a container stamp again only when it is more than 0.1 s
+    off. The owner, with that build on the iPad's speakers (a 2-channel
+    route with spatial audio on): "audio worked". **For A-2: decoded
+    sound is timed by sample count; container stamps only anchor it.**
+    Which channel description the engine should use was not separated:
+    all three variants got the same repair, and the owner paused sound
+    tests before saying which he heard.
+  - The owner's other answers on the iPad: 10-bit H.264 shows the same
+    sharp pattern through Apple's decoder and through FFmpeg's ("they
+    look basically the same but I haven't looked too closely"); the VP9
+    clip through FFmpeg's decoder shows its frame (a dim room; the
+    agent's caption called it bright, wrongly); Dolby Vision 8.1 at 2160p,
+    looping, "seems smooth".
+  - **Compressed samples given straight to the layer lose pictures on
+    streams with deep B-frame pyramids at 2160p.** `Aquaman_test.mkv`
+    (HEVC, eight B-frames between anchors): 25 to 34 of 255 pictures
+    dropped on the Mac, 41 of 240 on the iPad, steadily, about one a
+    group. `asuka.mkv` (three B-frames): 7 to 12 of 242. `snow-fades.mp4`:
+    19 to 24 of 289. Clips without that reordering lose none
+    (`contrast-recovery...`, `waterfall.mkv` in AV1, the 1080p clips).
+    Tried on the Mac and of no effect: the container's decode times, no
+    decode times, decode times made by the probe sixteen frames early,
+    the attachment that says later samples may show earlier, a remux to
+    MP4, no sound.
+  - **With a VideoToolbox session of the engine's own, none are lost.**
+    The probe decodes each sample in a `VTDecompressionSession`, sorts
+    the decoded pictures by presentation time in a queue of sixteen, and
+    gives the layer decoded pictures in the order they are shown: 0
+    dropped on all three clips (Mac).
+  - **Dolby Vision engages on that path too** (Mac): the session's
+    pictures carry the `DolbyVisionRPUData` attachment, and the layer
+    applies it: `dark.mkv` (profile 5) shows natural colours
+    (`shots/p2-mac-p5-vt-dvh1.png`); the 8.1 clip plays 100 pictures,
+    none dropped.
+  - **What P2 says about A-2's design, so far:** the layer stays, and the
+    engine does the decoding. Hardware codecs go through a decompression
+    session of the engine's own and reach the layer as decoded pictures
+    in display order, as software-decoded ones already do. The engine
+    then also has every decoded picture in hand, which is what cropping's
+    detector needs without a second session. A-2's "compressed sample
+    buffers to the layer" is amended, and the amendment reviewed, before
+    engine code. Not yet shown on the iPad or an Apple TV: the build with
+    this path is on the iPad, silent, and has not run (locked).
