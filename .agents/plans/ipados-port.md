@@ -594,12 +594,20 @@ Inside:
     time comes from the container; each later buffer starts where the
     last one ended. A container time is believed again only when it is
     far from the counted one (0.1 s in P2; the engine's value is set
-    with the tests), and that is then a real discontinuity: the count
-    starts again at the container's time, for the sound from there on.
-    What is already queued before the discontinuity is still to be
-    heard and stays queued; the renderer is flushed only by a seek, a
-    change of track or its own request. P2 found why the count is
-    needed: a TrueHD
+    with the tests), and that is then a real discontinuity, of one of
+    two kinds (the play's timeline, below, tells them apart):
+    - the source's own clock jumped, for picture and sound together, as
+      at an HLS discontinuity where times can start again at zero. The
+      timeline's offset moves, and the sound's count goes on from the
+      end of what is queued, on the play's timeline. Nothing is given a
+      time the clock has already passed;
+    - this track alone has a gap or an overlap. The count starts again
+      at the container's time placed on the timeline. If that is behind
+      what is already queued, the overlapping sound is dropped, never
+      scheduled in the past.
+    Either way, what is already queued is still to be heard and stays
+    queued; the renderer is flushed only by a seek, a change of track or
+    its own request. P2 found why the count is needed: a TrueHD
     frame is 40 samples, Matroska stamps packets to the millisecond, the
     stamps repeat and overlap, and Apple's renderer, given a buffer for
     each, reports no error and plays nothing. Small frames are gathered
@@ -647,6 +655,14 @@ Inside:
     and then its removal for each listed format.
   - Bitmap formats (PGS, VobSub, DVB) come from FFmpeg's decoders and are
     drawn as images, scaled with the picture.
+- **One timeline.** The synchronizer runs the play's timeline, and
+  container times are placed on it by an offset the engine keeps, which
+  starts at zero. When the source's clock jumps for every stream at
+  once, forward or back (an HLS discontinuity, which the demuxer
+  reports; otherwise picture and sound jumping together by the same
+  amount), the offset changes so that what follows continues where what
+  came before ends. The position reported to the page and the servers
+  is the item's own, computed back through the offset.
 - **Seeking is exact.** Both renderers, the session and the queues are
   emptied; decoding starts at the keyframe before the target; the clock
   starts again at the target itself. The picture shown is the one whose
