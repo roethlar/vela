@@ -437,21 +437,27 @@ Inside:
     10 bits, which this plan used to list as software-only, is decoded
     by Apple's decoder on the M5 and on the Mac; profile 7 Dolby Vision
     is refused at session creation.)
-  - **A Dolby Vision stream in software keeps its metadata, or it is not
-    played as a picture it is not.** The layer applies Dolby Vision from
-    the RPU attached to each picture (below), and VideoToolbox is what
-    attaches it. FFmpeg gives each decoded frame's RPU beside the frame,
-    in the same raw form: the bytes VideoToolbox attaches to a profile 5
-    picture are the stream's RPU exactly (checked on the Mac, 267 of 267
-    bytes). So the software path attaches FFmpeg's RPU to the pixel
-    buffer it makes, with the tags VideoToolbox puts on the same stream.
-    That hand-over is not yet shown with software-decoded pixels. Until
-    a profile 5 stream forced to software has been seen in natural
-    colours on a device (A7), a profile 5 stream VideoToolbox will not
-    decode ends with an error that says so. It is never sent to the
-    layer without its RPU, which is the green and purple picture.
-    Profile 8.1's base layer is valid HDR10 by itself and plays as that,
-    said to be that.
+  - **Dolby Vision is presented only for pictures VideoToolbox decoded.**
+    The layer applies Dolby Vision from an RPU attached to each picture
+    (below), and VideoToolbox is what attaches it, under a key
+    (`DolbyVisionRPUData`) that Apple's public headers do not declare.
+    The engine never writes that attachment itself. Writing it would
+    rest the picture on undocumented behaviour, and the Apple apps use
+    public API only (`.agents/decisions.md`, 2026-11-18, Apple builds).
+    P2 saw that writing it works today, and that the bytes are the
+    stream's raw RPU; that is an observation in the Log, and nothing in
+    the engine is built on it. Apple's documented per-frame metadata
+    session makes metadata from a picture; it does not take a stream's.
+    So a Dolby Vision stream that VideoToolbox will not decode is never
+    presented as Dolby Vision from software:
+    - where its base layer is a valid picture by itself (profiles 8.1
+      and 8.4, and profile 10's HDR10- and HLG-compatible forms), FFmpeg
+      decodes it and it plays as that HDR10 or HLG picture, and the
+      play's state says it is not Dolby Vision;
+    - where it is not (profile 5, and profile 10 with no compatible base
+      layer), the play ends with an error that says this device will not
+      decode this Dolby Vision stream. It is never shown without its
+      metadata, which is the green and purple picture.
   - The format description says what an ISO sample entry would: the
     codec type, the configuration record from the container (`hvcC`,
     `avcC`, `av1C`, `vpcC`), the colour tags, the mastering display and
@@ -537,24 +543,38 @@ Inside:
       checked against a reference.
     - **FEL** (the enhancement layer carries part of the picture): the
       picture the disc means is both layers together, and the conversion
-      drops one. **The target is to compose them:** decode the
-      enhancement layer beside the base layer, apply the RPU's mapping
-      and residual, and hand the layer the composed picture with a
-      converted RPU attached. P2 showed the last step is possible: the
-      layer applies Dolby Vision to a picture the app made itself when
-      the RPU is attached (the Mac by measurement, the iPad by the
-      owner's eye). Everything before that step is unproven, so it has a
-      probe of its own, P5 (Slices), before it is built.
-    - Until that composition has landed, a FEL title plays by the MEL
-      conversion, and the engine says so: the play's state carries
-      "Dolby Vision, converted, enhancement layer not applied", so that
-      nothing shown to the user or written in a test claims the disc's
-      full picture. If P5 shows a device cannot compose in real time,
-      that goes to the owner; it is not settled here.
+      drops one. Composing them means decoding the enhancement layer
+      beside the base layer and applying the RPU's mapping and residual.
+      The composed picture is the engine's own, not VideoToolbox's, so
+      how it reaches the screen is the open question, and there are
+      three ways a FEL title can play:
+      1. converted, as MEL is: Dolby Vision's mapping, the enhancement
+         layer dropped;
+      2. composed and presented as HDR10: the whole picture, by a
+         documented path, with Apple's HDR10 mapping in place of the
+         disc's dynamic metadata, and no Dolby Vision mode;
+      3. composed and presented as Dolby Vision, by attaching a
+         converted RPU to the composed picture. P2 saw the layer honour
+         that on a picture the app made (the Mac by measurement, the
+         iPad by the owner's eye). It is the undocumented attachment
+         above, which the engine does not write.
+      Composition is unproven on a device, so it has a probe of its own,
+      P5 (Slices), which measures ways 2 and 3 beside way 1. **Which way
+      Vela takes is the owner's choice, made with P5's results**: way 3
+      is the disc's picture with its own mapping and bears on the App
+      Store rule; way 2 keeps to public API and gives up the mapping.
+    - Until the owner has chosen and it has landed, a FEL title plays by
+      the MEL conversion, and the engine says so: the play's state
+      carries "Dolby Vision, converted, enhancement layer not applied",
+      so that nothing shown to the user or written in a test claims the
+      disc's full picture.
   - Profile 10 is AV1, whose Dolby Vision metadata travels in metadata
     OBUs, so the engine carries those and an AV1 Dolby Vision format
-    description (HLS names it `dav1`). Profiles 10 and 8.4 were not in
-    P2: no file. Each is proved in A7 when a file exists.
+    description (HLS names it `dav1`) to VideoToolbox. Profiles 10 and
+    8.4 were not in P2: no file. Each is proved in A7 when a file exists.
+    In software there is no Dolby Vision for it, as for any profile
+    (above); FFmpeg's dav1d path would not supply a raw RPU in any case,
+    only the parsed metadata.
   - Native 8.1 is used wherever the device takes it. P2 checks that per
     device and per Apple TV generation.
   - Converting 8.1 to 5 for a device that takes only 5 needs the picture
@@ -1160,9 +1180,9 @@ New rows, for every Apple device:
 15. HDR10 and HLG tagged and shown in HDR.
 16. Dolby Vision profiles 5, 8.1, 8.4, 7 and 10 (where the device
     decodes AV1) shown as Dolby Vision, each on the minimum OS. Profile 7
-    MEL is converted. Profile 7 FEL passes this row only composed from
-    both layers (after P5); while it is converted, the row is open for
-    FEL and the play's state says so.
+    MEL is converted. For profile 7 FEL the row is open until the owner
+    has chosen among A-2's three ways after P5; while it plays
+    converted, the play's state says so.
 17. Each audio format listed in A-2, decoded or passed as A-2 says. The
     ear cannot tell stereo, multichannel LPCM and Atmos apart, so the
     proof is threefold:
@@ -1265,12 +1285,14 @@ records what landed.
   the Log, before any of it is engine code. It must show, on the iPad
   Pro and the A16 iPad: the enhancement layer decoded beside the base
   layer at the film's rate; the two composed as the RPU says, at the
-  depth the result needs; the layer presenting the composed picture
-  with its RPU attached; and the composed picture agreeing with one
-  composed offline from the same frames by an independent tool. What it
-  costs in memory and heat is measured. If it holds, the composition is
-  designed in an amendment, reviewed, and built after A7. If it does not
-  hold on a device, that goes to the owner.
+  depth the result needs; the composed picture agreeing with one
+  composed offline from the same frames by an independent tool; and the
+  composed picture on the screen both ways A-2 names, as HDR10 and with
+  a converted RPU attached, beside the converted play. What each costs
+  in memory and heat is measured. The results go to the owner, who
+  chooses among A-2's three ways for FEL titles; the chosen way is then
+  designed in an amendment, reviewed, and built after A7. If composition
+  does not hold on a device, that goes to the owner too.
 - **A8, audio, subtitles and multi-part items (rows 17–19).** Also
   TLS-verify (row 20).
 - **A9, markers, cropping and Automatic quality (rows 8–11).** Row 11,
@@ -1374,12 +1396,12 @@ no Dolby Vision box).
   owner, and the engine is changed for the Apple TV as far as it needs.
 - **The attachment that carries the RPU has no name in Apple's public
   headers.** `DolbyVisionRPUData` is the key VideoToolbox was seen to
-  use, and the layer was seen to honour it on pictures the app made. The
-  engine's own decoded pictures get it from VideoToolbox, so ordinary
-  Dolby Vision does not depend on Vela writing it. The software path for
-  Dolby Vision and the FEL composition do. If an OS release stops
-  honouring it, those two lose Dolby Vision, and the tests that play
-  them fail; nothing else changes.
+  use. The engine only passes on pictures VideoToolbox decoded, with
+  whatever VideoToolbox attached, and never writes the key, so Dolby
+  Vision in Vela rests on public API: a documented codec type, a
+  decompression session and the display layer. The one thing that would
+  need the key written is way 3 for FEL titles, which is the owner's to
+  allow or not (A-2).
 - **A FEL picture from both layers may not be possible in real time**
   on one of the devices (P5). Until it is shown, FEL plays converted and
   says so.
