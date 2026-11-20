@@ -68,10 +68,12 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     again (2026-11-20, "you can resume audio testing if necessary"): keep
     them to the iPad, where the owner's ears judge. The iPad Pro half of P2 is done
     but for three things (the Log's last entry of 2026-11-20): profile 7
-    FEL, which converted to 8.1 does NOT look right (darker than Infuse
-    on the same iPad, which looks like the probe's plain HDR10; the disc
-    is a 4000-nit master whose enhancement layer the conversion throws
-    away). The layer does apply Dolby Vision to pictures the app makes
+    FEL: converted to 8.1 it is darker on the iPad than the same pictures
+    as plain HDR10, which is what Infuse's picture looks like; whether
+    Infuse uses Dolby Vision for that disc is not known, so that
+    comparison does not say which is right (the Log's correction of
+    2026-11-20). By the format the conversion drops a layer that is part
+    of the picture. The layer does apply Dolby Vision to pictures the app makes
     itself when the RPU is attached (Mac), so putting both layers
     together in the engine is possible on the presenting side; decoding
     and composing them is unbuilt and needs its own probe. Profiles 8.4

@@ -1484,3 +1484,27 @@ no Dolby Vision box).
     picture; seeks land where asked; nothing dropped). The first step
     after a pause can move two pictures, since the pause lands between
     two; later steps are single.
+
+- 2026-11-20, **correction to the entry on profile 7 FEL above.** That
+  entry reads the owner's comparison ("mockingjay in Infuse looks like
+  the brighter clip, C") as showing that the 8.1 conversion "does not"
+  match "the player the owner trusts", and the agent told the owner the
+  conversion "is the one that's wrong". The comparison does not show
+  that. It shows that Infuse's picture of that disc on the iPad looks
+  like the probe's plain HDR10 rendering. Whether Infuse plays that disc
+  in Dolby Vision at all on an iPad is not known here; if it falls back
+  to HDR10 for full-layer discs, its picture says nothing about how the
+  conversion should look. What stands without the comparison:
+  - the conversion's picture is darker than the plain HDR10 one on the
+    iPad (the owner), and the two measured alike on the Mac;
+  - by the format, a FEL disc's intended picture is the base and the
+    enhancement layer together, and the conversion drops one of them, so
+    the conversion cannot be that picture exactly. How far off it is on a
+    given title is not measured;
+  - for MEL the enhancement layer carries no picture, so the conversion
+    loses nothing by the format. That is not confirmed by eye, and the
+    comparison asked of the owner for it (The Fifth Element against
+    Infuse) had the same weakness and was withdrawn. The owner, of that
+    request: "I don't understand what I'm supposed to be judging here."
+  A-2's direction is unchanged by this: MEL converts; FEL is rebuilt from
+  both layers, after a probe of its own.
