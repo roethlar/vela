@@ -2916,3 +2916,27 @@ How to apply:
   with `nagatha`, and the files its media plan names.
 - A probe that overturns an assumption stops the work it rests on and
   goes to the owner (the plan's Risks).
+
+## 2026-11-20 - iPad and iPhone are finished first; the Apple TV follows the week after
+
+Status: OWNER DIRECTION (2026-11-20). An order of work.
+
+Decision:
+Told that the iPad Pro half of probe P2 was done and that its Apple TV
+half waited on an Apple TV paired with the Mac and a tvOS development
+profile, the owner, verbatim: "let's finish the ipad and ios builds
+first, then apple tv next week".
+
+How to apply:
+- The work goes on with the iPad and then the iPhone. The Apple TV half
+  of P2 and everything of `.agents/plans/tvos-port.md` wait for the
+  owner's word the following week; nothing is asked of the owner for the
+  Apple TV before then.
+- The iPadOS plan made engine code wait for P2 on the Apple TV as well
+  as the iPad. That wait is lifted by this direction for the iPad and the
+  iPhone. Its risk stays recorded: if an Apple TV needs something the
+  iPad did not, the engine is changed for it then.
+- The agent's reading, not the owner's words: this sets the order. It is
+  not by itself the approval of `ipados-port.md` and `ios-port.md`, which
+  the owner gives on an executive summary and open questions (decision of
+  2026-11-18). That summary was put to the owner the same day.
