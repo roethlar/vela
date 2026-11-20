@@ -647,9 +647,14 @@ Inside:
   again. A9 tests a letterboxed, hardware-decoded clip on the minimum OS.
   It reports the same crop states `vela-crop.lua` reports today.
 - **Health:** dropped frames and buffered seconds feed Automatic quality
-  as `PlayerEvent`s. Dropped frames are the renderer's own count (its
-  video performance metrics) together with the pictures the engine could
-  not decode in time. The iOS 27 SDK reports a renderer's failures
+  as `PlayerEvent`s. The dropped frames that feed it are only the
+  pictures the decoder, hardware or software, could not deliver in time
+  for their turn: that is the signal the owner approved ("sustained
+  decoder frame drops mean this machine cannot decode the file",
+  `.agents/decisions.md` 2026-07-25). The renderer's own count (its video
+  performance metrics) also includes pictures that missed their moment
+  on screen for other reasons. It is kept as a diagnostic of the play and
+  never reaches the step-down. The iOS 27 SDK reports a renderer's failures
   through the result of each enqueue and a stream of rendering events;
   the engine uses those, not the deprecated `error` property.
 - **Footprint.** With the engine decoding, the decoded pictures waiting
