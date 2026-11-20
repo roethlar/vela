@@ -9,9 +9,14 @@ results. Test specifics
 written here before the code exists are not binding: tests are designed
 with the code, in the slice that writes it (`.agents/decisions.md`
 2026-11-18, "No tests are designed for code that has not been
-written"). Review:
-pending (`codereview codex gpt-6.2-astra xhigh`, owner's request of
-2026-11-18). This is the first of three plans, in the owner's order:
+written"). Review: five codex rounds on 2026-11-18
+(`.agents/review/codereview-2026-11-18-apple-plans.md`); the amendment
+of 2026-11-20, which follows the probes, has its own round
+(`.agents/review/codereview-2026-11-20-apple-plans-amendment.md`).
+Order of work (owner, 2026-11-20): the iPad and the iPhone are finished
+first, and the Apple TV follows the week after; engine code for them
+does not wait for P2's Apple TV half (`.agents/decisions.md`).
+This is the first of three plans, in the owner's order:
 this one, then `.agents/plans/ios-port.md` (iPhone), then
 `.agents/plans/tvos-port.md` (Apple TV). Part A of this plan builds what
 all three share. The other two plans point here instead of repeating it.
@@ -141,6 +146,17 @@ hardware keyboard.
 
 ## Assumptions (each proven or overturned by a probe before product code)
 
+Where each stands after the probes of 2026-11-20 (the Log has the
+evidence): A1 holds, on the simulator and on the iPad Pro. A2 holds on
+the iPad Pro for profiles 5 and 8.1 and for profile 7 MEL converted, by
+the route A-2 now describes (the engine decodes; the layer presents);
+profiles 8.4 and 10 had no file; the Apple TV is not probed yet. A3 is
+not probed (Apple TV). A4 holds on the iPad's speakers for sound
+decoded to PCM and for AC-3 and E-AC-3 passed on; what a surround route
+shows is not probed. A5 holds, simulator and device. A6 holds for
+scripts, finding, clicks, typing and screenshots, with adapters for
+pointer coordinates and keys.
+
 - **A1 (P1).** A Tauri 2 iOS app shows the page in WKWebView, and a
   native layer can sit beneath a transparent web view, with touches on the
   page's controls still reaching the page. Tauri's generated Xcode project
@@ -152,15 +168,20 @@ hardware keyboard.
   profiles 5 and 8.1 from MKV, and for profile 7 converted to 8.1 live
   with libdovi, through the engine's renderer.
   - **The renderer is Apple's sample-buffer path, for everything.**
-    FFmpeg demuxes into compressed `CMSampleBuffer`s whose format
-    description carries the Dolby Vision configuration (`dvcC`/`dvvC`).
-    They go to `AVSampleBufferDisplayLayer` and
-    `AVSampleBufferAudioRenderer`, with one
+    FFmpeg demuxes. Pictures reach `AVSampleBufferDisplayLayer` and
+    sound `AVSampleBufferAudioRenderer`, with one
     `AVSampleBufferRenderSynchronizer` as the clock for both. Only this
     path shows video Vela decodes itself and plays multichannel LPCM, so
     every codec plays locally (owner, 2026-11-18: no server transcode
     unless the user chooses one). Infuse is built the same way, by the
     libraries it links.
+  - **As first written, the layer was to be given compressed samples**
+    whose format description carries the Dolby Vision configuration
+    (`dvcC`/`dvvC`). P2 found that route engages Dolby Vision and drops
+    pictures on deeply reordered streams. The route that holds, and that
+    A-2 describes since 2026-11-20: the same format description opens a
+    decompression session of the engine's own, and the layer is given
+    its decoded pictures, which carry the RPU.
   - **P2 decides one thing** (owner, 2026-11-18: "add the player decision
     to the list of things the apple tv probe will decide"): whether Dolby
     Vision engages through the sample-buffer path, for each profile, on
@@ -360,24 +381,100 @@ Inside:
     an error cannot write a credential to a log;
   - the desktop's recorded Jellyfin and Emby boundary
     (`.agents/decisions.md` 2026-07-23) is unchanged.
-- **Video:** compressed HEVC, H.264, AV1 (where the device has a
-  hardware decoder) and VP9 go to Apple's pipeline as compressed sample
-  buffers (A2). Only a Dolby Vision profile and device named in a
-  reviewed amendment may take another path. Codecs Apple does not decode, such as MPEG-2, VC-1, H.264
-  10-bit, and AV1 on devices without a hardware decoder:
-  FFmpeg decodes them on the device, in software, into `CVPixelBuffer`s
-  (dav1d for AV1). They are shown by the sample-buffer display layer on
-  the same clock as the audio, whatever P2 decides for Dolby Vision.
-  They never go to a server transcode unless the user picked one.
+- **Video: the engine decodes, the layer presents** (amended 2026-11-20
+  after P2; the Log has the measurements).
+  - **Decoded pictures, in the order they are shown, are what the layer
+    gets.** Compressed samples are never given to the layer. P2 did that
+    first, and on 2160p streams with deep B-frame reordering the layer
+    lost about one picture a group (41 of 255 on the iPad Pro), whatever
+    decode times or reordering hints the samples carried. Decoded
+    pictures in presentation order lost none.
+  - **What VideoToolbox takes, it decodes, in a decompression session of
+    the engine's own.** Which streams those are is asked of VideoToolbox
+    for each stream, never read from a list: the engine builds the
+    stream's format description and creates the session. If the session
+    cannot be created, or the first pictures fail to decode, the stream
+    goes to software. (P2: H.264 at 10 bits, which this plan used to list
+    as software-only, is decoded by Apple's decoder on the M5 and on the
+    Mac; profile 7 Dolby Vision is refused at session creation.)
+  - The format description says what an ISO sample entry would: the
+    codec type, the configuration record from the container (`hvcC`,
+    `avcC`, `av1C`, `vpcC`), the colour tags, the mastering display and
+    the content light level. A stream that arrives as Annex B (MPEG-TS,
+    which is also what a server's HLS transcode can carry) has its
+    parameter sets collected into that record and its NAL units given
+    length prefixes before the session sees it. P2 did not exercise
+    Annex B; slice A5 proves it with a transport-stream clip and a real
+    HLS transcode.
+  - Decoded pictures wait in a reorder queue and leave it in presentation
+    order. The queue's depth comes from the stream (HEVC's
+    `sps_max_num_reorder_pics`, H.264's `max_num_reorder_frames`, or the
+    decoded-picture-buffer size when the stream does not say), bounded at
+    sixteen. The engine decodes ahead of the clock only within a budget
+    of pictures and bytes it owns (the footprint bound below).
+  - Pictures go to the layer as image sample buffers, only while the
+    renderer reports it is ready for more.
+  - What VideoToolbox does not take (MPEG-2, VC-1, MPEG-4 ASP, VP9 where
+    it is refused, AV1 on devices without a hardware decoder): FFmpeg
+    decodes on the device, in software, into `CVPixelBuffer`s (dav1d for
+    AV1), and those join the same reorder queue and the same hand-over.
+    They never go to a server transcode unless the user picked one.
+  - A software-decoded picture carries the same description a hardware
+    one would: primaries, transfer, matrix and range from the decoded
+    frame, and from the container where the frame does not say; the
+    pixel aspect ratio (a 704 x 480 picture is shown at 4:3); mastering
+    display and content light level.
+  - **Interlaced video is deinterlaced.** The owner's libraries hold
+    interlaced MPEG-2 (broadcast recordings); H.264 at 1080i is the same
+    case. Software-decoded fields go through FFmpeg's `bwdif` (LGPL; A-3
+    builds libavfilter for it and asserts the licence). For streams
+    VideoToolbox decodes, the session's field mode asks it to
+    deinterlace. A test plays an interlaced clip on each path and checks
+    the picture rate and that no combing is left on a moving edge.
+  - Only a Dolby Vision profile and device named in a reviewed amendment
+    may be presented any other way (the AVPlayer remux that P2 would try
+    on an Apple TV if a profile does not engage there).
 - **HDR and Dolby Vision:**
   - The engine tags colour primaries, transfer, matrix, mastering
     display and content light level.
-  - For Dolby Vision it carries the configuration record and the RPU of
-    each frame. Profile 7 (MEL or FEL) becomes 8.1 live through
-    libdovi's conversion mode 2. Profile 10 is AV1, whose Dolby Vision
-    metadata travels in metadata OBUs, so the engine carries those and an
-    AV1 Dolby Vision format description (HLS names it `dav1`). Which
-    subtype Apple's pipeline needs is found in P2.
+  - **Dolby Vision is carried by the decoder and applied by the layer**
+    (P2, the iPad Pro and the Mac). The session's format description
+    names the stream `dvh1` and carries its configuration box (`dvcC` for
+    profiles up to 7, `dvvC` above). VideoToolbox then attaches each
+    picture's RPU to the decoded picture (`DolbyVisionRPUData`), and the
+    layer applies it when it presents the picture. Profile 5 is only
+    recognised as `dvh1`: as `hvc1` its box is ignored and the picture is
+    the unprocessed green and purple. Profile 8.1 is recognised either
+    way; the engine names both `dvh1`.
+  - **Profile 7 is refused by VideoToolbox as it comes** (P2: the session
+    cannot be created, MEL or FEL). What the engine does depends on the
+    enhancement layer, which the RPU tells apart:
+    - **MEL** (the enhancement layer carries no picture): the engine
+      converts each RPU to 8.1 live with libdovi's mode 2, drops the
+      enhancement layer's NAL units, and names the stream 8.1. By the
+      format nothing of the picture is lost. P2 showed the converted
+      stream decodes with its RPU and plays; its look has not been
+      checked against a reference.
+    - **FEL** (the enhancement layer carries part of the picture): the
+      picture the disc means is both layers together, and the conversion
+      drops one. **The target is to compose them:** decode the
+      enhancement layer beside the base layer, apply the RPU's mapping
+      and residual, and hand the layer the composed picture with a
+      converted RPU attached. P2 showed the last step is possible: the
+      layer applies Dolby Vision to a picture the app made itself when
+      the RPU is attached (the Mac by measurement, the iPad by the
+      owner's eye). Everything before that step is unproven, so it has a
+      probe of its own, P5 (Slices), before it is built.
+    - Until that composition has landed, a FEL title plays by the MEL
+      conversion, and the engine says so: the play's state carries
+      "Dolby Vision, converted, enhancement layer not applied", so that
+      nothing shown to the user or written in a test claims the disc's
+      full picture. If P5 shows a device cannot compose in real time,
+      that goes to the owner; it is not settled here.
+  - Profile 10 is AV1, whose Dolby Vision metadata travels in metadata
+    OBUs, so the engine carries those and an AV1 Dolby Vision format
+    description (HLS names it `dav1`). Profiles 10 and 8.4 were not in
+    P2: no file. Each is proved in A7 when a file exists.
   - Native 8.1 is used wherever the device takes it. P2 checks that per
     device and per Apple TV generation.
   - Converting 8.1 to 5 for a device that takes only 5 needs the picture
@@ -393,7 +490,33 @@ Inside:
     and MP3, compressed, to the audio renderer.
   - TrueHD, DTS, DTS-HD MA, FLAC, Opus, Vorbis and PCM variants are
     decoded by FFmpeg into multichannel LPCM.
-  - Track switching happens without restarting the play.
+  - **Decoded sound is timed by counting samples.** The first buffer's
+    time comes from the container; each later buffer starts where the
+    last one ended. A container time is believed again only when it is
+    far from the counted one (0.1 s in P2; the engine's value is set
+    with the tests), and that is then a real discontinuity: the renderer
+    is flushed and the count starts again there. P2 found why: a TrueHD
+    frame is 40 samples, Matroska stamps packets to the millisecond, the
+    stamps repeat and overlap, and Apple's renderer, given a buffer for
+    each, reports no error and plays nothing. Small frames are gathered
+    into buffers of tens of milliseconds.
+  - AC-3 and E-AC-3 go to the renderer one frame to a sample buffer,
+    with the frame's length in samples read from its header (E-AC-3
+    frames are 256, 512, 768 or 1536), and are timed by the same count.
+  - Decoded sound is described to Apple by a standard channel layout
+    where the source layout has one (mono, stereo, 5.1 as
+    `MPEG_5_1_A`, 7.1 as `MPEG_7_1_C`, the channels moved from FFmpeg's
+    order into the layout's), and by a label for each channel otherwise.
+    P2 heard both ways on the iPad's speakers, where left and right can
+    be told and surround positions cannot; row 17's channel clips on a
+    surround route settle the positions.
+  - Track switching happens without restarting the play, and the new
+    track is heard from where the picture is. P2's probe only showed the
+    renderer can be flushed and refilled while the picture runs on: it
+    continued from where the demuxer had read to, which leaves silence
+    as long as what was queued. The engine reads the new track from the
+    clock's position; how (a second reader, or a short cache of every
+    audio track's packets) is settled in A8.
   - The engine reports the format and channel layout it hands to Apple,
     so tests can assert them (row 17).
 - **Subtitles:**
@@ -410,23 +533,37 @@ Inside:
     and then its removal for each listed format.
   - Bitmap formats (PGS, VobSub, DVB) come from FFmpeg's decoders and are
     drawn as images, scaled with the picture.
+- **Seeking is exact.** Both renderers, the session and the queues are
+  emptied; decoding starts at the keyframe before the target; pictures
+  and sound before the target are decoded and not shown; the clock
+  starts again at the first picture at or after it. P2 measured 86 to
+  225 ms for this at 2160p on the Mac, with up to 72 pictures decoded
+  and thrown away.
 - **Cropping:** off, manual or auto, rebuilt for the engine. The engine
-  detects black bars on sampled frames.
-  - On the software path, the frames are the decoded ones.
-  - On the hardware sample-buffer path, the display layer gives no frame
-    access. So the engine decodes, with a `VTDecompressionSession` of its
-    own used only for detection, the frames at the presentation times it
-    measures, starting from the random-access point before them. It
-    measures the picture being shown, not the last keyframe, which in a
-    long group of pictures can have different bars.
-  - With the loopback, the frames come from `AVPlayerItemVideoOutput`.
+  detects black bars on sampled pictures. Since the engine decodes, it
+  has every picture it shows, hardware-decoded or software-decoded, and
+  samples those; no second decoder is needed. VideoToolbox's own buffers
+  can be in a losslessly compressed format (`&xv0`, `&xf0` in P2), so the
+  detector reads a small converted copy of the pictures it samples, and
+  A9 measures what that costs. With the conditional AVPlayer remux, the
+  frames come from `AVPlayerItemVideoOutput`.
 
   It crops by the layer's geometry, never by decoding the shown picture
-  again. P2 covers frame access on the chosen renderer, and A9 tests a
-  letterboxed, hardware-decoded clip on the minimum OS. It reports the same crop
-  states `vela-crop.lua` reports today.
+  again. A9 tests a letterboxed, hardware-decoded clip on the minimum OS.
+  It reports the same crop states `vela-crop.lua` reports today.
 - **Health:** dropped frames and buffered seconds feed Automatic quality
-  as `PlayerEvent`s.
+  as `PlayerEvent`s. Dropped frames are the renderer's own count (its
+  video performance metrics) together with the pictures the engine could
+  not decode in time. The iOS 27 SDK reports a renderer's failures
+  through the result of each enqueue and a stream of rendering events;
+  the engine uses those, not the deprecated `error` property.
+- **Footprint.** With the engine decoding, the decoded pictures waiting
+  to be shown are Vela's memory: about 12 MB each at 2160p and 10 bits
+  when not compressed. P2's fixed queue of sixteen peaked at 286 to 408
+  MB on the iPad Pro. The engine's budget is the stream's reorder depth
+  plus a small lead, in pictures and in bytes, checked before a picture
+  is decoded; A5 sets it and measures it on the A16 iPad, and
+  `ios-port.md` sets the phone's.
 - **Lifecycle:**
   - The engine configures `AVAudioSession` for playback and handles
     interruptions.
@@ -510,7 +647,9 @@ This follows the libmpv set's recipe (`packaging/libmpv/versions.txt`;
     EVC). AVS2, whose only decoder (davs2) is GPL, is not supported, by
     the owner's approval (O5). Any other codec whose only decoder that
     rule excludes goes to the owner the same way. swresample and
-    swscale are built too. Any codec Apple's
+    swscale are built too, and libavfilter for the deinterlacer (`bwdif`,
+    LGPL in the pinned release, with no GPL dependency in its
+    `configure`; the script asserts that as it asserts the rest). Any codec Apple's
     hardware does not take is then decoded in software, and the engine
     falls back to software whenever VideoToolbox refuses a stream.
     FFmpeg's HTTP and HTTPS protocols are compiled in, because its HLS
@@ -523,6 +662,10 @@ This follows the libmpv set's recipe (`packaging/libmpv/versions.txt`;
 - **Output:** dynamic `.xcframework`s for `ios-arm64`,
   `ios-arm64-simulator`, `tvos-arm64` and `tvos-arm64-simulator`, with a
   `MANIFEST` and the licence texts.
+- P2 built the pinned FFmpeg for iOS, the iOS simulator, tvOS and macOS
+  with the LGPL flags, statically and with far fewer parts than this
+  section asks for; it says the release builds for those targets and
+  nothing about this recipe.
 - **Where it builds:** `scripts/build-apple-media.sh`, and a CI job
   `apple-media` on a macOS runner. It is cached by its pins and its
   toolchain record, like `libmpv-macos`, and the Xcode version is
@@ -546,8 +689,22 @@ the owner's servers.
 
 What must change for the crate to build and behave in the sandbox. This
 list is completed by P3, and the slice lands what P3 finds:
-(P3 ran on 2026-11-20; the Log has what it adds: swift-rs 1.0.9,
-`set_fullscreen`, the test-only macOS modules.)
+P3 ran on 2026-11-20 (the Log has the evidence) and adds these:
+- `player_fullscreen` (`commands.rs`) calls `WebviewWindow::set_fullscreen`,
+  which Tauri has on desktop only: the one compile error on iOS. On iOS
+  the player view is the window, so the command answers the claim and
+  asks the window nothing.
+- `player/embedded/mod.rs` builds `macos_geometry` and `macos_display`
+  for every test build (`any(target_os = "macos", test)`), and they use
+  `session`, which is desktop-only. The test half of that gate is
+  narrowed to the desktop systems.
+- The iOS build needs swift-rs 1.0.9 or later under Xcode 27 (it comes
+  with slice T0's Tauri update).
+- With the rename repair below, the unit tests run in the simulator pass
+  but for the nine that start an external player's process; those are
+  gated to the desktop with the code they test.
+- On a device the sandbox refuses `/tmp` and the temporary directory is
+  the container's own, as this list assumed.
 - Compile out on iOS what spawns programs or exists only for mpv:
   - the external player (`src-tauri/src/player/external.rs`);
   - mpv detection and installation (`check_mpv`, `install_mpv`,
@@ -623,11 +780,26 @@ list is completed by P3, and the slice lands what P3 finds:
 ### B-2. The Tauri iOS app and the engine's plugin
 
 - **The app:** `tauri ios init` makes `src-tauri/gen/apple` from tracked
-  configuration. P1 (Log, 2026-11-20) found what that takes on the
-  iOS 27 SDK: Tauri 2.12.7 for the scene lifecycle, landed for the
-  desktop first; a scene manifest in `Info.ios.plist`; a tracked XcodeGen
-  template for iPad only. CI makes it on every build; it is never committed or
-  edited (repo-guidance: `src-tauri/gen/` is generated).
+  configuration. CI makes it on every build; it is never committed or
+  edited (repo-guidance: `src-tauri/gen/` is generated). P1 (Log,
+  2026-11-20) found what that takes on the iOS 27 SDK:
+  - **The scene lifecycle.** An app built with that SDK that has not
+    adopted it is ended at launch. Tauri's window library adopts it from
+    Tauri 2.12 (tao 0.37) when `Info.plist` has a
+    `UIApplicationSceneManifest`. So Tauri is updated first, for every
+    platform, in a slice of its own (T0), and `Info.ios.plist` carries
+    the manifest with `UIApplicationSupportsMultipleScenes` false.
+  - `tauri.ios.conf.json` sets the identifier, `minimumSystemVersion`,
+    `developmentTeam` and an empty `bundle.resources`; `Info.ios.plist`
+    is merged at each build. Both were shown to take effect.
+  - iPad only is set in a tracked copy of Tauri's XcodeGen template
+    (`bundle.iOS.template`, `TARGETED_DEVICE_FAMILY: "2"`). Tauri reads
+    that path against the directory its CLI runs in, so every command
+    that builds the app runs from the repo root, and a test of the build
+    scripts holds that.
+  - A build on a Mac whose `xcode-select` does not point at Xcode fails,
+    because Tauri's CLI does not pass `DEVELOPER_DIR` on. CI selects
+    Xcode itself; `docs/development.md` says what a local Mac needs.
   - Device family: iPad only in this plan.
   - Bundle: the iOS app's bundle carries no mpv scripts, which are
     desktop resources (`tauri.conf.json` `bundle.resources`). A tracked
@@ -648,7 +820,20 @@ list is completed by P3, and the slice lands what P3 finds:
   Swift (an `ios/` Swift package that depends on `apple/VelaEngine`).
   - It makes the web view transparent and puts the engine's layer beneath
     it, sized to the rectangle the page reports (`player_set_rect`, as on
-    the desktop).
+    the desktop). P1 showed the layer under the page and real touches
+    reaching the page over it, in the simulator and on the iPad Pro.
+  - The page's coordinates are the web content's, and the web view's
+    content can start below the status bar (32 pt in P1) while the web
+    view itself fills the screen. The plugin converts the page's
+    rectangle with the web view's own geometry (its content inset and
+    zoom), never by assuming they agree. B-3's `viewport-fit=cover`
+    makes the inset zero, and the conversion stays.
+  - The view behind the page is white in Tauri's window. The plugin
+    gives the picture's area a black backing, so no white shows around a
+    letterboxed picture or before the first one.
+  - The plugin's build leaves generated files in its directory
+    (`.tauri/`, `permissions/autogenerated/`, `ios/Package.resolved`);
+    the commit that adds the plugin ignores them.
   - `PlayerHandle::Apple` sends `PlayerCommand`s through the plugin and
     receives `PlayerEvent`s on a Tauri channel. From there the trackers
     and `player-state` work exactly as for mpv.
@@ -725,7 +910,11 @@ of any new layout logic.
     upload rights, uploads the build.
   - **Development builds:** an Apple Development certificate and a
     development profile listing the owner's devices. No distribution
-    certificate is used.
+    certificate is used. The probes' builds ran on the iPad Pro with the
+    wildcard development profile already on `nagatha`, which lists that
+    iPad and neither the A16 iPad nor an iPhone; a profile that lists
+    those needs the owner's Apple account in Xcode or an App Store
+    Connect key (`.agents/machines.md`).
 
   Tauri's iOS signing requirements are the reference. The slice proves
   its channel end to end: a build from a fresh runner installs and starts
@@ -749,8 +938,19 @@ of any new layout logic.
 
 ### B-5. Verification venues
 
-P4 (Log, 2026-11-20) ran `smoke` unchanged through Appium and lists the
-adapters the harness needs: real taps, screen coordinates, and keys.
+P4 (Log, 2026-11-20) ran the `smoke` scenario unchanged through Appium
+with the harness's own client. What the Apple venue's driver adds to
+that client, in slice A6:
+- element clicks are real touches (`appium:nativeWebTap`); without it
+  they are scripted clicks, which the desktop's are not;
+- pointer actions take screen coordinates there, so `clickAt`,
+  `movePointer` and `doubleClick` convert from the page's coordinates
+  with the same geometry the plugin uses;
+- keys with nothing focused go through XCUITest's hardware-key command,
+  with a hardware keyboard connected to the simulator: letters, Space
+  and the arrows arrived that way in P4. **Escape did not.** A6 finds
+  how Escape is sent, or shows on a device with a keyboard that the
+  page receives it, before any scenario that presses it is counted.
 
 - **Unit tests:** Rust unit tests, Node tests and the engine's XCTests,
   with generated media, in the simulator.
@@ -807,8 +1007,11 @@ own; they are difference 2, approved as absent on 2026-11-18.
 New rows, for every Apple device:
 
 15. HDR10 and HLG tagged and shown in HDR.
-16. Dolby Vision profiles 5, 8.1, 8.4, 7 (converted) and 10 (where the
-    device decodes AV1) shown as Dolby Vision, each on the minimum OS.
+16. Dolby Vision profiles 5, 8.1, 8.4, 7 and 10 (where the device
+    decodes AV1) shown as Dolby Vision, each on the minimum OS. Profile 7
+    MEL is converted. Profile 7 FEL passes this row only composed from
+    both layers (after P5); while it is converted, the row is open for
+    FEL and the play's state says so.
 17. Each audio format listed in A-2, decoded or passed as A-2 says. The
     ear cannot tell stereo, multichannel LPCM and Atmos apart, so the
     proof is threefold:
@@ -855,6 +1058,18 @@ records what landed.
   - Before P2, Probe P2's media plan names which of the owner's files it
     uses: "Probe P2's media plan", below, written 2026-11-20, with what
     the owner's test library lacks.
+  - Done on 2026-11-20 (Log): P1, P3 and P4, and P2 on the iPad Pro. P2
+    on the Apple TVs waits for the owner (the order of work, Status).
+- **T0, Tauri 2.12 on the desktop.** Tauri 2.12.7 with what it brings
+  (tao 0.37, wry 0.57, swift-rs 1.0.9; 72 crates in `Cargo.lock` in P1's
+  trial) and the npm packages its CLI requires at the same minor
+  (`@tauri-apps/api`, `@tauri-apps/cli`, `@tauri-apps/plugin-dialog`).
+  Nothing of iOS is in it. It lands by itself and is proved as any
+  desktop change is: the whole verification set, both Linux end-to-end
+  suites with the parity verdict PASS, the Windows suite and the macOS
+  jobs in CI, and a codex hunt. P1's trial compiled Vela against 2.12.7
+  with no source change, on macOS and iOS, and the macOS unit tests gave
+  what `main` gives.
 - **A1, the media library build.** Scripts, pins, CI job, licence texts,
   and the dependency-policy test.
 - **A2, the player seam (A-1).** It lands in steps, each with the desktop
@@ -865,14 +1080,29 @@ records what landed.
   `check-other-platforms.sh`.
 - **A4, the Tauri iOS target (B-2, first half).** The app runs in the
   simulator with the page and no playback; the icons; the CI job.
-- **A5, engine core (A-2).** Input, video through sample buffers, audio,
-  events and commands, with XCTests on generated media.
+- **A5, engine core (A-2).** Input; video decoded by the engine and
+  presented by the layer, the hardware and the software path, Annex B
+  input and interlaced input included; sound, decoded and passed on,
+  timed by sample count; seeking; events and commands; the footprint
+  budget. With XCTests on generated media.
 - **A6, the plugin and `PlayerKind::Apple` (B-2, second half).** Rows 1–7
   and 12 in the simulator venue (B-5's harness work comes first).
 - **A7, HDR and Dolby Vision (rows 15–16).** By eye on the owner's iPad,
   with the integrated engine in Vela's app. Apple TV is proven by
   `tvos-port.md` (T6, T7) with the integrated engine there. P2's
   throwaway build only chooses the architecture and counts for neither.
+  Profile 7 here is the live conversion (libdovi in the engine), MEL and
+  FEL, with FEL's state saying what it is.
+- **P5, a probe: a FEL picture from both layers.** Throwaway, results in
+  the Log, before any of it is engine code. It must show, on the iPad
+  Pro and the A16 iPad: the enhancement layer decoded beside the base
+  layer at the film's rate; the two composed as the RPU says, at the
+  depth the result needs; the layer presenting the composed picture
+  with its RPU attached; and the composed picture agreeing with one
+  composed offline from the same frames by an independent tool. What it
+  costs in memory and heat is measured. If it holds, the composition is
+  designed in an amendment, reviewed, and built after A7. If it does not
+  hold on a device, that goes to the owner.
 - **A8, audio, subtitles and multi-part items (rows 17–19).** Also
   TLS-verify (row 20).
 - **A9, markers, cropping and Automatic quality (rows 8–11).** Row 11,
@@ -970,8 +1200,15 @@ no Dolby Vision box).
 - **P2 may find that neither path gives real Dolby Vision from MKV on
   the owner's Apple TVs.** That would contradict what shipping apps
   report (Infuse's Dolby Vision for profiles 5 and 8; AetherEngine's live
-  7-to-8.1 conversion). Then the plan stops and the finding goes to the
-  owner before any engine code lands.
+  7-to-8.1 conversion). By the owner's order of 2026-11-20 the iPad's
+  and iPhone's engine is built before that half of P2 runs. So a
+  finding there no longer stops engine code from landing: it goes to the
+  owner, and the engine is changed for the Apple TV as far as it needs.
+- **A FEL picture from both layers may not be possible in real time**
+  on one of the devices (P5). Until it is shown, FEL plays converted and
+  says so.
+- **The engine now owns the decoded pictures**, so its memory is Vela's
+  to bound; the iPhone has the least of it (`ios-port.md`).
 - **A single Svelte page for desktop and iPad can regress the desktop.**
   Every page slice runs both desktop suites.
 - **The engine is the largest new code in the repo.** The rule "the

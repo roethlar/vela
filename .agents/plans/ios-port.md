@@ -6,9 +6,12 @@
 written here before the code exists are not binding: tests are designed
 with the code, in the slice that writes it (`.agents/decisions.md`
 2026-11-18, "No tests are designed for code that has not been
-written"). Review:
-pending (`codereview codex gpt-6.2-astra xhigh`, owner's request of
-2026-11-18).
+written"). Review: three codex rounds on 2026-11-18
+(`.agents/review/codereview-2026-11-18-apple-plans.md`); the amendment
+of 2026-11-20, which follows the iPadOS plan's probes, has its own round
+(`.agents/review/codereview-2026-11-20-apple-plans-amendment.md`).
+Order of work (owner, 2026-11-20): the iPad and the iPhone are finished
+before the Apple TV (`.agents/decisions.md`).
 
 This plan comes after `.agents/plans/ipados-port.md` and before
 `.agents/plans/tvos-port.md` (`.agents/decisions.md` 2026-11-18). It
@@ -139,7 +142,17 @@ detail pages, top-tab Settings, the player's single sheet):
 - No engine features are added.
 - **Buffer limits** are set from C1's measurements, on the buffers Vela
   owns: byte and frame budgets on the demux, decode and subtitle queues,
-  checked before anything is allocated or enqueued. Apple's renderers
+  checked before anything is allocated or enqueued.
+  - Since the iPadOS plan's amendment of 2026-11-20 the engine decodes
+    video itself, so the decoded pictures waiting to be shown are among
+    those buffers, and at 2160p they are the largest of them: about
+    12 MB a picture at 10 bits when not compressed. The iPadOS plan's
+    probe, with a fixed queue of sixteen pictures, peaked at 286 to 408
+    MB on an iPad Pro. On the phone the queue is the stream's reorder
+    depth plus the smallest lead that plays without drops, which C1
+    finds; a stream whose reorder depth alone exceeds the phone's budget
+    is reported in the Log with its numbers, not played badly in
+    silence. Apple's renderers
   keep their own internal queue, which Vela cannot count. So the engine
   enqueues only while the renderer reports it is ready for more
   (`isReadyForMoreMediaData`). The phone runs measure the memory charged
@@ -210,7 +223,10 @@ each pushed to `origin` and `github` as it lands
   - Dolby Vision profiles 5, 8.1 and 8.4, profile 10 if the phone
     decodes AV1, and an original profile 7 file converted live, each on
     the minimum iOS as well as the current one (row 16). A file converted
-    beforehand would bypass the converter.
+    beforehand would bypass the converter. Profile 7 is checked with a
+    MEL file and with a FEL file: the FEL one as the iPadOS plan's row 16
+    stands when this slice runs (composed from both layers if that has
+    landed; converted, and said to be, if not).
   - the Dolby Vision reference clip of `tvos-port.md` and its
     stripped-RPU control;
   - each audio format, proved as row 17 says: the layout the engine
