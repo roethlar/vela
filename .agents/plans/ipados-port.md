@@ -1467,3 +1467,20 @@ no Dolby Vision box).
     probe of its own before A-2 promises it.
   - MEL converted (The Fifth Element) has not been compared with a
     reference by eye.
+
+- 2026-11-20, P2 on the iPad, two answers from the owner:
+  - **The layer applies Dolby Vision to pictures the app makes, on the
+    iPad too.** Profile 5 (`p5-shantaram.mkv`) with each decoded picture
+    copied into the player's own pixel buffer and the RPU attached, then
+    without the RPU: natural, then green and purple; the owner: "1 yes".
+  - The MEL comparison with Infuse could not be made: "I cannot tell.
+    there's no way to pause or rewind in your test app so a comparison
+    has to go by visual memory and that is unreliable." The probe app now
+    has what that needs: pause, a step of one picture either way, a
+    second either way, restart, previous and next clip, each clip held at
+    its end, a clock with the film's own time (roughly), and it runs in
+    Split View beside another player. The controls were driven by a
+    script on the Mac first (pause holds the picture; steps move one
+    picture; seeks land where asked; nothing dropped). The first step
+    after a pause can move two pictures, since the pause lands between
+    two; later steps are single.
