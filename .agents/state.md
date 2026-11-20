@@ -77,8 +77,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     owner's Plex library "Test Video" and, by the owner's word of
     2026-11-20 ("scan plex for whatever you need for testing"), excerpts
     cut from the owner's other libraries (`p2/media2/` in the probes'
-    folder; never in a repository). Still without a file: profile 7 FEL,
-    8.4 and 10. No Apple TV is paired with `nagatha` yet.
+    folder; never in a repository). Still without a file: profiles 8.4
+    and 10. Apple's decoder refuses profile 7 as it comes and takes it
+    converted to 8.1 (Mac). No Apple TV is paired with `nagatha` yet.
   - Review of the plans (`.agents/review/codereview-2026-11-18-apple-plans.md`):
     five codex design rounds, every finding repaired; round 5's repairs
     have no verdict, and no further round is scheduled.

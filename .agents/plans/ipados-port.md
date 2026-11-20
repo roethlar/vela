@@ -936,9 +936,20 @@ repository.
 | Software-decoded video with E-AC-3 | `vc1-eac3-last-samurai.mkv` | The Last Samurai (2003) | VC-1 1080p, 20 s; E-AC-3 5.1 and 2.0; PGS |
 | MPEG-2, interlaced | `mpeg2-480i-snl.mkv` | Saturday Night Live (1981) | 704x480 at 29.97 interlaced, 20 s; AC-3 2.0; EIA-608 captions |
 
-Still without a file: profile 7 with a full enhancement layer (FEL: the
-other profile 7 remuxes are being read), profile 8.4 (an iPhone's
-recording) and profile 10 (the libraries hold no AV1).
+Also cut: `p7-fel-mockingjay2.mkv` (The Hunger Games: Mockingjay, Part 2,
+2015: profile 7 with a full enhancement layer, by dovi_tool's reading;
+2160p, 13 s, TrueHD 7.1 with Atmos), which with the Fifth Element excerpt
+(renamed `p7-mel-fifth-element.mkv`) gives both kinds of profile 7. Each
+has a copy converted to profile 8.1 on the Mac with dovi_tool's mode 2,
+its enhancement layer discarded (`p7to81-fel-mockingjay2.mkv`,
+`p7to81-mel-fifth-element.mkv`): the same conversion libdovi makes live.
+
+Three entries the scan chose could not be read: Plex answered 404 for
+Mortal Engines (2018) and timed out on Oldboy (2003) and RED 2 (2013).
+Told to the owner.
+
+Still without a file: profile 8.4 (an iPhone's recording) and profile 10
+(the libraries hold no AV1).
 
 Found in passing: the libraries hold 199 MPEG-2 entries, interlaced
 broadcast recordings among them, 187 VC-1 and 595 MPEG-4 ASP. A-2 does
@@ -1342,3 +1353,34 @@ no Dolby Vision box).
   The same test and a one-minute memory run are in the iPad build
   (silent); not run there yet (locked). Track switching has no file: the
   library has none with two audio tracks.
+
+- 2026-11-20, P2, profile 7 and the owner's own films (the media plan
+  says what each excerpt is; the Mac, silent, the engine's own session):
+  - **Apple's decoder refuses profile 7 as it comes.** A decompression
+    session for a profile 7 stream, MEL or FEL, named `dvh1` or `hvc1`
+    with its `dvcC` box, cannot be created (-12910). Without the box the
+    base layer decodes as plain HDR10, no RPU.
+  - **Converted to 8.1 it is Dolby Vision.** The copies converted with
+    dovi_tool's mode 2 (libdovi's conversion, done beforehand here)
+    decode as `dvh1` with `dvvC` and carry the RPU attachment (163 bytes
+    on the FEL clip). Both play, 100 pictures, none dropped. So A-2's
+    live conversion of profile 7 is the route, and the device question it
+    rested on is answered for this decoder; by eye on the iPad it is on
+    the owner's list. The live conversion itself (libdovi inside the
+    engine) is not built in the probe.
+  - A real profile 5 scene (`p5-shantaram.mkv`): `dvh1`, RPU of 316 bytes,
+    plays, none dropped.
+  - 2160p films through the session, 4 s of each, none dropped: Dolby
+    Vision 8.1 (`p81-el-camino.mkv`), HDR10 (`hdr10-dtshdma-witch-hunter.mkv`,
+    `hdr10-dtsx-ex-machina.mkv`).
+  - FFmpeg's software decoders into the layer: VC-1 at 1080p
+    (`vc1-eac3-last-samurai.mkv`) and MPEG-2 at 480i (`mpeg2-480i-snl.mkv`),
+    none dropped. The probe neither deinterlaces nor applies the pixel
+    aspect ratio; the engine must do both.
+  - Sound, built and not yet heard: AC-3 and E-AC-3 handed to Apple's
+    audio renderer undecoded (one sample buffer a frame; the renderer
+    takes them and reports "rendering" on the Mac); spoken channel checks
+    in 7.1 (FLAC) and 5.1 (E-AC-3, AC-3, DTS), made with the Mac's voice,
+    each voice proven to sit in the channel it names; a change of audio
+    track in the middle of a play. All of it is in the list on the iPad,
+    for the owner's ears.
