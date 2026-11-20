@@ -392,11 +392,29 @@ Inside:
   - **What VideoToolbox takes, it decodes, in a decompression session of
     the engine's own.** Which streams those are is asked of VideoToolbox
     for each stream, never read from a list: the engine builds the
-    stream's format description and creates the session. If the session
-    cannot be created, or the first pictures fail to decode, the stream
-    goes to software. (P2: H.264 at 10 bits, which this plan used to list
-    as software-only, is decoded by Apple's decoder on the M5 and on the
-    Mac; profile 7 Dolby Vision is refused at session creation.)
+    stream's format description and creates the session. If VideoToolbox
+    answers that it does not support the format, or the first pictures
+    fail to decode, the stream goes to software. An answer that the
+    decoder is not available now (another app holds it) is not that: the
+    engine tries again, and tells the user if it stays so. (P2: H.264 at
+    10 bits, which this plan used to list as software-only, is decoded
+    by Apple's decoder on the M5 and on the Mac; profile 7 Dolby Vision
+    is refused at session creation.)
+  - **A Dolby Vision stream in software keeps its metadata, or it is not
+    played as a picture it is not.** The layer applies Dolby Vision from
+    the RPU attached to each picture (below), and VideoToolbox is what
+    attaches it. FFmpeg gives each decoded frame's RPU beside the frame,
+    in the same raw form: the bytes VideoToolbox attaches to a profile 5
+    picture are the stream's RPU exactly (checked on the Mac, 267 of 267
+    bytes). So the software path attaches FFmpeg's RPU to the pixel
+    buffer it makes, with the tags VideoToolbox puts on the same stream.
+    That hand-over is not yet shown with software-decoded pixels. Until
+    a profile 5 stream forced to software has been seen in natural
+    colours on a device (A7), a profile 5 stream VideoToolbox will not
+    decode ends with an error that says so. It is never sent to the
+    layer without its RPU, which is the green and purple picture.
+    Profile 8.1's base layer is valid HDR10 by itself and plays as that,
+    said to be that.
   - The format description says what an ISO sample entry would: the
     codec type, the configuration record from the container (`hvcC`,
     `avcC`, `av1C`, `vpcC`), the colour tags, the mastering display and
@@ -1217,6 +1235,14 @@ no Dolby Vision box).
   and iPhone's engine is built before that half of P2 runs. So a
   finding there no longer stops engine code from landing: it goes to the
   owner, and the engine is changed for the Apple TV as far as it needs.
+- **The attachment that carries the RPU has no name in Apple's public
+  headers.** `DolbyVisionRPUData` is the key VideoToolbox was seen to
+  use, and the layer was seen to honour it on pictures the app made. The
+  engine's own decoded pictures get it from VideoToolbox, so ordinary
+  Dolby Vision does not depend on Vela writing it. The software path for
+  Dolby Vision and the FEL composition do. If an OS release stops
+  honouring it, those two lose Dolby Vision, and the tests that play
+  them fail; nothing else changes.
 - **A FEL picture from both layers may not be possible in real time**
   on one of the devices (P5). Until it is shown, FEL plays converted and
   says so.
