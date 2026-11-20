@@ -576,12 +576,18 @@ Inside:
   through the result of each enqueue and a stream of rendering events;
   the engine uses those, not the deprecated `error` property.
 - **Footprint.** With the engine decoding, the decoded pictures waiting
-  to be shown are Vela's memory: about 12 MB each at 2160p and 10 bits
-  when not compressed. P2's fixed queue of sixteen peaked at 286 to 408
-  MB on the iPad Pro. The engine's budget is the stream's reorder depth
-  plus a small lead, in pictures and in bytes, checked before a picture
-  is decoded; A5 sets it and measures it on the A16 iPad, and
-  `ios-port.md` sets the phone's.
+  to be shown are Vela's memory. In Apple's 10-bit formats each
+  component takes 16 bits, so a 2160p picture is 24.9 MB when not
+  compressed (3840 x 2160 x 1.5 x 2 bytes, before row padding), and
+  sixteen are about 398 MB. VideoToolbox's own buffers are often
+  losslessly compressed and smaller; a software-decoded or copied
+  picture is the full size. P2's 286 to 408 MB was the whole process's
+  footprint with a fixed queue of sixteen. The engine's budget is the
+  stream's reorder depth plus a small lead, in pictures and in bytes,
+  and the bytes are each buffer's real size (its format, its planes'
+  strides, its backing allocation), never an estimate, checked before a
+  picture is decoded. A5 sets the budget and measures it on the A16
+  iPad, and `ios-port.md` sets the phone's.
 - **Lifecycle:**
   - The engine configures `AVAudioSession` for playback and handles
     interruptions.
