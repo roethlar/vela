@@ -1181,3 +1181,44 @@ two visibly different RPUs, and the same layer with its RPU stripped).
     engine is written to the new ones.
   - Built for the iPad (signed like the other probe build) and installed
     on the iPad Pro. Not run there yet: the iPad was locked.
+
+- 2026-11-20, P2 on the owner's iPad Pro 13-inch (M5), iPadOS 27.2 (the
+  throwaway player, opened by the owner; its log copied from the app's
+  container to `logs/p2-ipad-log-1.jsonl` in the probes' folder):
+  - **Dolby Vision engages through the sample-buffer path on the iPad.**
+    `dark.mkv` (profile 5, from MKV) as `dvh1` with `dvcC`, then with
+    Dolby Vision switched off: the owner, asked whether the first looks
+    natural and the second green and purple, "yes, DV seems to work".
+    The decoder agrees with the Mac's, frame for frame: profile 5 as
+    `dvh1` comes out PQ with a 267-byte RPU attachment and as `hvc1`
+    without one; profile 8.1 carries its RPU as `dvh1` and as `hvc1` with
+    `dvvC` (156 and 173 bytes on the two clips), and none without the
+    box. All on the hardware decoder.
+  - The 8.1 clips at 1080p and 2160p rendered. The frame counts of that
+    run say nothing about smoothness: the probe's looping replayed old
+    timestamps (repaired since).
+  - HDR10 (`Aquaman_test.mkv`), HLG (`snow-fades.mp4`) and AV1 at 2160p
+    and 59.94 (`waterfall.mkv`: hardware decoder, 2 of 356 pictures
+    dropped) rendered. While they showed, the screen's
+    `currentEDRHeadroom` was 3.2 of a potential 16 (it was 1.2 under the
+    page of the first probe build).
+  - **A4, first result: sound was missing.** TrueHD 7.1 decoded by FFmpeg
+    to 8-channel float PCM and given to `AVSampleBufferAudioRenderer` with
+    a label for each channel: the renderer reported "rendering" and no
+    error, 316,840 frames went in, and the owner heard nothing ("no audio
+    on E"). The iPad's route is its speakers, 2 channels. Three ways of
+    describing the same sound are on the iPad for the owner's ears
+    (Apple's 7.1 layout tag with the channels rearranged for it, the
+    labels again, a stereo downmix); not answered yet.
+  - **10-bit H.264 (High 10) is decoded by Apple's own decoder**, on the
+    Mac and on the iPad (`2022-08-31,21.08.25.mkv`: a decompression
+    session reports a hardware decoder and a 10-bit picture, and the Mac's
+    window shows the test pattern). A-2 names "H.264 10-bit" among the
+    codecs Apple does not decode; that is wrong for this OS and these
+    chips. What goes to software is decided by asking VideoToolbox, as
+    A-2 already says for refusals, never by a list.
+  - FFmpeg's software path into the same layer works (the same clip
+    through `h264` and pixel buffers, on the Mac). In window captures on
+    the Mac its greys came out a little darker than the Apple path's;
+    the cause was not found, and the engine's software path has to match
+    the hardware path's tagging exactly.
