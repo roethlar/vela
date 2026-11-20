@@ -721,6 +721,15 @@ Recorded 2026-07-14. Owner-approved access (2026-07-14) to the boxes below.
   Vela holds on this Mac (`p2/plex-list.py`, `p2/plex-fetch.py` in the
   folder; the token goes in a request header only). Seventeen small clips
   are in `p2/media/`.
+- P2's throwaway player is `p2/` in the folder: `build-ffmpeg.sh <ios |
+  iossim | tvos | macos>` (the pinned FFmpeg, static, LGPL, into
+  `p2/ffmpeg/out-<platform>`), `player/` (a C layer over FFmpeg, the Swift
+  engine, a UIKit shell for iPad and Apple TV, `project.yml` for XcodeGen)
+  and `build-mac.sh` with `mac-shot.sh` for trying it on this Mac. The
+  iPad build: `xcodebuild -project VelaP2.xcodeproj -scheme VelaP2 -sdk
+  iphoneos -destination generic/platform=iOS -derivedDataPath
+  ../build-ios build`, bundle id `com.roethlar.VelaP2`, with the clips of
+  `p2/media/` inside it.
 - Unit tests run in the simulator with
   `CARGO_TARGET_AARCH64_APPLE_IOS_SIM_RUNNER` set to `sim-run.sh` there,
   which runs the test binary with `xcrun simctl spawn`.

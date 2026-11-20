@@ -51,7 +51,14 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     sandbox, TLS against the owner's Plex, ATS, and an EDR headroom of 16.
     The owner saw the test pattern move under the page and a tap on the
     button over it count ("1 yes 2 yes"). P1, P3 and P4 are finished.
-  - Probe P2 HAS NOT RUN, and its throwaway player is not built. Its
+  - Probe P2 IS BEGUN (the Log's third entry of 2026-11-20). Its throwaway
+    player is built (`p2/player/` in the probes' folder) and plays on the
+    Mac: Dolby Vision 8.1 and profile 5 from MKV through the sample-buffer
+    path, profile 5 with correct colours only when signalled as `dvh1`.
+    It is installed on the iPad Pro as "Vela P2" and HAS NOT RUN THERE
+    (the iPad was locked; the owner opens it by hand, it plays its list
+    with captions, and its log is `Library/Caches/p2-log.jsonl` in the
+    app's container). The Apple TV half has not started. Its
     media plan is written (the plan's "Probe P2's media plan"), from the
     owner's Plex library "Test Video", which lacks Dolby Vision profiles
     7, 8.4 and 10, a profile 5 clip longer than one frame, E-AC-3 with

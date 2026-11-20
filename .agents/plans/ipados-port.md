@@ -1143,3 +1143,41 @@ two visibly different RPUs, and the same layer with its RPU stripped).
     the top which obviously needs to be removed from the ios versions".
     That is B-1's mpv detection, compiled out in slice A3, and one of the
     four differences approved on 2026-11-18.
+
+- 2026-11-20, P2 begun: **the throwaway player, and what it showed on the
+  Mac** (`nagatha`, macOS 27, its own XDR screen). macOS is not one of
+  P2's venues; these results say the approach works in Apple's pipeline
+  of this OS generation, and nothing yet about the iPad or the Apple TV.
+  - The pinned FFmpeg (9.0.2, checksum matched) builds for iOS, the iOS
+    simulator, tvOS and macOS with `--disable-gpl --disable-nonfree
+    --disable-version3 --disable-autodetect`, and reports "LGPL version
+    2.1 or later". The probe's build is static and bare, not A-3's recipe.
+  - The player (`p2/player/` in the probes' folder): FFmpeg demuxes; the
+    compressed video goes to `AVSampleBufferDisplayLayer` as sample
+    buffers whose format description carries `hvcC` and the Dolby Vision
+    box (`dvcC` for profiles up to 7, `dvvC` above); FFmpeg decodes the
+    sound to PCM for `AVSampleBufferAudioRenderer`; one
+    `AVSampleBufferRenderSynchronizer` is the clock.
+  - **What VideoToolbox does with each way of naming the stream** (first
+    picture decoded by a decompression session, its attachments read):
+    - profile 5, codec type `dvh1` with `dvcC`: the picture comes out
+      tagged PQ with a `DolbyVisionRPUData` attachment (267 bytes);
+    - profile 5, codec type `hvc1`, with or without the box: no RPU, and
+      colours "guessed by VideoToolbox" as BT.709. **Profile 5 needs
+      `dvh1`.**
+    - profile 8.1, `dvh1` with `dvvC`, and also `hvc1` with `dvvC`: the
+      RPU attachment (156 bytes) and `DolbyCompatibilityID` 1;
+    - profile 8.1, `hvc1` without the box: HDR10 tags only, no RPU.
+  - **Played through the layer:** `01freeguy.mkv` (8.1): 100 pictures,
+    none dropped. `dark.mkv` (profile 5, one frame), captured from the
+    window: natural colours as `dvh1`, and the green and purple of an
+    unprocessed IPT picture with Dolby Vision switched off
+    (`shots/p2-mac-p5-dvh1.png`, `shots/p2-mac-p5-off.png`). So the layer
+    applies the metadata, on the Mac. `snow-fades.mp4` (HLG, AAC): picture
+    and sound on the one clock; 11 of 219 pictures dropped at 2160p, all
+    near the start, not looked into.
+  - The iOS 27 SDK deprecates the renderers' `error` property for the
+    result `enqueue` returns and a stream of rendering events; A-2's
+    engine is written to the new ones.
+  - Built for the iPad (signed like the other probe build) and installed
+    on the iPad Pro. Not run there yet: the iPad was locked.
