@@ -2,7 +2,10 @@
 
 ## Status
 
-**DRAFT 2026-11-18. Not approved; no code is authorized.** Test specifics
+**DRAFT 2026-11-18. Not approved; no product code is authorized.** Slice
+S0, the probes P1 to P4, was approved by the owner on 2026-11-20
+("approve the probes", `.agents/decisions.md`); the Log has their
+results. Test specifics
 written here before the code exists are not binding: tests are designed
 with the code, in the slice that writes it (`.agents/decisions.md`
 2026-11-18, "No tests are designed for code that has not been

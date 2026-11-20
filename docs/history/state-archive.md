@@ -5,6 +5,50 @@ live (handoff pruning rule). Newest rotation first; each block keeps its
 original wording and internal chronology.
 
 
+## Rotated 2026-11-20 (the Apple ports' entry, before the probes were approved)
+
+Context for readers: this entry stood under Now. On 2026-11-20 the owner
+approved the probes ("approve the probes"), and a shorter entry replaced
+it. By then O4 had been approved (2026-11-18), though the entry still
+listed it as pending. The entry, verbatim:
+
+- APPLE PORTS, PLANS DRAFTED 2026-11-18, NOT APPROVED. Owner rulings of
+  that day (`.agents/decisions.md`): iPadOS first, then iOS, then tvOS;
+  on all three, video plays through one engine built on Apple's own
+  pipeline, never mpv, so Apple TV shows real Dolby Vision. Plans:
+  `.agents/plans/ipados-port.md` (its Part A holds what all three share:
+  the player seam, the engine, the media libraries, the probes),
+  `.agents/plans/ios-port.md`, `.agents/plans/tvos-port.md`. Review
+  (`codereview codex gpt-6.2-astra xhigh`, owner-named for these
+  dispatches; record `.agents/review/codereview-2026-11-18-apple-plans.md`):
+  - first hunt: 50 findings, all repaired;
+  - repair hunt: 39 closed, 10 reopened, 30 new;
+  - after the owner's ruling of 2026-11-18 (no tests designed or reviewed
+    for unwritten code), 9 declined and the rest repaired. 33 rows wait
+    for a verdict.
+
+  Rounds 3 and 4 ran and every finding is repaired; V5 (a full offline
+  playlist queue on tvOS) was approved by the owner on 2026-11-18. Round 5
+  ran and is repaired; O5 (AVS2 unsupported) was approved by the owner.
+  No further plan review is scheduled (the agent's recommendation, given
+  to the owner): the probes come next, waiting on the owner's go, device
+  setup and test files. Earlier note:
+  a design-only codex round over the updated plans (owner,
+  2026-11-18: "review with codex is fine once you have the updated
+  plans"). It gives the 33 repaired rows their verdicts. No go to start
+  has been given. [Corrected: the agent misread the owner's Claude usage
+  as declining that round.]
+
+  Pending with the owner:
+  - O4, the four features absent on Apple devices;
+  - the bundle identifier. The owner rejected the `com.michael` prefix;
+    songr-mobile's owner signing uses `com.roethlar.Songr`, so the agent
+    proposed `com.roethlar.Vela` for the Apple apps. O1 is answered (devices in
+  `.agents/machines.md`, "Apple test devices"); no owner input is
+  waiting. O2 is ruled (TestFlight and development signing now, the App
+  Store later), and O3 needs nothing, since Xcode 27.2 is installed. O4
+  comes before A9. Next is the owner's approval of the plans.
+
 ## Rotated 2026-11-17 (the `markers` intermittent: the harness lost its quit)
 
 Context for readers: this entry stood under Blockers. Its evidence

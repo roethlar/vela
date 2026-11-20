@@ -2894,3 +2894,25 @@ Supersedes:
 The first paragraph of 2026-07-26 (a Claude harness is never an eligible
 reviewer here) and the note in `.agents/machines.md` that repeated it.
 Nothing else.
+
+## 2026-11-20 - The Apple ports' probes are approved; nothing after them is
+
+Status: OWNER APPROVAL (2026-11-20), for slice S0 of
+`.agents/plans/ipados-port.md` only.
+
+Decision:
+Told that the Apple ports wait on the plans' approval, and that their
+first stage is four probes (P1, P3 and P4 on the Mac `nagatha` alone, P2
+on the owner's iPad Pro and an Apple TV), the owner, verbatim: "approve
+the probes".
+
+How to apply:
+- S0 is authorized: probes P1 to P4, as throwaway code kept outside the
+  repo, with each result written to the plan's Log.
+- No product code is authorized. Slices A1 onward, `ios-port.md` and
+  `tvos-port.md` stay drafts until the owner approves them, on an
+  executive summary and open questions (decision of 2026-11-18).
+- P2 needs the owner: the iPad Pro and one Apple TV registered and paired
+  with `nagatha`, and the files its media plan names.
+- A probe that overturns an assumption stops the work it rests on and
+  goes to the owner (the plan's Risks).

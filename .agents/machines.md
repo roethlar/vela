@@ -664,6 +664,18 @@ Recorded 2026-07-14. Owner-approved access (2026-07-14) to the boxes below.
   0600 to the VM's `/tmp`, and deleted on exit. Gitignored. Never printed,
   never logged, never committed.
 
+## Apple probes on nagatha (slice S0 of the iPadOS plan)
+
+- Throwaway probe code and its build output live in
+  `~/Dev/vela-agent-keep/apple-probes/`, outside the repo, since
+  2026-11-20. Nothing there is source of truth; each probe's result is in
+  the Log of `.agents/plans/ipados-port.md`.
+- Xcode commands set
+  `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`, since
+  `xcode-select` points to the Command Line Tools. Observed 2026-11-20:
+  Xcode 27.2 (27B52), simulator runtimes iOS 27.2 and tvOS 27.0,
+  tauri-cli 2.12.5 in `~/.cargo/bin`.
+
 ## Apple test devices (owner's, for the Apple ports)
 
 Owner, verbatim (2026-11-18): "ipad A16 base model, iPad Pro M5, apple TV
