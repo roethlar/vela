@@ -518,9 +518,15 @@ Inside:
     stamps repeat and overlap, and Apple's renderer, given a buffer for
     each, reports no error and plays nothing. Small frames are gathered
     into buffers of tens of milliseconds.
-  - AC-3 and E-AC-3 go to the renderer one frame to a sample buffer,
-    with the frame's length in samples read from its header (E-AC-3
-    frames are 256, 512, 768 or 1536), and are timed by the same count.
+  - AC-3 and E-AC-3 go to the renderer one access unit to a sample
+    buffer, and are timed by the same count. An E-AC-3 access unit is an
+    independent substream's frame together with the dependent substream
+    frames that belong to it (a 7.1 programme carries its extra channels
+    that way). They cover the same stretch of time, so the clock moves
+    once for the unit, by the samples its independent frame declares in
+    its header (256, 512, 768 or 1536), however many frames the unit
+    holds. A container that delivers the substreams' frames apart has
+    them gathered into the unit first.
   - Decoded sound is described to Apple by a standard channel layout
     where the source layout has one (mono, stereo, 5.1 as
     `MPEG_5_1_A`, 7.1 as `MPEG_7_1_C`, the channels moved from FFmpeg's
