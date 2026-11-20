@@ -440,6 +440,13 @@ Inside:
     of pictures and bytes it owns (the footprint bound below).
   - Pictures go to the layer as image sample buffers, only while the
     renderer reports it is ready for more.
+  - **A track's display rotation is applied.** A recording made holding
+    a phone upright is stored on its side with a rotation in the track
+    (FFmpeg gives it as the stream's display matrix), and a decoded
+    pixel buffer does not carry it. The engine turns the layer by it,
+    and everything measured against the picture, cropping and bitmap
+    subtitles among it, uses the turned picture's coordinates. Profile
+    8.4 recordings from an iPhone are the case in this plan's scope.
   - What VideoToolbox does not take (MPEG-2, VC-1, MPEG-4 ASP, VP9 where
     it is refused, AV1 on devices without a hardware decoder): FFmpeg
     decodes on the device, in software, into `CVPixelBuffer`s (dav1d for
