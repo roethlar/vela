@@ -365,7 +365,11 @@ Inside:
     the end of the file, not an error: a `416` whose `Content-Range`
     gives a total equal to the requested offset, or an offset equal to a
     total already known, returns no bytes and the end-of-file flag. An
-    HLS byte range must come back whole. Anything else is a read error.
+    HLS byte range must come back whole, and "whole" is measured against
+    what FFmpeg asked for in that read (its `offset` and `end_offset`):
+    for consecutive byte ranges of one resource its HLS demuxer asks for
+    several segments in one read. Each segment's own end is held as its
+    bytes are used. Anything else is a read error.
   - One logical open is one representation. A playlist is fetched whole,
     resolved and cleaned, and served from that snapshot. Media read in
     several ranges carries the first response's validator (`If-Range`
