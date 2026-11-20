@@ -372,9 +372,20 @@ Inside:
     bytes are used. Anything else is a read error.
   - One logical open is one representation. A playlist is fetched whole,
     resolved and cleaned, and served from that snapshot. Media read in
-    several ranges carries the first response's validator (`If-Range`
-    with its ETag or Last-Modified), and restarts if the resource
-    changed.
+    several ranges is tied to one version by `If-Range`, with a
+    validator HTTP allows there: a strong ETag, or a Last-Modified date
+    that counts as strong (RFC 9110, 13.1.5). A weak ETag is never sent.
+    A `200` in answer to a conditional range means the resource was
+    replaced: the logical open restarts, and no byte of the new version
+    reaches the demuxer that holds the old one.
+    - With no usable validator, ranges cannot be tied to a version. The
+      engine then keeps reading the response it has for as long as the
+      demuxer reads forward, and on each new range checks what the
+      server does say: the total length in `Content-Range` must be the
+      first response's. A different total is a replaced resource, and
+      the open restarts. A resource replaced by one of the same length,
+      on a server that gives no validator, is not detected; the play's
+      diagnostics record that the server gave none.
   - FFmpeg's HLS demuxer runs with its HTTP persistence off, since it
     expects its own HTTP context when that is on.
   - FFmpeg's protocol whitelist admits only the engine's own I/O, so no
