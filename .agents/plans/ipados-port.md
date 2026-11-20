@@ -923,16 +923,21 @@ What P2 needs and the library does not have:
 - a profile 5 clip longer than one frame. A TV takes seconds to change
   mode, so one frame can show a still picture at most;
 - profile 8.4 (an iPhone's recording) and profile 10 (AV1);
-- Dolby Vision 8.1 known to be CMv2.9 and known to be CMv4.0. Which the
-  four clips carry is read with dovi_tool, not done yet;
 - E-AC-3 with Atmos, DTS-HD MA, and plain AC-3 and DTS;
 - the mixed plays A2 names: Dolby Vision with TrueHD, software-decoded
   video with E-AC-3, HDR10 with DTS-HD MA;
 - one long file with several audio and subtitle tracks, for seeking,
   track switching and memory.
 
-Made by the probe, as S0 says: the reference clip (one base layer with
-two visibly different RPUs, and the same layer with its RPU stripped).
+Read with dovi_tool 2.3.4 on 2026-11-20: the three 1080p 8.1 clips carry
+CMv4.0 metadata, and `contrast-recovery-pq-output-colornoise.mkv` and the
+profile 5 frame carry CMv2.9. So both versions are in the library.
+
+Made by the probe on 2026-11-20, as S0 says, from `02themeg-dovi.mkv`'s
+base layer (`p2/dv/` in the probes' folder has the recipes): `ref-low.mkv`
+(an RPU saying the scene peaks at 100 nits), `ref-high.mkv` (one saying
+10,000 nits, with full saturation trims) and `ref-stripped.mkv` (no RPU,
+no Dolby Vision box).
 
 ## Risks
 
@@ -1277,3 +1282,12 @@ two visibly different RPUs, and the same layer with its RPU stripped).
     buffers to the layer" is amended, and the amendment reviewed, before
     engine code. Not yet shown on the iPad or an Apple TV: the build with
     this path is on the iPad, silent, and has not run (locked).
+
+- 2026-11-20, P2, the reference clip: one picture of `ref-low.mkv`,
+  `ref-high.mkv` and `ref-stripped.mkv` (the media plan says what they
+  are), each through the engine's own decompression session into the
+  layer on the Mac, captured from the window: mean luma 94.8, 52.3 and
+  88.1 of 255. The same base picture is drawn three ways, so the layer
+  uses what each RPU says, not just the fact of Dolby Vision. The three
+  are in the iPad build for the owner's eyes. The player also builds for
+  tvOS (unsigned; no Apple TV is paired and no tvOS profile exists yet).

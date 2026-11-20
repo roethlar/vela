@@ -730,6 +730,8 @@ Recorded 2026-07-14. Owner-approved access (2026-07-14) to the boxes below.
   iphoneos -destination generic/platform=iOS -derivedDataPath
   ../build-ios build`, bundle id `com.roethlar.VelaP2`, with the clips of
   `p2/media/` inside it.
+- dovi_tool 2.3.4 was installed from Homebrew on 2026-11-20 for the probes
+  (test-only; it reads and makes Dolby Vision metadata).
 - Unit tests run in the simulator with
   `CARGO_TARGET_AARCH64_APPLE_IOS_SIM_RUNNER` set to `sim-run.sh` there,
   which runs the test binary with `xcrun simctl spawn`.
