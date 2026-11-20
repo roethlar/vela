@@ -486,7 +486,14 @@ Inside:
   - What VideoToolbox does not take (MPEG-2, VC-1, MPEG-4 ASP, VP9 where
     it is refused, AV1 on devices without a hardware decoder): FFmpeg
     decodes on the device, in software, into `CVPixelBuffer`s (dav1d for
-    AV1), and those join the same reorder queue and the same hand-over.
+    AV1), and those take the same hand-over to the layer. They do not
+    pass through the reorder queue: FFmpeg's decoders hold their delayed
+    pictures themselves and give pictures out in the order they are
+    shown, so a second queue would pay for the reordering twice, in
+    delay and in memory. The reorder queue is for VideoToolbox's output,
+    which comes in decode order. The budget counts the pictures a
+    software decoder holds as that decoder's, and the short lead of
+    pictures waiting for the layer as the engine's.
     They never go to a server transcode unless the user picked one.
   - A software-decoded picture carries the same description a hardware
     one would: primaries, transfer, matrix and range from the decoded
