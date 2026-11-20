@@ -424,6 +424,14 @@ Inside:
     length prefixes before the session sees it. P2 did not exercise
     Annex B; slice A5 proves it with a transport-stream clip and a real
     HLS transcode.
+  - **A stream can change format while it plays** (an HLS discontinuity,
+    new parameter sets in an Annex B stream). When the parameter sets
+    change, the engine builds the new format description and asks the
+    session whether it accepts it
+    (`VTDecompressionSessionCanAcceptFormatDescription`). If it does not,
+    the pictures already decoded are shown, and a new session, or the
+    software decoder if VideoToolbox does not support the new format,
+    takes over at the next random-access point. The clock runs on.
   - Decoded pictures wait in a reorder queue and leave it in presentation
     order. The queue's depth comes from the stream (HEVC's
     `sps_max_num_reorder_pics`, H.264's `max_num_reorder_frames`, or the
