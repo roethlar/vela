@@ -687,9 +687,19 @@ Inside:
        user presses Play.
        - The checkpoint also records the server's position and watched
          state as they were when it was written. At Play, the server is
-         read again. If its position or watched state has changed since,
-         the server wins, because another device moved it. If not, Vela's
-         position wins. If the server has no resume state, Vela's wins.
+         read again, and what it reports now is compared with what the
+         checkpoint recorded:
+         - a different position or watched state: the server wins,
+           because another device moved it;
+         - a position then and none now: the server wins as well. That
+           is a reset made elsewhere (the item cleared, or finished and
+           marked watched), and the play starts where the server says,
+           from the beginning if it says nothing. Vela's checkpoint never
+           brings back progress the user cleared;
+         - the same as recorded: Vela's position wins;
+         - a provider or an item that gives no resume state at all, then
+           and now, leaves nothing to compare, and only then does Vela's
+           position win for lack of one.
          No clocks are compared.
        - A seek the user made in the paused view wins over both.
        - Playing starts a fresh session there.
