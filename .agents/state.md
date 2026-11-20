@@ -49,8 +49,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   - The device half of P1 and P3 RAN on the owner's iPad Pro (M5) on
     2026-11-20 and holds (the Log's second entry of that date): the
     sandbox, TLS against the owner's Plex, ATS, and an EDR headroom of 16.
-    One by-eye answer is open: whether the owner sees the test pattern
-    under the page and a tap on the button over it counts.
+    The owner saw the test pattern move under the page and a tap on the
+    button over it count ("1 yes 2 yes"). P1, P3 and P4 are finished.
   - Probe P2 HAS NOT RUN, and its throwaway player is not built. Its
     media plan is written (the plan's "Probe P2's media plan"), from the
     owner's Plex library "Test Video", which lacks Dolby Vision profiles

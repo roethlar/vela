@@ -1133,9 +1133,12 @@ two visibly different RPUs, and the same layer with its RPU stripped).
     show more space), not the 1376 x 1032 of the default setting. The
     page must not assume one iPad size.
   - The display layer rendered on the device (its renderer's status is
-    "rendering", about 90 frames in three seconds, no error). Whether the
-    owner sees it under the page, and whether a tap on the page's button
-    over it counts, is asked of the owner; not answered yet.
+    "rendering", about 90 frames in three seconds, no error). **Seen by
+    the owner on the iPad** (2026-11-20, asked "Do you see the colour
+    bars with the bar moving?" and "Does tapping the button count up?":
+    "1 yes 2 yes"): the pattern shows under the transparent page and
+    moves, and a finger on the page's button over it counts. A1 holds on
+    the device.
   - The owner, seeing the build: "it's showing the install mpv banner at
     the top which obviously needs to be removed from the ios versions".
     That is B-1's mpv detection, compiled out in slice A3, and one of the
