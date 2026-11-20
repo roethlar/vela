@@ -362,15 +362,20 @@ Inside:
   - A read returns up to the bytes asked for, with a count and an end of
     file flag. A `206` must start at the requested offset; when the server
     sends the whole resource instead, the interval is cut from it as it
-    streams. A read that begins exactly at the end of the resource is
+    streams. A `206` may hold less than was asked: its `Content-Range`
+    says what it holds, and the engine asks for the bytes after it under
+    the same validator until the range is complete or the resource
+    ends. A read that begins exactly at the end of the resource is
     the end of the file, not an error: a `416` whose `Content-Range`
     gives a total equal to the requested offset, or an offset equal to a
     total already known, returns no bytes and the end-of-file flag. An
-    HLS byte range must come back whole, and "whole" is measured against
-    what FFmpeg asked for in that read (its `offset` and `end_offset`):
-    for consecutive byte ranges of one resource its HLS demuxer asks for
+    HLS byte range must come whole in the end, over as many responses
+    as the server takes, and "whole" is measured against what FFmpeg
+    asked for in that read (its `offset` and `end_offset`): for
+    consecutive byte ranges of one resource its HLS demuxer asks for
     several segments in one read. Each segment's own end is held as its
-    bytes are used. Anything else is a read error.
+    bytes are used. A declared range that the resource ends short of is
+    a read error, and so is anything else.
   - One logical open is one representation. A playlist is fetched whole,
     resolved and cleaned, and served from that snapshot. Media read in
     several ranges is tied to one version by `If-Range`, with a
