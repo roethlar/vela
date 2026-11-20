@@ -63,19 +63,22 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     engine's own drops none and keeps Dolby Vision (shown on the Mac).
     A-2 needs that amendment before engine code. The iPad confirmed it
     (41 of 255 dropped against 0; Dolby Vision profile 5 and 8.1 seen by
-    the owner on the engine's own session). The owner PAUSED SOUND TESTS
-    on 2026-11-20 while in a meeting: play no audio on the Mac or the
-    iPad until told. NEXT: seeking, track switching and memory; then the
-    rows that need files the test library lacks; then the Apple TV half,
-    which has not started. The app's log is
+    the owner on the engine's own session). Seeking is exact with that session
+    (Mac). Sound tests, paused by the owner for a meeting, are allowed
+    again (2026-11-20, "you can resume audio testing if necessary"): keep
+    them to the iPad, where the owner's ears judge. NEXT: the owner's
+    answers on the sound list now on the iPad (spoken channel checks in
+    7.1 and 5.1; E-AC-3 and AC-3 handed to Apple undecoded); the rows the
+    excerpts below make possible (profiles 5 and 7, DTS-HD MA, track
+    switching, VC-1 and MPEG-2 in software); memory; then the Apple TV
+    half, which has not started. The app's log is
     `Library/Caches/p2-log.jsonl` in its container. Its
     media plan is written (the plan's "Probe P2's media plan"), from the
-    owner's Plex library "Test Video", which lacks Dolby Vision profiles
-    7, 8.4 and 10, a profile 5 clip longer than one frame, E-AC-3 with
-    Atmos, DTS-HD MA and a long file with several tracks. ASKED OF THE
-    OWNER, not answered: whether the agent may look in the owner's main
-    Plex libraries for those, or the owner adds them to "Test Video". No
-    Apple TV is paired with `nagatha` yet.
+    owner's Plex library "Test Video" and, by the owner's word of
+    2026-11-20 ("scan plex for whatever you need for testing"), excerpts
+    cut from the owner's other libraries (`p2/media2/` in the probes'
+    folder; never in a repository). Still without a file: profile 7 FEL,
+    8.4 and 10. No Apple TV is paired with `nagatha` yet.
   - Review of the plans (`.agents/review/codereview-2026-11-18-apple-plans.md`):
     five codex design rounds, every finding repaired; round 5's repairs
     have no verdict, and no further round is scheduled.
