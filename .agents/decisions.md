@@ -8,7 +8,10 @@ guidance when relevant.
 
 ### 2026-07-26 - Never review Vela's code with a Claude harness
 
-Status: Active
+Status: CORRECTED by the owner on 2026-11-20 ("Review crosses model
+families", the last entry of this file). The ban on a Claude reviewer
+applies only to code a Claude model wrote; code a GPT model wrote is
+reviewed by Claude. "Call codex plainly", below, still stands.
 
 Decision:
 Independent review passes for this repo - `openreview` and `codereview` alike -
@@ -2840,3 +2843,54 @@ How to apply:
   unaffected.
 - Any other codec whose only decoder the licensing rule excludes goes to
   the owner the same way. It is never dropped silently.
+
+## 2026-11-20 - Review crosses model families: no family reviews its own code
+
+Status: OWNER RULING (2026-11-20), standing. Corrects "Never review Vela's
+code with a Claude harness" (2026-07-26).
+
+Decision:
+Told that reviews here go to codex because the 2026-07-26 decision bars a
+Claude harness from reviewing this repo, the owner, verbatim: "that rule
+is incorrect. the correct rule is the coding agent family cannot review
+its own code, so opus cannot review opus or fable. code written by a gpt
+family model cannot be reviewd by a gpt model. claude authored code is
+reviewed by gpt and vice-versa just to minimize gaps inherent to the
+family."
+
+How to apply:
+- The reviewer is chosen by who wrote what is under review, not by the
+  repo. What a Claude model wrote (the working agent or its helper
+  agents, on any Claude model) is reviewed by a GPT-family reviewer,
+  which here is codex. What a GPT-family model wrote (codex) is reviewed
+  by a Claude-family reviewer.
+- A family never reviews its own work, across its models too: Opus
+  reviews neither Opus's nor Fable's, and one GPT model does not review
+  another's.
+- So a Claude harness is an eligible reviewer in this repo, for
+  GPT-written work only. `codereview` and `openreview` are covered alike,
+  as they were on 2026-07-26.
+- The agent's readings, not the owner's words:
+  - A range holding work from both families is split by author, and each
+    part goes to the other family.
+  - A plan counts as written by whoever drafted it.
+  - The ruling names Claude and GPT. Its principle bars only a family
+    reviewing itself, so it does not say which family reviews a third
+    one's work; that is asked when it comes up.
+- Unchanged:
+  - Codex is called plainly, with no model or effort named by the agent
+    (2026-07-26, "Call codex plainly").
+  - Starting more than one Claude session needs the owner's approval
+    (2026-08-20), a Claude reviewer session included.
+  - A repair codex wrote is closed by the working agent's review
+    (2026-11-14). That entry called it a qualification of the 2026-07-26
+    ban for one case; under this rule it is the general case.
+
+Reason:
+The owner's: each family has gaps of its own, and a reviewer from the
+other family is the one that does not share them.
+
+Supersedes:
+The first paragraph of 2026-07-26 (a Claude harness is never an eligible
+reviewer here) and the note in `.agents/machines.md` that repeated it.
+Nothing else.

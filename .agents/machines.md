@@ -127,11 +127,12 @@ portable and may at most point here.
   its transcript. Tier pairs live in the gitignored
   `.agents/review/harnesses.local.json`.
 
-  **Reviews of this repo go to `codex`, never to a Claude harness** (decision
-  `.agents/decisions.md` 2026-07-26): the working agent here IS Claude, so a
-  Claude reviewer is not independent. The cache's owner-confirmed `claude` tiers
-  (`claude-fable-5` @ xhigh / @ max, `competitive`) are therefore NOT selectable
-  for review work on this repository, whatever the cache says.
+  **Reviews cross model families** (decision `.agents/decisions.md`
+  2026-11-20, correcting 2026-07-26): what a Claude model wrote is reviewed by
+  `codex`, and what a GPT model wrote is reviewed by a Claude harness. The
+  cache's owner-confirmed `claude` tiers (`claude-fable-5` @ xhigh / @ max,
+  `competitive`) are selectable for reviewing GPT-written work only, never
+  for Claude-written work, whatever the cache says.
 
   **Owner-directed `tr-12` exception (2026-07-26):** the owner explicitly
   required a one-off finding review by Claude with no model or effort override.

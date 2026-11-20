@@ -398,8 +398,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   worktree `cx-pa5r5` on `continuum`) was never reviewed or landed.
 - HOW TO WORK HERE: rules the owner set since 2026-11-12, most of them
   in `.agents/decisions.md` under their dates; read them there before
-  doing anything. Every slice with repo code gets a `codereview codex`
-  pass, and each commit is pushed (2026-11-12, "plans are approved").
+  doing anything. Every slice with repo code gets a `codereview` pass by
+  the other model family (codex for what Claude wrote; 2026-11-20), and
+  each commit is pushed (2026-11-12, "plans are approved").
   Settle implementation and failure-mode details yourself and record
   them; bring the owner only what changes Vela for its user, briefly,
   and never put an answered ask again (2026-11-12, 2026-11-15).
@@ -414,7 +415,10 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   the approval the 2026-08-20 constraint below asks for before more than
   one Claude session is started, for that session only. The same day
   the owner asked that agents started from then on run on Opus 5.5.
-  Reviews of record still go to codex, and no agent is cut short.
+  Reviews of record cross model families (owner, 2026-11-20,
+  `.agents/decisions.md`: Claude-written work goes to codex, GPT-written
+  work to a Claude reviewer; no family reviews its own), and no agent is
+  cut short.
 - Windows mpv idle-exit fix, 2026-11-12, `bf1b1c3` (1.0.62; plan
   `.agents/plans/windows-mpv-idle-exit.md`). On Windows, mpv started by Vela
   idled at end of file instead of exiting, so Continue Playing, playlist
