@@ -514,7 +514,14 @@ Inside:
     VideoToolbox decodes, the session's field mode asks it to
     deinterlace. That property is optional for a decoder: the engine
     checks whether the session took it, and when it did not, the
-    session's pictures go through `bwdif` like the software ones. A test
+    session's pictures go through `bwdif` like the software ones.
+    `bwdif` reads planar pictures in ordinary memory, and VideoToolbox's
+    own buffers can be losslessly compressed surfaces, which must not be
+    read that way. So for such a stream the session is asked for an
+    uncompressed bi-planar format, each picture is copied into the
+    planar layout the filter takes, and the filter's output becomes the
+    pixel buffer the layer gets. Those intermediate pictures are part of
+    the footprint budget. A test
     plays an interlaced clip on each path and checks the picture rate
     and that no combing is left on a moving edge.
   - Only a Dolby Vision profile and device named in a reviewed amendment
