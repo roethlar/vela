@@ -376,6 +376,14 @@ Inside:
     several ranges is tied to one version by `If-Range`, with a
     validator HTTP allows there: a strong ETag, or a Last-Modified date
     that counts as strong (RFC 9110, 13.1.5). A weak ETag is never sent.
+    - A `200` in answer to a conditional range is read by its validator.
+      With the same strong validator as the open's, the resource is
+      unchanged and the server did not honour the range: the engine
+      keeps that one response and takes the interval from it as it
+      streams, and does not restart. With a different validator, or
+      none, the resource was replaced or cannot be known: the logical
+      open restarts, and no byte of that response reaches the demuxer
+      that holds the old version.
     - With no usable validator, ranges cannot be tied to a version, so
       none are joined. The open is then one response, read forward. A
       seek ends that open and starts another, with a new demuxer, which
