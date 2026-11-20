@@ -1,0 +1,16 @@
+You are the reviewer in a `codereview` change review of this repository. It is read-only work.
+
+Repository: /Users/michael/Dev/vela
+Pins: base 2ffdd13a45d465428b05a6d0a6cf557caea79d28, head bee0c0003a8d27efcf25733782449a49b580785e.
+
+Capability proof first: read AGENTS.md in the repository, and run `git rev-parse bee0c0003a8d27efcf25733782449a49b580785e`. Report whether both succeeded.
+
+Scope: the plan `.agents/plans/ipados-port.md` as it stands at head, and what changed in it between base and head. Read the diff yourself with git; it is not supplied. The plan is a design for code that is not written yet.
+
+Hunt for observable design defects: places where an implementer who follows the plan as written would build something that fails, where one part of the plan contradicts another part or a recorded owner decision in `.agents/decisions.md`, or where the design rests on a claim that the evidence recorded in the plan's own Log does not support. Check technical claims about Apple's frameworks, FFmpeg, Dolby Vision, Tauri and Appium against primary sources where you can.
+
+Design only: by the owner's ruling (`.agents/decisions.md`, 2026-11-18, "No tests are designed for code that has not been written"), do not raise findings that ask only for tests, test designs or coverage.
+
+Also give a verdict, closed or reopened with the reason, on each repair made after the previous review round. The findings are in `.agents/review/codereview-2026-11-18-apple-plans/ipados-r5.md`. Their repairs are these commits: ipd-32 in 3566faf; ipd-36 and ipd-56 in 1dbb1d6; ipd-52 in 3285093; ipd-53 and ipd-57 in facab84; ipd-55 in fd4461e; ipd-58 in 24cf277.
+
+For each new finding give: a title; a severity (CRITICAL, HIGH, MEDIUM or LOW) with the impact that justifies it; file and line evidence at head; the triggering input or condition; the predicted observable failure; and a better approach. A clean result is a valid outcome. Report nothing you cannot support with evidence. Do not edit any file, create commits, change refs or contact a Git remote.
