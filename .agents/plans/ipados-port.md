@@ -376,17 +376,16 @@ Inside:
     several ranges is tied to one version by `If-Range`, with a
     validator HTTP allows there: a strong ETag, or a Last-Modified date
     that counts as strong (RFC 9110, 13.1.5). A weak ETag is never sent.
-    A `200` in answer to a conditional range means the resource was
-    replaced: the logical open restarts, and no byte of the new version
-    reaches the demuxer that holds the old one.
-    - With no usable validator, ranges cannot be tied to a version. The
-      engine then keeps reading the response it has for as long as the
-      demuxer reads forward, and on each new range checks what the
-      server does say: the total length in `Content-Range` must be the
-      first response's. A different total is a replaced resource, and
-      the open restarts. A resource replaced by one of the same length,
-      on a server that gives no validator, is not detected; the play's
-      diagnostics record that the server gave none.
+    - With no usable validator, ranges cannot be tied to a version, so
+      none are joined. The open is then one response, read forward. A
+      seek ends that open and starts another, with a new demuxer, which
+      reads its one response from the start of the resource and skips
+      to the target. That is slow on a large file, and it never gives
+      one demuxer bytes whose version it cannot know. The play's
+      diagnostics record that the server gave no validator. It is the
+      exception: the owner's Plex answers a ranged request for a media
+      part with a strong ETag and a Last-Modified date (read
+      2026-11-20).
   - FFmpeg's HLS demuxer runs with its HTTP persistence off, since it
     expects its own HTTP context when that is on.
   - FFmpeg's protocol whitelist admits only the engine's own I/O, so no
