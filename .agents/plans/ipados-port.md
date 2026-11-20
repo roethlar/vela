@@ -1291,3 +1291,26 @@ no Dolby Vision box).
   uses what each RPU says, not just the fact of Dolby Vision. The three
   are in the iPad build for the owner's eyes. The player also builds for
   tvOS (unsigned; no Apple TV is paired and no tvOS profile exists yet).
+
+- 2026-11-20, P2, **the engine's own decompression session, on the iPad
+  Pro** (`logs/p2-ipad-log-3.jsonl`; every clip silent):
+  - `Aquaman_test.mkv` given to the layer compressed: 41, 42 and 42 of 255
+    pictures dropped in three passes. Decoded by the player's own session
+    and given in display order: 0 of 255. The owner, asked whether the
+    second is smoother: "y".
+  - **Dolby Vision engages on that path on the iPad.** Profile 5 through
+    the session (decoded as `&xf0`), then with Dolby Vision off (`pf20`):
+    natural, then green and purple; the owner: "y". Dolby Vision 8.1 at
+    2160p through the session: 0 dropped.
+  - The reference clip: the owner sees the two metadata sets differ on
+    the iPad, though not as on the Mac: "G is not darker than F, but it's
+    less vibrant". (On the Mac's screen the second set was much darker.)
+    So what each RPU says changes the picture on the iPad too. Whether
+    the stripped copy looks different from both was not said.
+  - With this, A2 holds for the iPad Pro for profiles 5 and 8.1, by the
+    route "FFmpeg demuxes, the engine's VideoToolbox session decodes, the
+    sample-buffer layer presents". Still to do for P2 on the iPad:
+    profile 7 converted (no file yet), 8.4 and 10 (no file), seeking,
+    track switching, memory, E-AC-3 with Atmos and DTS-HD MA (no file),
+    and which channel description sound needs. The Apple TV half has not
+    begun.

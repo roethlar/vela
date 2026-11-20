@@ -61,11 +61,13 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     render. Compressed samples given straight to the layer drop pictures
     on deeply reordered 2160p streams; a VideoToolbox session of the
     engine's own drops none and keeps Dolby Vision (shown on the Mac).
-    A-2 needs that amendment before engine code. NEXT: the same
-    comparison on the iPad (the build on it is silent; the owner PAUSED
-    SOUND TESTS on 2026-11-20 while in a meeting: play no audio on the
-    Mac or the iPad until told), then seeking, track switching and memory,
-    then the Apple TV half, which has not started. The app's log is
+    A-2 needs that amendment before engine code. The iPad confirmed it
+    (41 of 255 dropped against 0; Dolby Vision profile 5 and 8.1 seen by
+    the owner on the engine's own session). The owner PAUSED SOUND TESTS
+    on 2026-11-20 while in a meeting: play no audio on the Mac or the
+    iPad until told. NEXT: seeking, track switching and memory; then the
+    rows that need files the test library lacks; then the Apple TV half,
+    which has not started. The app's log is
     `Library/Caches/p2-log.jsonl` in its container. Its
     media plan is written (the plan's "Probe P2's media plan"), from the
     owner's Plex library "Test Video", which lacks Dolby Vision profiles
