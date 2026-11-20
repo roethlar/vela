@@ -520,8 +520,12 @@ Inside:
     time comes from the container; each later buffer starts where the
     last one ended. A container time is believed again only when it is
     far from the counted one (0.1 s in P2; the engine's value is set
-    with the tests), and that is then a real discontinuity: the renderer
-    is flushed and the count starts again there. P2 found why: a TrueHD
+    with the tests), and that is then a real discontinuity: the count
+    starts again at the container's time, for the sound from there on.
+    What is already queued before the discontinuity is still to be
+    heard and stays queued; the renderer is flushed only by a seek, a
+    change of track or its own request. P2 found why the count is
+    needed: a TrueHD
     frame is 40 samples, Matroska stamps packets to the millisecond, the
     stamps repeat and overlap, and Apple's renderer, given a buffer for
     each, reports no error and plays nothing. Small frames are gathered
