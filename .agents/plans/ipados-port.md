@@ -686,11 +686,18 @@ Inside:
   losslessly compressed and smaller; a software-decoded or copied
   picture is the full size. P2's 286 to 408 MB was the whole process's
   footprint with a fixed queue of sixteen. The engine's budget is the
-  stream's reorder depth plus a small lead, in pictures and in bytes,
-  and the bytes are each buffer's real size (its format, its planes'
-  strides, its backing allocation), never an estimate, checked before a
-  picture is decoded. A5 sets the budget and measures it on the A16
-  iPad, and `ios-port.md` sets the phone's.
+  stream's reorder depth plus a small lead, in pictures and in bytes.
+  A picture's real size is known only when it exists: VideoToolbox
+  hands over its buffer in the decode's callback, with strides and a
+  backing size the hardware chose. So admission works in two steps.
+  Before a picture is sent to be decoded, copied or decoded in
+  software, an upper bound is reserved for it: its dimensions rounded
+  up to the alignment, at 16 bits a component for a 10-bit format, for
+  the format asked for. When the buffer exists, the reservation is
+  replaced by its real size (its planes' strides and its backing
+  allocation). A decode is not started when its reservation would pass
+  the budget. A5 sets the budget and measures it on the A16 iPad, and
+  `ios-port.md` sets the phone's.
 - **Lifecycle:**
   - The engine configures `AVAudioSession` for playback and handles
     interruptions.

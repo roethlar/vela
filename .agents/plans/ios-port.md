@@ -150,8 +150,10 @@ detail pages, top-tab Settings, the player's single sheet):
     component), less when VideoToolbox hands over a compressed buffer.
     The iPadOS plan's probe, with a fixed queue of sixteen pictures, saw
     the whole process's footprint peak at 286 to 408 MB on an iPad Pro.
-    The budget counts each buffer's real size, and C1 budgets what Vela
-    holds for demuxing, decoding and presenting together. On the phone the queue is the stream's reorder
+    The budget reserves an upper bound for each picture before it is
+    decoded or allocated and settles to the buffer's real size when it
+    exists (the iPadOS plan's Footprint), and C1 budgets what Vela holds
+    for demuxing, decoding and presenting together. On the phone the queue is the stream's reorder
     depth plus the smallest lead that plays without drops, which C1
     finds; a stream whose reorder depth alone exceeds the phone's budget
     is reported in the Log with its numbers, not played badly in
