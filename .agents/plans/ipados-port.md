@@ -391,15 +391,18 @@ Inside:
       open restarts, and no byte of that response reaches the demuxer
       that holds the old version.
     - With no usable validator, ranges cannot be tied to a version, so
-      none are joined. The open is then one response, read forward. A
-      seek ends that open and starts another, with a new demuxer, which
-      reads its one response from the start of the resource and skips
-      to the target. That is slow on a large file, and it never gives
-      one demuxer bytes whose version it cannot know. The play's
-      diagnostics record that the server gave no validator. It is the
-      exception: the owner's Plex answers a ranged request for a media
-      part with a strong ETag and a Last-Modified date (read
-      2026-11-20).
+      none are joined, and a demuxer still has to seek (an MP4 whose
+      index follows its media cannot be read front to back at all). So
+      the open is served from a snapshot: one complete response, stored
+      in the container's temporary directory, which the demuxer reads
+      with seeking. A resource too large to store (the bound is set in
+      A5 against the device's free space) is not played: the play ends
+      with an error that names the cause, the server giving nothing to
+      tell one version of the file from another. The play's diagnostics
+      record it. This is the exception: the owner's Plex answers a
+      ranged request for a media part with a strong ETag and a
+      Last-Modified date (read 2026-11-20); what Jellyfin and Emby send
+      is read in A5 before this path is counted on being rare.
   - FFmpeg's HLS demuxer runs with its HTTP persistence off, since it
     expects its own HTTP context when that is on.
   - FFmpeg's protocol whitelist admits only the engine's own I/O, so no
