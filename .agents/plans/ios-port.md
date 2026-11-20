@@ -217,8 +217,11 @@ each pushed to `origin` and `github` as it lands
   - Excluding a scenario never settles a parity row. Each row a scenario
     proves on the desktop gets its own phone disposition: an Apple test
     for the portable behaviour, or an iPhone-scoped ruling for a feature
-    left out. `mpvargs` proves row 13a (the user's mpv options), which
-    stays open until difference 2 is ruled for the iPhone.
+    left out. `mpvargs` proves row 13a (the user's mpv options). Rows
+    13a and 13b are approved as absent on iPhone, with iPad and Apple TV
+    (difference 2, `.agents/decisions.md` 2026-11-18, "Four desktop
+    features are absent on iPad, iPhone and Apple TV"); nothing waits on
+    a ruling there.
   - The desktop suites run too, to show the desktop is unchanged.
 - **I3, icons and release packaging.** The iPhone icon sizes. The
   release workflow's iOS job, if O2 made one, ships the universal app.
