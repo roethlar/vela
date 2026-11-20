@@ -848,7 +848,16 @@ Inside:
          The new play's picture does not wait for this, only its
          reports. If the server cannot be reached, the close cannot be
          confirmed and the new play's reports wait with it; when the
-         server answers again, the close goes first. Where a
+         server answers again, the close goes first.
+         What this cannot exclude: a `Stopped` the server has received
+         and not yet handled when the retry is answered. Jellyfin has no
+         close scoped to one play, and a device has one session there.
+         If that late handler runs after the new `Started`, the server's
+         current item for the device is cleared until the new play's
+         next progress report, which follows `Started` at once and then
+         every few seconds; no item's progress is lost. The review holds
+         this open and the working agent holds that the client cannot
+         close it (`.agents/review/ipd-52.contested.md`). Where a
          provider has no such close, the server's own expiry closes it.
          The Log records, per provider, what that expiry does to the
          position (Jellyfin's can report the old one).
