@@ -699,6 +699,28 @@ Recorded 2026-07-14. Owner-approved access (2026-07-14) to the boxes below.
   change the probes needed; also saved as `clone-changes.patch`),
   `p1.mjs`, `p4.mjs` and `p4b.mjs` (the drivers), `net/` (the test
   servers and their certificates), `logs/`, `shots/`, `NOTES.md`.
+- The owner's devices as this Mac sees them (2026-11-20, `xcrun devicectl
+  list devices`): "iPad (2)" is the iPad Pro 13-inch (M5), `iPad17,3`,
+  iPadOS 27.2, wired, Developer Mode on; "iPad" is the iPad (A16),
+  `iPad15,7`, iPadOS 27.2.1, over the network, Developer Mode on. Both are
+  paired. No Apple TV is paired yet.
+- Signing a probe build for the iPad Pro needed nothing new on the
+  owner's Apple account: with the team set, Xcode's automatic signing
+  picked the wildcard profile already on this Mac ("iOS Team Provisioning
+  Profile: *", which lists the iPad Pro and not the A16 iPad, expires
+  2027-09-11) and the "Apple Development" identity. Xcode has no account
+  signed in, so it cannot make or change profiles; a manual setting
+  naming that profile is refused, because the profile is Xcode-managed.
+  The A16 iPad is in the AppleRDP app's profile only, so a build for it
+  needs a profile that lists it.
+- Install and start on a device: `xcrun devicectl device install app
+  --device <id> <Vela.app from the xcarchive>`, then `xcrun devicectl
+  device process launch --device <id> com.roethlar.Vela`. The launch is
+  refused while the iPad is locked.
+- The probes read the owner's Plex library "Test Video" with the sign-in
+  Vela holds on this Mac (`p2/plex-list.py`, `p2/plex-fetch.py` in the
+  folder; the token goes in a request header only). Seventeen small clips
+  are in `p2/media/`.
 - Unit tests run in the simulator with
   `CARGO_TARGET_AARCH64_APPLE_IOS_SIM_RUNNER` set to `sim-run.sh` there,
   which runs the test binary with `xcrun simctl spawn`.

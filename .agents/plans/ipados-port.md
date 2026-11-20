@@ -853,7 +853,8 @@ records what landed.
     the mock Plex, `File::lock` and the config location.
   - P4: Appium driving the page in the simulator.
   - Before P2, Probe P2's media plan names which of the owner's files it
-    uses.
+    uses: "Probe P2's media plan", below, written 2026-11-20, with what
+    the owner's test library lacks.
 - **A1, the media library build.** Scripts, pins, CI job, licence texts,
   and the dependency-policy test.
 - **A2, the player seam (A-1).** It lands in steps, each with the desktop
@@ -884,6 +885,54 @@ records what landed.
 - **A10, lifecycle, signing and distribution (B-4, O2).** Then the docs
   (README platform list, `docs/`), the release notes and the owner's
   checklist.
+
+## Probe P2's media plan (2026-11-20)
+
+Source: the owner's Plex library "Test Video" on `altiera` (owner,
+2026-11-20: "I added a library to plex called "Test Video" which contains
+hdr test video found on github"). 139 files, read through Plex that day
+with the sign-in Vela holds on `nagatha`; the list with every stream's
+facts is `p2/test-video-library.json` in the probes' folder
+(`.agents/machines.md`). Most are HEVC HDR10 clips of one to eight seconds
+with no sound.
+
+What P2 uses from it:
+
+| For | File | Facts |
+|-----|------|-------|
+| SDR control, and software decoding | `2022-08-31,21.08.25.mkv` | H.264 High 10 (10-bit, which Apple's hardware does not take), 1080p, 1 s |
+| HDR10 control | any of the 125 HDR10 clips; `La La Land.mkv` | HEVC Main 10, 2160p, 8 s |
+| HDR10, long, for seeking and memory | `01. Black Clipping_1_HDR10.mp4`, `240-1000nits-pattern.mp4` | 300 s and 360 s, one AAC track each |
+| HDR10 with lossless sound | `Aquaman_test.mkv` | 2160p, TrueHD 7.1 with Atmos, 11 s |
+| HLG | `snow-fades.mp4`, `Grayscale BT.2100 HLG.mkv` | 2160p 20 s with AAC; 1080p 105 s |
+| Dolby Vision 8.1 | `01freeguy.mkv`, `01interstellar.mkv`, `02themeg-dovi.mkv` | 1080p, level 3, 4 s, no sound |
+| Dolby Vision 8.1 at 2160p | `contrast-recovery-pq-output-colornoise.mkv` | level 7, 4 s, with an ASS subtitle |
+| Dolby Vision 5 | `dark.mkv` (`transition.mkv` is the same file) | 2160p, level 6, **one frame** |
+| AV1 (software on the A16 iPad and the Apple TVs, hardware on the M5) | `waterfall.mkv` | 2160p at 59.94, HDR10, 6 s, Opus |
+| VP9 | `hdr1500.mkv` | profile 2, 2160p, HDR10, under a second |
+| Subtitles | `asuka.mkv` and `vindiesel.mkv` (ASS), `scenechange.mkv` (SRT) | |
+
+Four entries are not media: `landing_dv.mkv`, `landing_hdr.mkv`,
+`landing_sdr.mkv` and `tonemap_flicker.mkv` are 133-byte Git LFS pointer
+files (the first names a file of 84 MB). Fetched with Git LFS they would
+be real clips.
+
+What P2 needs and the library does not have:
+- Dolby Vision profile 7, MEL and FEL (real discs' files; they cannot be
+  made);
+- a profile 5 clip longer than one frame. A TV takes seconds to change
+  mode, so one frame can show a still picture at most;
+- profile 8.4 (an iPhone's recording) and profile 10 (AV1);
+- Dolby Vision 8.1 known to be CMv2.9 and known to be CMv4.0. Which the
+  four clips carry is read with dovi_tool, not done yet;
+- E-AC-3 with Atmos, DTS-HD MA, and plain AC-3 and DTS;
+- the mixed plays A2 names: Dolby Vision with TrueHD, software-decoded
+  video with E-AC-3, HDR10 with DTS-HD MA;
+- one long file with several audio and subtitle tracks, for seeking,
+  track switching and memory.
+
+Made by the probe, as S0 says: the reference clip (one base layer with
+two visibly different RPUs, and the same layer with its RPU stripped).
 
 ## Risks
 
