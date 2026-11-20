@@ -608,11 +608,15 @@ Inside:
     buffer, and are timed by the same count. An E-AC-3 access unit is an
     independent substream's frame together with the dependent substream
     frames that belong to it (a 7.1 programme carries its extra channels
-    that way). They cover the same stretch of time, so the clock moves
-    once for the unit, by the samples its independent frame declares in
-    its header (256, 512, 768 or 1536), however many frames the unit
-    holds. A container that delivers the substreams' frames apart has
-    them gathered into the unit first.
+    that way). A dependent frame covers the same stretch of time as the
+    independent frame it follows, and adds none. A unit can also hold
+    more than one stretch: with frames of three blocks, two independent
+    frames follow each other in one unit, each with its dependent
+    frames. So the unit's length is the sum of what its independent
+    frames of the first substream declare in their headers (256, 512,
+    768 or 1536 samples each), and the clock moves by that, once. A
+    container that delivers the substreams' frames apart has them
+    gathered into the unit first.
   - Decoded sound is described to Apple by a standard channel layout
     where the source layout has one (mono, stereo, 5.1 as
     `MPEG_5_1_A`, 7.1 as `MPEG_7_1_C`, the channels moved from FFmpeg's
