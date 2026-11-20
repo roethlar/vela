@@ -546,6 +546,8 @@ the owner's servers.
 
 What must change for the crate to build and behave in the sandbox. This
 list is completed by P3, and the slice lands what P3 finds:
+(P3 ran on 2026-11-20; the Log has what it adds: swift-rs 1.0.9,
+`set_fullscreen`, the test-only macOS modules.)
 - Compile out on iOS what spawns programs or exists only for mpv:
   - the external player (`src-tauri/src/player/external.rs`);
   - mpv detection and installation (`check_mpv`, `install_mpv`,
@@ -621,7 +623,10 @@ list is completed by P3, and the slice lands what P3 finds:
 ### B-2. The Tauri iOS app and the engine's plugin
 
 - **The app:** `tauri ios init` makes `src-tauri/gen/apple` from tracked
-  configuration. CI makes it on every build; it is never committed or
+  configuration. P1 (Log, 2026-11-20) found what that takes on the
+  iOS 27 SDK: Tauri 2.12.7 for the scene lifecycle, landed for the
+  desktop first; a scene manifest in `Info.ios.plist`; a tracked XcodeGen
+  template for iPad only. CI makes it on every build; it is never committed or
   edited (repo-guidance: `src-tauri/gen/` is generated).
   - Device family: iPad only in this plan.
   - Bundle: the iOS app's bundle carries no mpv scripts, which are
@@ -743,6 +748,9 @@ of any new layout logic.
   `.agents/repo-guidance.md` when slice A4 lands.
 
 ### B-5. Verification venues
+
+P4 (Log, 2026-11-20) ran `smoke` unchanged through Appium and lists the
+adapters the harness needs: real taps, screen coordinates, and keys.
 
 - **Unit tests:** Rust unit tests, Node tests and the engine's XCTests,
   with generated media, in the simulator.
@@ -910,3 +918,140 @@ records what landed.
   Rust code, the page's touch and size assumptions, and the build, CI and
   test infrastructure. Their findings are folded into A-1, B-1, B-3 and
   B-4.
+
+- 2026-11-20: **probes P1, P3 and P4 ran on `nagatha`** (owner's go of
+  that day: "approve the probes"). Xcode 27.2, the iOS 27.2 simulator, a
+  simulator made for the probes ("Vela Probe iPad Pro", iPad Pro 13-inch
+  M5), a throwaway clone of `main` at `d32c5ea`. Code, logs and
+  screenshots: `.agents/machines.md`, "Apple probes on nagatha". P2 has
+  not run: it needs the owner's devices and files. None of A1, A5 or A6
+  was overturned. What each probe found:
+
+  **P3 (A5: the Rust crate on iOS). Holds, with these changes:**
+  - `swift-rs` 1.0.7, which `Cargo.lock` pins, cannot build Tauri's Swift
+    package for iOS under Xcode 27: SwiftPM adds the host's `-sdk` and
+    `-target` after the ones swift-rs passes. swift-rs 1.0.9 has the fix.
+  - With that, the crate type-checks for `aarch64-apple-ios` and
+    `aarch64-apple-ios-sim` after one change: `player_fullscreen`
+    (`commands.rs`) calls `WebviewWindow::set_fullscreen`, which Tauri has
+    on desktop only.
+  - The test build needs one more: `player/embedded/mod.rs` builds
+    `macos_geometry` and `macos_display` under `any(target_os = "macos",
+    test)`, and they use `session`, which iOS does not build.
+  - The compiler confirms B-1's `rename_noreplace` defect by itself: on
+    iOS it warns that the code after the `Unsupported` return is
+    unreachable.
+  - The unit tests ran inside the simulator (`cargo test --target
+    aarch64-apple-ios-sim --lib`, with `xcrun simctl spawn` as the
+    runner): 595 tests. As `main` is, 556 passed and 38 failed: 27 on the
+    rename (every durable save over an existing file), 11 that start a
+    stand-in mpv or `sleep`. With B-1's rename fix (`target_vendor =
+    "apple"` on both predicates), 585 passed and 9 failed, all 9 tests of
+    the external player that start a process. tokio, reqwest and the
+    durable stores' tests are among the 585.
+  - Inside the app, in the simulator (a routine in the throwaway build,
+    results in `logs/` there):
+    - the config directory is `<container>/Library/Application
+      Support/com.vela.vela`, as the explorer read it;
+    - three durable saves through `config::update` succeeded, with the
+      version history beside `config.json`, and the value read back;
+    - `File::lock` holds: a second handle is refused while the first has
+      it, and gets it after release;
+    - `rename_noreplace` moves onto a fresh name and refuses an existing
+      file, whose bytes stay;
+    - TLS: a server whose CA the simulator trusts answers with
+      verification on; a server with an unknown CA is refused with
+      verification on and answers with it off;
+    - plain HTTP from reqwest reaches an IP address, a `.local` name and a
+      full domain name. Apple's `URLSession`, asked for the same URLs from
+      the same app, refuses the full domain name with App Transport
+      Security's error -1022. So ATS does not govern the core's client.
+  - Not proven by the simulator: the sandbox. `/tmp` was writable there,
+    which a device will not allow. The same routine runs on the iPad when
+    it is paired (with P2).
+  - Seen on screen: the page shows "mpv is required" with Linux's
+    install text, so iOS does take the Linux branches B-1 lists.
+
+  **P1 (A1: the Tauri iOS shell and a native layer under the page).
+  Holds, with these changes:**
+  - **An app built with the iOS 27 SDK must adopt the scene lifecycle or
+    it does not launch.** Vela on Tauri 2.11.5 (tao 0.35.3) was killed at
+    launch on iOS 27.2 inside UIKit's check for it. tao adopts scenes for
+    a single-window app from 0.37, when `Info.plist` has a
+    `UIApplicationSceneManifest`. That needs Tauri 2.12.7 (tao 0.37.3,
+    wry 0.57.3; 72 crates in `Cargo.lock` move), and the same minor of
+    the npm packages, which the CLI enforces: `@tauri-apps/api` 2.12.5,
+    `@tauri-apps/cli` 2.12.6, `@tauri-apps/plugin-dialog` 2.8.4. Vela's
+    Rust compiled against 2.12.7 with no further change, on iOS and on
+    macOS, where the unit tests give the same result as `main`.
+    **The update reaches every desktop platform, so it lands by itself
+    first, proved by the desktop suites, before any iOS work.**
+  - With it, and `Info.ios.plist` carrying the scene manifest
+    (`UIApplicationSupportsMultipleScenes` false), Vela's page shows in
+    WKWebView on the iPad simulator and the Rust core answers it.
+  - Tracked files alone do configure the generated project:
+    - `tauri.ios.conf.json`: the identifier, `minimumSystemVersion`,
+      `developmentTeam`, and `bundle.resources` emptied, so the app
+      carries no mpv scripts;
+    - `Info.ios.plist`: merged at each build (the scene manifest,
+      `NSLocalNetworkUsageDescription`);
+    - iPad only needs `bundle.iOS.template`, a tracked copy of Tauri's
+      XcodeGen template with `TARGETED_DEVICE_FAMILY: "2"`. Its path is
+      read against the directory the CLI runs in, not the config's;
+    - `src-tauri/gen/apple` was deleted and made again from those files,
+      and the build came out the same.
+  - An in-tree plugin with Swift builds and links from a path
+    dependency. It leaves generated files in its own directory
+    (`.tauri/`, `permissions/autogenerated/`, `ios/Package.resolved`),
+    which the real plugin's commit must ignore.
+  - **The layer.** An `AVSampleBufferDisplayLayer` in a view put beneath
+    the web view (`insertSubview(_:belowSubview:)` on tao's view) shows
+    through the page wherever the page is transparent, with the page's
+    text and controls drawn over it. Screenshots taken at different
+    moments show its moving bar at different places.
+  - **Touches.** Real touches (XCUITest, trusted events) on a button
+    over the layer, and on Vela's own "Add a source" over the layer,
+    reached the page: the counter counted, and Settings opened.
+  - The page's coordinates are not the view's. The web view fills the
+    screen, and its content starts below the status bar (32 pt on this
+    iPad), so a rectangle the page reports must be moved by that inset,
+    unless the page covers the safe area (`viewport-fit=cover`, B-3),
+    which makes the inset zero. `player_set_rect` for iOS is written and
+    tested with that in mind.
+  - The web view is already not opaque at launch (Vela asks Tauri for a
+    transparent window), and tao's view behind it is white. The plugin
+    gives the area behind the page a black backing.
+  - The simulator reports an EDR headroom of 1.0. HDR is a device matter,
+    as the Risks say.
+  - Local builds: Tauri's CLI does not pass `DEVELOPER_DIR` on to
+    `xcodebuild`, and its `ios init` wants CocoaPods (`.agents/machines.md`
+    has how `nagatha` is set up).
+
+  **P4 (A6: the scenarios through Appium). Holds, with adapters:**
+  - Appium 4.0.0 with its XCUITest driver 13.4.0 attaches to Tauri's
+    WKWebView as a web context.
+  - The harness's own client (`tests/e2e/driver.mjs`), given a session
+    opened with Appium's capabilities, ran **the `smoke` scenario
+    unchanged, and it passed.** `execute/sync` waits for a promise, so
+    `invoke` calls work as they do on the desktop.
+  - What slice A6's harness work must add:
+    - `appium:nativeWebTap`, or an element click is a scripted click
+      (`isTrusted` false). With it, the click is a real touch;
+    - pointer actions take screen coordinates, so `clickAt`,
+      `movePointer` and `doubleClick` need the same inset as the layer;
+    - typing into a field works as it is;
+    - W3C key actions arrive only while a text field has focus. XCUITest's
+      `mobile: keys`, with a hardware keyboard connected to the
+      simulator, delivers letters, Space and the arrows with nothing
+      focused, as trusted events. **Escape did not arrive that way** in
+      any of three runs. Whether a real keyboard's Escape reaches the page on
+      an iPad is not known; A6 finds a route or the owner's keyboard
+      settles it.
+  - Not tried: a play. There is no engine yet.
+
+  **Found beside the probes:** on `main`, on macOS, two unit tests fail
+  (`player::launch::tests::the_minimal_embedded_launch_is_exactly_the_recorded_one`
+  and `the_full_embedded_launch_is_exactly_the_recorded_one`): they
+  compare with launch arguments recorded on Linux, and macOS adds its
+  own. CI runs the unit tests on Linux only. Recorded in
+  `.agents/state.md`, Blockers.

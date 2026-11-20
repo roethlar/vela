@@ -675,6 +675,33 @@ Recorded 2026-07-14. Owner-approved access (2026-07-14) to the boxes below.
   `xcode-select` points to the Command Line Tools. Observed 2026-11-20:
   Xcode 27.2 (27B52), simulator runtimes iOS 27.2 and tvOS 27.0,
   tauri-cli 2.12.5 in `~/.cargo/bin`.
+- Tauri's CLI does not pass `DEVELOPER_DIR` to the `xcodebuild` it starts,
+  so `cargo tauri ios build` fails here with "requires Xcode". The probes
+  put two shims first on `PATH`
+  (`~/Dev/vela-agent-keep/apple-probes/bin/xcodebuild` and `xcrun`, which
+  set it and run the real tool). The lasting remedy is the owner's:
+  `sudo xcode-select -s /Applications/Xcode.app`.
+- Installed for the probes on 2026-11-20, none with `sudo`:
+  - the Rust targets `aarch64-apple-ios` and `aarch64-apple-ios-sim`
+    (rustup);
+  - CocoaPods 1.17.0 from Homebrew (`brew install cocoapods`, which
+    brought Homebrew's Ruby). `cargo tauri ios init` needs it, and tried
+    to install it with `gem` under `sudo`, which failed;
+  - `cargo tauri ios init` itself reinstalled Homebrew's
+    `libimobiledevice` and its libraries;
+  - Appium 4.0.0 and its XCUITest driver 13.4.0, inside the probes'
+    folder only (`appium/`, with `APPIUM_HOME` there).
+- A simulator made for the probes: "Vela Probe iPad Pro" (iPad Pro
+  13-inch M5, iOS 27.2); its id is in `sim-ipad.udid` there. The probes'
+  test CA is trusted in that simulator only. The owner's other simulators
+  were not touched.
+- What is in the folder: `vela-ios/` (the clone, whose `git diff` is every
+  change the probes needed; also saved as `clone-changes.patch`),
+  `p1.mjs`, `p4.mjs` and `p4b.mjs` (the drivers), `net/` (the test
+  servers and their certificates), `logs/`, `shots/`, `NOTES.md`.
+- Unit tests run in the simulator with
+  `CARGO_TARGET_AARCH64_APPLE_IOS_SIM_RUNNER` set to `sim-run.sh` there,
+  which runs the test binary with `xcrun simctl spawn`.
 
 ## Apple test devices (owner's, for the Apple ports)
 

@@ -34,11 +34,22 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   `.agents/plans/ipados-port.md` (Part A holds what all three share; slice
   S0 is the probes; its Log has each probe's result),
   `.agents/plans/ios-port.md`, `.agents/plans/tvos-port.md`.
-  - Probes P1, P3 and P4 run on the Mac `nagatha` alone. Their throwaway
-    code is outside the repo (`.agents/machines.md`, "Apple probes on
-    nagatha").
-  - Probe P2 needs the owner: the iPad Pro and one Apple TV registered
-    and paired with `nagatha`, and the files its media plan names.
+  - Probes P1, P3 and P4 RAN on the Mac `nagatha` on 2026-11-20 and
+    their assumptions hold (the plan's Log, that date, has every result).
+    Their throwaway code is outside the repo (`.agents/machines.md`,
+    "Apple probes on nagatha"). What they add to the work:
+    - an app built with the iOS 27 SDK must adopt the scene lifecycle, so
+      Vela needs Tauri 2.12.7 (72 crates move, and three npm packages),
+      which reaches every desktop platform and so lands by itself first,
+      proved by the desktop suites;
+    - swift-rs 1.0.9 for Xcode 27; a scene manifest in `Info.ios.plist`;
+      a tracked XcodeGen template for iPad only;
+    - the harness on iOS needs real taps, screen coordinates and a key
+      route; Escape has none yet.
+  - Probe P2 HAS NOT RUN. It needs the owner: the iPad Pro and one Apple
+    TV registered and paired with `nagatha`, and the files its media plan
+    names. The media plan is not written yet. The sandbox half of P3 (what
+    the simulator cannot show) runs on the iPad with it.
   - Review of the plans (`.agents/review/codereview-2026-11-18-apple-plans.md`):
     five codex design rounds, every finding repaired; round 5's repairs
     have no verdict, and no further round is scheduled.
@@ -611,6 +622,16 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   the owner, 2026-11-17: "playback works in both the embedded and external
   players without issue". N1 IS PROVEN ON NVIDIA. Follow-up asked by the
   owner: `.agents/plans/settings-restructure.md` (draft).
+
+- FOUND 2026-11-20, NOT FIXED: on macOS, two unit tests fail on `main`
+  (`cargo +stable test --locked --lib` on `nagatha` at `d32c5ea`: 669
+  passed, 2 failed):
+  `player::launch::tests::the_minimal_embedded_launch_is_exactly_the_recorded_one`
+  and `the_full_embedded_launch_is_exactly_the_recorded_one`. They compare
+  the embedded launch with arguments recorded on Linux, and on macOS the
+  launch carries macOS's own options as well. CI runs the unit tests on
+  Linux only, so nothing showed it. A defect of the tests, not of the
+  app, as far as it was read; the repair is not planned yet.
 
 - No known product blocker.
 - A timing failure in a local end-to-end run proves nothing until the
