@@ -911,9 +911,10 @@ P3 ran on 2026-11-20 (the Log has the evidence) and adds these:
     `UIApplicationSceneManifest`. So Tauri is updated first, for every
     platform, in a slice of its own (T0), and `Info.ios.plist` carries
     the manifest with `UIApplicationSupportsMultipleScenes` false.
-  - `tauri.ios.conf.json` sets the identifier, `minimumSystemVersion`,
-    `developmentTeam` and an empty `bundle.resources`; `Info.ios.plist`
-    is merged at each build. Both were shown to take effect.
+  - `tauri.ios.conf.json` sets the identifier, `minimumSystemVersion`
+    and `developmentTeam`, and `Info.ios.plist` is merged at each build.
+    Those were shown to take effect. Its `bundle.resources` was not: see
+    "Bundle", below.
   - iPad only is set in a tracked copy of Tauri's XcodeGen template
     (`bundle.iOS.template`, `TARGETED_DEVICE_FAMILY: "2"`). Tauri reads
     that path against the directory its CLI runs in, so every command
@@ -927,6 +928,21 @@ P3 ran on 2026-11-20 (the Log has the evidence) and adds these:
     desktop resources (`tauri.conf.json` `bundle.resources`). A tracked
     `tauri.ios.conf.json` overlay leaves them out (decisions
     2026-11-12, licensing, and 2026-11-18, the App Store).
+    - The overlay says `"resources": []`. Tauri merges an object into
+      the base configuration's object, so `"resources": {}` removes
+      nothing: P1's overlay said that, and the probe's app carried
+      `mpv-scripts/`, `autocrop.lua` and `LICENSE.GPL` among them. A
+      list replaces the map. With the list, and a clean generated
+      project, a build has none of them (tried in the simulator build
+      after the review).
+    - Tauri does not clear `gen/apple/assets`: what an earlier build
+      copied there stays and is bundled again. CI generates the project
+      afresh on every build; a local build that changes resources starts
+      from a removed `gen/apple`.
+    - Packaging does not trust the configuration. It looks inside the
+      built app and fails if it finds `mpv-scripts`, a `.lua` file or
+      `LICENSE.GPL`, in the simulator app of every push and in the
+      archive of every release.
   - Minimum iPadOS: 27. The owner's devices run the latest release and
     are updated as each one ships (owner, 2026-11-18), and the owner is
     Vela's only user. So P2 and every check run on the 27.x the devices
@@ -1890,3 +1906,14 @@ no Dolby Vision box).
     request: "I don't understand what I'm supposed to be judging here."
   A-2's direction is unchanged by this: MEL converts; FEL is rebuilt from
   both layers, after a probe of its own.
+
+- 2026-11-20, **correction to P1's entry above** (review finding iph-22).
+  That entry says the overlay emptied `bundle.resources` "so the app
+  carries no mpv scripts". It did not: the overlay was `"resources": {}`,
+  which Tauri merges into the base map, and the probe's app carried the
+  desktop's mpv scripts and `LICENSE.GPL`. The agent had listed the
+  bundle's top folder and not looked inside `assets`. The probe app was a
+  throwaway on the owner's own iPad and simulator and went nowhere else.
+  With `"resources": []` and the generated `assets` folder emptied, a
+  fresh simulator build has no Lua and no GPL file. B-2 has the rule and
+  the check that follow.
