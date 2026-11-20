@@ -541,7 +541,10 @@ Inside:
     read that way. So for such a stream the session is asked for an
     uncompressed bi-planar format, each picture is copied into the
     planar layout the filter takes, and the filter's output becomes the
-    pixel buffer the layer gets. Those intermediate pictures are part of
+    pixel buffer the layer gets. The copy carries the picture's field
+    order with it (top or bottom field first, which VideoToolbox states
+    on the decoded picture), so the filter's parity is the stream's and
+    not its default. Those intermediate pictures are part of
     the footprint budget. A test
     plays an interlaced clip on each path and checks the picture rate
     and that no combing is left on a moving edge.
