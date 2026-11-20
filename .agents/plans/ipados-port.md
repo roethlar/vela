@@ -476,9 +476,19 @@ Inside:
       decodes it and it plays as that HDR10 or HLG picture, and the
       play's state says it is not Dolby Vision;
     - where it is not (profile 5, and profile 10 with no compatible base
-      layer), the play ends with an error that says this device will not
-      decode this Dolby Vision stream. It is never shown without its
-      metadata, which is the green and purple picture.
+      layer), the picture needs the stream's own mapping to be a picture
+      at all. **The target is for the engine to apply it**: the RPU's
+      reshaping and colour conversion, which FFmpeg parses for HEVC and
+      for AV1, turn each decoded picture into BT.2020 PQ, and that is
+      presented as HDR10 by public API. Every codec plays on the device
+      (the owner's ruling of 2026-11-18), and an AV1 profile 10 title on
+      a device with no AV1 hardware is exactly this case. It is the
+      arithmetic FEL composition needs too, so P5 probes it, and it is
+      designed in the amendment that follows P5.
+    - Until that has landed, such a play ends with an error that says
+      this device cannot yet show this Dolby Vision stream. That is a
+      safeguard, not the answer: the stream is never shown without its
+      mapping, which is the green and purple picture.
   - The format description says what an ISO sample entry would: the
     codec type, the configuration record from the container (`hvcC`,
     `avcC`, `av1C`, `vpcC`), the colour tags, the mastering display and
@@ -1382,7 +1392,9 @@ records what landed.
   depth the result needs; the composed picture agreeing with one
   composed offline from the same frames by an independent tool; and the
   composed picture on the screen both ways A-2 names, as HDR10 and with
-  a converted RPU attached, beside the converted play. What each costs
+  a converted RPU attached, beside the converted play. It also applies
+  a profile 5 stream's mapping in software and presents the result as
+  HDR10, measured against VideoToolbox's own rendering of that stream. What each costs
   in memory and heat is measured. The results go to the owner, who
   chooses among A-2's three ways for FEL titles; the chosen way is then
   designed in an amendment, reviewed, and built after A7. If composition
