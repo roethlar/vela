@@ -734,11 +734,20 @@ Inside:
   hands over its buffer in the decode's callback, with strides and a
   backing size the hardware chose. So admission works in two steps.
   Before a picture is sent to be decoded, copied or decoded in
-  software, an upper bound is reserved for it: its dimensions rounded
-  up to the alignment, at 16 bits a component for a 10-bit format, for
-  the format asked for. When the buffer exists, the reservation is
-  replaced by its real size (its planes' strides and its backing
-  allocation). A decode is not started when its reservation would pass
+  software, a bound is reserved for it that the allocation cannot
+  exceed, taken from whoever will allocate it:
+  - VideoToolbox allocates from the session's own pool, which the
+    session exposes. When a session is made, and again when its format
+    changes, the engine takes one buffer from that pool and measures its
+    backing size before any picture is admitted; that is the bound for
+    that pool's pictures;
+  - a software decoder's bound is what its allocator asks for, computed
+    as the pinned FFmpeg computes it. For dav1d that is both dimensions
+    rounded up to 128, the aligned image size, and two alignment units
+    more; for FFmpeg's own decoders, their buffer request's size;
+  - a copy the engine makes is sized by the engine.
+  When the buffer exists, the reservation is replaced by its real size
+  (its planes' strides and its backing allocation). A decode is not started when its reservation would pass
   the budget. A5 sets the budget and measures it on the A16 iPad, and
   `ios-port.md` sets the phone's.
 - **Lifecycle:**
