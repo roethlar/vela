@@ -917,17 +917,32 @@ Four entries are not media: `landing_dv.mkv`, `landing_hdr.mkv`,
 files (the first names a file of 84 MB). Fetched with Git LFS they would
 be real clips.
 
-What P2 needs and the library does not have:
-- Dolby Vision profile 7, MEL and FEL (real discs' files; they cannot be
-  made);
-- a profile 5 clip longer than one frame. A TV takes seconds to change
-  mode, so one frame can show a still picture at most;
-- profile 8.4 (an iPhone's recording) and profile 10 (AV1);
-- E-AC-3 with Atmos, DTS-HD MA, and plain AC-3 and DTS;
-- the mixed plays A2 names: Dolby Vision with TrueHD, software-decoded
-  video with E-AC-3, HDR10 with DTS-HD MA;
-- one long file with several audio and subtitle tracks, for seeking,
-  track switching and memory.
+What P2 needs and the test library does not have, and where it comes
+from instead. The owner, 2026-11-20: "scan plex for whatever you need for
+testing". The owner's other Plex libraries were read that day (9,555
+media entries; read-only, with the sign-in Vela holds on `nagatha`), and
+short excerpts were cut from the files below by stream copy into
+`p2/media2/` of the probes' folder. They are the owner's films and
+episodes: they stay on the owner's machines and devices and are in no
+repository.
+
+| For | Excerpt | From | Facts |
+|-----|---------|------|-------|
+| Profile 7, MEL, with TrueHD Atmos | `p7-fifth-element.mkv` | The Fifth Element (1997) | 2160p, 12.6 s, CMv2.9; TrueHD 7.1 with Atmos, AC-3 5.1, PGS |
+| Profile 5 longer than a frame, with E-AC-3 Atmos | `p5-shantaram.mkv` | Shantaram, "Dead Man Walking" (2022) | 3840x1606, 25 s; E-AC-3 5.1 with Atmos; SRT |
+| Profile 8.1 with DTS-HD MA; several tracks | `p81-el-camino.mkv` | El Camino (2019) | 2160p, 25 s; DTS-HD MA 5.1 and two AC-3 stereo tracks; PGS and SRT |
+| HDR10 with DTS-HD MA | `hdr10-dtshdma-witch-hunter.mkv` | The Last Witch Hunter (2015) | 3840x1596, 15 s; DTS-HD MA 7.1 |
+| DTS:X | `hdr10-dtsx-ex-machina.mkv` | Ex Machina (2014) | 2160p, 10 s; DTS-HD MA 7.1 with DTS:X |
+| Software-decoded video with E-AC-3 | `vc1-eac3-last-samurai.mkv` | The Last Samurai (2003) | VC-1 1080p, 20 s; E-AC-3 5.1 and 2.0; PGS |
+| MPEG-2, interlaced | `mpeg2-480i-snl.mkv` | Saturday Night Live (1981) | 704x480 at 29.97 interlaced, 20 s; AC-3 2.0; EIA-608 captions |
+
+Still without a file: profile 7 with a full enhancement layer (FEL: the
+other profile 7 remuxes are being read), profile 8.4 (an iPhone's
+recording) and profile 10 (the libraries hold no AV1).
+
+Found in passing: the libraries hold 199 MPEG-2 entries, interlaced
+broadcast recordings among them, 187 VC-1 and 595 MPEG-4 ASP. A-2 does
+not mention deinterlacing; the engine's software path needs it for these.
 
 Read with dovi_tool 2.3.4 on 2026-11-20: the three 1080p 8.1 clips carry
 CMv4.0 metadata, and `contrast-recovery-pq-output-colornoise.mkv` and the
