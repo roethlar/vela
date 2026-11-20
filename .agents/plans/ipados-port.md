@@ -1104,3 +1104,39 @@ two visibly different RPUs, and the same layer with its RPU stripped).
   compare with launch arguments recorded on Linux, and macOS adds its
   own. CI runs the unit tests on Linux only. Recorded in
   `.agents/state.md`, Blockers.
+
+- 2026-11-20, later: **P3's and P1's device half, on the owner's iPad Pro
+  13-inch (M5), iPadOS 27.2**, with the same throwaway build, signed for
+  development with the wildcard profile already on `nagatha`
+  (`.agents/machines.md`). The owner unlocked the iPad and started it.
+  - **The sandbox holds what the simulator could not show.** `/tmp` is
+    refused ("Operation not permitted"), so nothing of the desktop's
+    `private_runtime_dir` can be used on iOS, as B-1 says. The temporary
+    directory is the container's own `tmp/`.
+  - The config directory is `<container>/Library/Application
+    Support/com.vela.vela` there too. Three durable saves, `File::lock`
+    and the no-replace rename behaved as in the simulator.
+  - TLS with verification on: the owner's own Plex server answered over
+    its `plex.direct` address, so the device's trust store is used; the
+    test server with an unknown CA was refused, and answered with
+    verification off.
+  - Plain HTTP from reqwest reached the Mac by address, by `.local` name
+    and by a full domain name. `URLSession`, from the same app, refused
+    the full domain name with ATS's -1022. ATS does not govern the core's
+    client on a device either.
+  - The requests to the local network succeeded, so the Local Network
+    permission was granted on the iPad (`NSLocalNetworkUsageDescription`
+    is in the build's `Info.ios.plist`).
+  - **EDR:** `potentialEDRHeadroom` is 16 and `currentEDRHeadroom` 1.2 on
+    this screen. B-1's HDR capability reads from a real number here.
+  - The window was 1600 x 1200 points (landscape, with the iPad set to
+    show more space), not the 1376 x 1032 of the default setting. The
+    page must not assume one iPad size.
+  - The display layer rendered on the device (its renderer's status is
+    "rendering", about 90 frames in three seconds, no error). Whether the
+    owner sees it under the page, and whether a tap on the page's button
+    over it counts, is asked of the owner; not answered yet.
+  - The owner, seeing the build: "it's showing the install mpv banner at
+    the top which obviously needs to be removed from the ios versions".
+    That is B-1's mpv detection, compiled out in slice A3, and one of the
+    four differences approved on 2026-11-18.
