@@ -45,8 +45,9 @@ all three share. The other two plans point here instead of repeating it.
 - The licensing rule of 2026-11-12 binds every library shipped here:
   separate dynamic libraries, LGPL builds. It is settled; do not raise it.
 - Working rules since 2026-11-12 (`.agents/state.md`, "HOW TO WORK
-  HERE"): every slice that lands repo code gets a `codereview codex`
-  hunt. Every commit is pushed to `origin` and `github`
+  HERE"): every slice that lands repo code gets a `codereview` hunt by
+  the other model family from its author (`.agents/decisions.md`,
+  2026-11-20). Every commit is pushed to `origin` and `github`
   (`.agents/push-policy.md`). Implementation details are settled by the
   agent and recorded. Only what changes Vela for its user goes to the
   owner.
@@ -1181,7 +1182,9 @@ New rows, for every Apple device:
 Each slice is one or more commits, each with its tests and red-proofs,
 each pushed to `origin` and `github` as it lands
 (`.agents/push-policy.md`). Each slice that lands repo code gets a
-`codereview codex` hunt. The Log
+`codereview` hunt by the other model family from the one that wrote it
+(`.agents/decisions.md`, 2026-11-20): codex for what Claude wrote, a
+Claude reviewer for what codex wrote. The Log
 records what landed.
 
 - **S0, probes.** Throwaway code outside the repo, with results in the

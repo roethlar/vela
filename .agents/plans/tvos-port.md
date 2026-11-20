@@ -527,7 +527,9 @@ uses.
 Each slice is one or more commits, each with its tests and red-proofs,
 each pushed to `origin` and `github` as it lands
 (`.agents/push-policy.md`). Each slice that lands repo code gets a
-`codereview codex` hunt.
+`codereview` hunt by the other model family from the one that wrote it
+(`.agents/decisions.md`, 2026-11-20): codex for what Claude wrote, a
+Claude reviewer for what codex wrote.
 
 - **T0, probes (throwaway; results in the Log).**
   - A throwaway crate with the core's dependency declarations copied from

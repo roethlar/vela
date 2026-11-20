@@ -191,7 +191,9 @@ detail pages, top-tab Settings, the player's single sheet):
 Each slice is one or more commits, each with its tests and red-proofs,
 each pushed to `origin` and `github` as it lands
 (`.agents/push-policy.md`). Each slice that lands repo code gets a
-`codereview codex` hunt.
+`codereview` hunt by the other model family from the one that wrote it
+(`.agents/decisions.md`, 2026-11-20): codex for what Claude wrote, a
+Claude reviewer for what codex wrote.
 
 - **I0, the iPhone family.** Device family 1,2 and the orientations go
   in the tracked configuration first. Apple's device family `2` alone
