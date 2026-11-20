@@ -382,6 +382,11 @@ Inside:
     several ranges is tied to one version by `If-Range`, with a
     validator HTTP allows there: a strong ETag, or a Last-Modified date
     that counts as strong (RFC 9110, 13.1.5). A weak ETag is never sent.
+    A validator belongs to the resource it came from: the open's
+    identity is the final URL it was served from, after redirects,
+    together with its validator. A later request that ends at a
+    different final URL is a different resource whatever validator it
+    carries, and restarts the open.
     - A `200` in answer to a conditional range is read by its validator.
       With the same strong validator as the open's, the resource is
       unchanged and the server did not honour the range: the engine
