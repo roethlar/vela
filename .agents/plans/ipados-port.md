@@ -768,16 +768,22 @@ Inside:
          item progress, and only before this device starts another play.
          Jellyfin's `Stopped` clears the device's current session, so a
          close not yet sent when a new play starts is dropped. A close
-         already sent whose answer has not come cannot be called back.
-         The new play's `Started` waits until that request is answered
-         or has failed; its own time limit bounds the wait. If it failed
-         with no answer, the server may still act on it afterwards, so
-         the new play does not rest on `Started` alone: its progress
-         reports begin at once, and they name the item again. Whether a
-         late `Stopped` for the old play leaves the new one current after
-         the next report is shown against a real Jellyfin and a real Emby
-         before the lifecycle slice builds on it; if it does not, this
-         rule comes back for review. Where a
+         already sent whose answer has not come cannot be called back,
+         and the server's handler clears the session's current item
+         whatever item the close names. So this device sends nothing for
+         a new play on that session until the old play's close is
+         confirmed:
+         - the close is sent again until the server answers it. A second
+           `Stopped` for a play already closed changes nothing;
+         - each attempt that gets no answer is ended by closing its
+           connection before the next is made, so the answered attempt
+           is the last one that can reach the server;
+         - only then is the new play's `Started` sent, with the position
+           it has reached by then.
+         The new play's picture does not wait for this, only its
+         reports. If the server cannot be reached, the close cannot be
+         confirmed and the new play's reports wait with it; when the
+         server answers again, the close goes first. Where a
          provider has no such close, the server's own expiry closes it.
          The Log records, per provider, what that expiry does to the
          position (Jellyfin's can report the old one).
