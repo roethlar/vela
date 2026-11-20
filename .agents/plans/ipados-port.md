@@ -650,11 +650,15 @@ Inside:
 - **Seeking is exact.** Both renderers, the session and the queues are
   emptied; decoding starts at the keyframe before the target; the clock
   starts again at the target itself. The picture shown is the one whose
-  time on screen contains the target, which is the last picture that
-  starts at or before it, not the first that starts after: with a
-  variable frame rate a picture can cover seconds, and the last picture
-  of a file has none after it. Pictures that end before the target are
-  decoded and not shown, and sound is cut at the target to the sample.
+  time on screen contains the target: it starts at or before the target
+  and ends after it, its end being its start plus its duration (which
+  Matroska can state for a block, and which otherwise runs to the next
+  picture's start). With a variable frame rate a picture can cover
+  seconds, and the last picture of a file has none after it. Where no
+  picture's time contains the target (a gap in the video), none is
+  shown: the clock starts at the target and the next picture appears at
+  its own time. Pictures that end at or before the target are decoded
+  and not shown, and sound is cut at the target to the sample.
   P2's probe took the first picture at or after the target, on a clip of
   constant rate where that is within a frame; it measured 86 to 225 ms a
   seek at 2160p on the Mac, with up to 72 pictures decoded and thrown
