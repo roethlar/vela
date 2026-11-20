@@ -361,8 +361,11 @@ Inside:
   - A read returns up to the bytes asked for, with a count and an end of
     file flag. A `206` must start at the requested offset; when the server
     sends the whole resource instead, the interval is cut from it as it
-    streams. An HLS segment with a declared `BYTERANGE` must come back at
-    exactly that length. Anything else is a read error.
+    streams. A read that begins exactly at the end of the resource is
+    the end of the file, not an error: a `416` whose `Content-Range`
+    gives a total equal to the requested offset, or an offset equal to a
+    total already known, returns no bytes and the end-of-file flag. An
+    HLS byte range must come back whole. Anything else is a read error.
   - One logical open is one representation. A playlist is fetched whole,
     resolved and cleaned, and served from that snapshot. Media read in
     several ranges carries the first response's validator (`If-Range`
