@@ -1384,3 +1384,50 @@ no Dolby Vision box).
     each voice proven to sit in the channel it names; a change of audio
     track in the middle of a play. All of it is in the list on the iPad,
     for the owner's ears.
+
+- 2026-11-20, P2 on the iPad Pro, the owner's films and the sound list
+  (`logs/p2-ipad-log-4.jsonl`; the engine's own session for every clip;
+  every clip: no picture dropped, the audio renderer "rendering", no
+  jump in the sound's timing). The owner's answers, in his words:
+  - Profile 5, a real scene, its E-AC-3 with Atmos handed to Apple
+    undecoded: "looks and sounds correct".
+  - Profile 7 FEL converted to 8.1, against the same pictures as plain
+    HDR10 (silent on purpose): "c is much brighter and has no sound". So
+    the two differ on the iPad, and the HDR10 rendering is the brighter.
+    **Which of the two is right is not known.** On the Mac's screen one
+    frame of each measured alike (mean luma 18.4 as Dolby Vision, 18.2
+    as HDR10; the MEL clip 59.9 and 51.9; the 8.1 film 75.7 and 78.4).
+    A profile 7 title whose enhancement layer carries real picture can
+    come out wrong once that layer is discarded, and the iPad's smaller
+    headroom (2.2 to 2.4 during these clips) also maps the two
+    differently. It needs a reference: the same scene in a player known
+    to be right, on the same iPad, by the owner's eye. Asked of the
+    owner.
+  - A change of audio track in the middle of a play (`p81-el-camino.mkv`,
+    DTS-HD MA to AC-3 at 7.9 s and back at 15.8 s): "I noticed a track
+    change in the breaking bad scene". 743 pictures, none dropped. The
+    probe's switch leaves a gap as long as what was queued of the old
+    track; the engine re-reads from the current position instead.
+  - The spoken channel checks, 7.1 and 5.1, each way of describing the
+    channels, and E-AC-3, AC-3 (undecoded) and DTS (decoded): "yes
+    positioning seems correct but hard to tell with an ipad not connected
+    to a surround system". Left and right are settled; the surround
+    positions wait for the Apple TV's soundbar. So A4 holds on the iPad
+    for TrueHD, DTS-HD MA, DTS:X (as DTS-HD MA), DTS, FLAC and AAC
+    decoded to PCM, and for AC-3 and E-AC-3 passed undecoded; Atmos as
+    Atmos cannot be told on these speakers.
+  - **Memory.** The player's footprint peaked at 286 to 408 MB on the
+    2160p clips, 45 to 49 MB on 1080p in software, 25 MB on the 480i
+    clip. Most of the 2160p figure is the probe's fixed queue of sixteen
+    decoded pictures. The engine sizes that queue from the stream's own
+    reordering depth, and A-2 gets a footprint bound for it (the iPhone
+    plan already asks for one).
+  - The screen's `currentEDRHeadroom` followed the content: 2.2 to 2.4
+    during the HDR and Dolby Vision clips, 1.0 during the SDR ones.
+  - **Where P2 stands for the iPad Pro:** Dolby Vision engages for
+    profiles 5 and 8.1 (CMv2.9 and CMv4.0) and for profile 7 converted
+    (decoder and playback; its look is the open point above); HDR10, HLG
+    and SDR play; the sound formats above play; seeking is exact (Mac;
+    the iPad's run of it was not made). Not done: profiles 8.4 and 10 (no
+    file), the live profile 7 conversion (libdovi in the player), and
+    everything on an Apple TV.

@@ -66,12 +66,20 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     the owner on the engine's own session). Seeking is exact with that session
     (Mac). Sound tests, paused by the owner for a meeting, are allowed
     again (2026-11-20, "you can resume audio testing if necessary"): keep
-    them to the iPad, where the owner's ears judge. NEXT: the owner's
-    answers on the sound list now on the iPad (spoken channel checks in
-    7.1 and 5.1; E-AC-3 and AC-3 handed to Apple undecoded); the rows the
-    excerpts below make possible (profiles 5 and 7, DTS-HD MA, track
-    switching, VC-1 and MPEG-2 in software); memory; then the Apple TV
-    half, which has not started. The app's log is
+    them to the iPad, where the owner's ears judge. The iPad Pro half of P2 is done
+    but for three things (the Log's last entry of 2026-11-20): whether
+    profile 7 FEL converted to 8.1 LOOKS right (the owner saw the plain
+    HDR10 rendering of the same pictures "much brighter"; a reference
+    player on the same iPad is needed; asked of the owner), profiles 8.4
+    and 10 (no file), and the live profile 7 conversion (libdovi in the
+    player, not built). NEXT: the Apple TV half, which has not started
+    and needs the owner: an Apple TV paired with `nagatha`, and a tvOS
+    development profile, which the owner's Apple account must issue (no
+    account is signed into Xcode, and the wildcard profile on this Mac
+    does not cover tvOS). Then A-2's amendment (the engine decodes in its
+    own VideoToolbox session; sound timed by sample count; the reorder
+    queue sized from the stream; deinterlacing), reviewed before engine
+    code. The app's log is
     `Library/Caches/p2-log.jsonl` in its container. Its
     media plan is written (the plan's "Probe P2's media plan"), from the
     owner's Plex library "Test Video" and, by the owner's word of
