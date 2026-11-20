@@ -690,7 +690,11 @@ Inside:
   and ends after it, its end being its start plus its duration (which
   Matroska can state for a block, and which otherwise runs to the next
   picture's start). With a variable frame rate a picture can cover
-  seconds, and the last picture of a file has none after it. Where no
+  seconds. The last picture of a file has none after it, and a
+  container may give it no duration (FFmpeg then reports zero, meaning
+  unknown): its time then runs to the end of the video track where the
+  container states one, and otherwise for one frame at the stream's
+  rate, so a seek to its own start still shows it. Where no
   picture's time contains the target (a gap in the video), none is
   shown: the clock starts at the target and the next picture appears at
   its own time. Pictures that end at or before the target are decoded
