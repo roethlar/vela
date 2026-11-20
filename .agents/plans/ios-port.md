@@ -166,15 +166,15 @@ detail pages, top-tab Settings, the player's single sheet):
 
     A stream whose own reordering exceeds the phone's budget is reported
     in the Log with its numbers, not played badly in silence.
-  - Apple's renderers
-  keep their own internal queue, which Vela cannot count. So the engine
-  enqueues only while the renderer reports it is ready for more
-  (`isReadyForMoreMediaData`). The phone runs measure the memory charged
-  to Vela's process. Memory iOS charges to a system process for playback
-  is not in that figure, so budgets that depend on it rely on device-wide
-  memory evidence, and what cannot be attributed stays unknown. A large allocation can end the
-  app before a memory-warning handler runs, so the handler only shrinks
-  the budgets further; it is not what keeps the app alive.
+  - Apple's renderers keep their own internal queue, which Vela cannot
+    count. So the engine enqueues only while the renderer reports it is
+    ready for more (`isReadyForMoreMediaData`). The phone runs measure
+    the memory charged to Vela's process. Memory iOS charges to a system
+    process for playback is not in that figure, so budgets that depend
+    on it rely on device-wide memory evidence, and what cannot be
+    attributed stays unknown. A large allocation can end the app before
+    a memory-warning handler runs, so the handler only shrinks the
+    budgets further; it is not what keeps the app alive.
 - **Composing a FEL picture is decided for the phone by the phone.**
   The iPadOS plan's P5 shows it on two iPads. It takes two decoders at
   once and a composed picture besides, so a phone that sustains the
