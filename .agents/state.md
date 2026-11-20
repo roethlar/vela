@@ -31,10 +31,13 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   is authorized (`.agents/decisions.md`, that date). ORDER, owner, the
   same day: "let's finish the ipad and ios builds first, then apple tv
   next week" (`.agents/decisions.md`): the Apple TV half of P2 and the
-  tvOS plan wait; the iPad and iPhone go ahead without it. ASKED OF THE
-  OWNER that day, on an executive summary: approval of `ipados-port.md`
-  and `ios-port.md` as the probes amend them. Until it is given, the next
-  work is the plans' amendment (not code). Order by the owner's
+  tvOS plan wait; the iPad and iPhone go ahead without it. The plans were
+  amended for the probes (`bee0c00`) and reviewed by codex in three
+  rounds that day (`.agents/review/codereview-2026-11-20-apple-plans-amendment.md`:
+  27 findings closed, 10 repaired without a verdict, ipd-52 contested).
+  ASKED OF THE OWNER: approval of `ipados-port.md` and `ios-port.md` as
+  they now stand, whether to stop the plan review there, and whether
+  ipd-52's residue is accepted. No product code until the approval. Order by the owner's
   rulings of 2026-11-18: iPadOS, then iOS, then tvOS, all three playing
   through one engine built on Apple's own pipeline, never mpv. Plans:
   `.agents/plans/ipados-port.md` (Part A holds what all three share; slice

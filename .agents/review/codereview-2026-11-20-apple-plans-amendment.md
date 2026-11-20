@@ -87,17 +87,21 @@ first repairs (below).
 | ID | Severity | Finding (one line) | Status | Commit |
 |----|----------|--------------------|--------|--------|
 | ipd-59 | HIGH | T0's Tauri 2.12.7 needs Rust 1.90; Vela's floor and CI are 1.89 | `[x]` closed in r2 | `675d6cd` |
-| ipd-60 | HIGH | A Dolby Vision stream that falls back to software decoding loses its RPU (profile 5 turns green) | `[ ]` reopened in r2 | `0e73e0b` |
-| ipd-61 | HIGH | The picture budget counts a 2160p 10-bit picture at 12 MB; uncompressed it is 24.9 MB | `[ ]` reopened in r2 | `c8cc601` |
-| ipd-62 | MEDIUM | Counting each E-AC-3 syncframe advances the clock twice when a dependent substream is present | `[ ]` reopened in r2 | `3c6fc64` |
+| ipd-60 | HIGH | A Dolby Vision stream that falls back to software decoding loses its RPU (profile 5 turns green) | `[x]` reopened in r2, closed in r3 | `0e73e0b`, `253c903` |
+| ipd-61 | HIGH | The picture budget counts a 2160p 10-bit picture at 12 MB; uncompressed it is 24.9 MB | `[~]` reopened in r2 and in r3, repaired again | `c8cc601`, `14a6960`, `b952812` |
+| ipd-62 | MEDIUM | Counting each E-AC-3 syncframe advances the clock twice when a dependent substream is present | `[x]` reopened in r2, closed in r3 | `3c6fc64`, `f1b2be5` |
 | ipd-63 | MEDIUM | A format change later in the stream (an HLS discontinuity) has no decoder recovery | `[x]` closed in r2 | `152d26a` |
-| ipd-64 | MEDIUM | "Exact" seek skips the picture that covers the target | `[ ]` reopened in r2 | `acefe81` |
-| ipd-65 | MEDIUM | A gap in the sound's time flushes sound that was still to be heard | `[ ]` reopened in r2 | `f8895f9` |
-| ipd-66 | MEDIUM | A hardware session may decode and still refuse to deinterlace | `[ ]` reopened in r2 | `33deafa` |
+| ipd-64 | MEDIUM | "Exact" seek skips the picture that covers the target | `[~]` reopened in r2 and in r3, repaired again | `acefe81`, `95331c5`, `32f7a3a` |
+| ipd-65 | MEDIUM | A gap in the sound's time flushes sound that was still to be heard | `[~]` reopened in r2 and in r3, repaired again | `f8895f9`, `89d3c02`, `3794375` |
+| ipd-66 | MEDIUM | A hardware session may decode and still refuse to deinterlace | `[x]` reopened in r2, closed in r3 | `33deafa`, `1a73731` |
 | ipd-67 | MEDIUM | A track's display rotation is lost (portrait iPhone recordings play sideways) | `[x]` closed in r2 | `9fc7392` |
 | ipd-68 | MEDIUM | The plan says P2 is done on the iPad and A2 holds, beyond what the Log shows | `[x]` closed in r2 | `787c2c9` |
-| ipd-69 | MEDIUM | (r2) An unchanged file restarts on every seek when the server answers a ranged request with the whole file | `[ ]` | |
-| ipd-70 | MEDIUM | (r2, both reports) The software path expects a raw RPU from dav1d for profile 10; FFmpeg gives parsed metadata there | `[ ]` | |
+| ipd-69 | MEDIUM | (r2) An unchanged file restarts on every seek when the server answers a ranged request with the whole file | `[x]` closed in r3 | `986478e` |
+| ipd-70 | MEDIUM | (r2, both reports) The software path expects a raw RPU from dav1d for profile 10; FFmpeg gives parsed metadata there | `[x]` closed in r3 | `253c903` |
+| ipd-71 | MEDIUM | (r3) With no validator the forward-only open cannot read an MP4 whose index follows its media | `[~]` | `9fed125` |
+| ipd-72 | MEDIUM | (r3) Reporting the position back through the timeline offset rewinds progress after a reset | `[~]` | `3794375` |
+| ipd-73 | MEDIUM | (r3) After a changed redirect target, two resources with the same ETag can be spliced | `[~]` | `a51a84b` |
+| ipd-74 | MEDIUM | (r3) The copy into the deinterlacer loses the field order | `[~]` | `5a3230e` |
 
 Round 5's repairs (findings in `codereview-2026-11-18-apple-plans.md`):
 
@@ -108,9 +112,9 @@ Round 5's repairs (findings in `codereview-2026-11-18-apple-plans.md`):
 | ipd-58 | closed | | `[x]` | `24cf277` |
 | ipd-32 | reopened | A reset on another device (an offset, then none) is both "the server changed" and "no resume state, Vela wins" | `[x]` closed in r2 | `f266d93` |
 | ipd-36 | reopened | "Every permitted external decoder" cannot be built: `libxevd` and `libxevdb` exclude each other | `[x]` closed in r2 | `2cb5d51` |
-| ipd-52 | reopened | A close already sent, whose answer was lost, can still clear the next play | `[ ]` reopened again in r2 | `1c59006` |
+| ipd-52 | reopened | A close already sent, whose answer was lost, can still clear the next play | contested after r3 (`ipd-52.contested.md`) | `1c59006`, `c9cfd9b`, `647c8c2` |
 | ipd-53 | reopened | A read that starts exactly at the end can get 416, which the plan calls an error | `[x]` closed in r2 | `56b3b76` |
-| ipd-57 | reopened | `If-Range` needs a strong validator; with a weak one or none, two versions can still be spliced | `[ ]` reopened again in r2 | `696c8a4` |
+| ipd-57 | reopened | `If-Range` needs a strong validator; with a weak one or none, two versions can still be spliced | `[x]` reopened again in r2, closed in r3 | `696c8a4`, `5203659` |
 
 ### iPhone plan
 
@@ -122,12 +126,14 @@ Its own:
 |----|----------|--------------------|--------|--------|
 | iph-22 | HIGH | The iOS overlay's `"resources": {}` does not remove the desktop's GPL mpv scripts from the app | `[x]` closed in r2 | `9e51f31` |
 | iph-23 | MEDIUM | FEL composition, once landed for the iPads, would run on the iPhone without a phone's own measurement | `[x]` closed in r2 | `2aaedf8` |
-| iph-24 | MEDIUM | Software decoders already give pictures in display order; a second reorder queue doubles delay and memory | `[ ]` closed for the iPadOS plan, reopened for the phone's own queue rule in r2 | `c5065a3` |
+| iph-24 | MEDIUM | Software decoders already give pictures in display order; a second reorder queue doubles delay and memory | `[x]` reopened for the phone's rule in r2, closed in r3 | `c5065a3`, `0731be8`, `add36fd` |
 | iph-25 | MEDIUM | The renderer's dropped count includes display misses, which could trigger an Automatic step-down the owner did not approve | `[x]` closed in r2 | `6f96695` |
 | iph-26 | MEDIUM | The exact-length rule for HLS byte ranges rejects FFmpeg's read across adjacent segments | `[x]` closed in r2 | `39b3e74` |
 | iph-27 | LOW | I2 keeps row 13a open for a ruling the owner already gave | `[x]` closed in r2 | `f1ca934` |
 | iph-28 | LOW | "Every slice gets a `codereview codex`" contradicts the 2026-11-20 rule when codex writes the slice | `[x]` closed in r2 | `ebe5773` |
-| iph-29 | MEDIUM | (r2) A server may answer a ranged request with a shorter `206`; the "whole range or error" rule breaks on it | `[ ]` | |
+| iph-29 | MEDIUM | (r2) A server may answer a ranged request with a shorter `206`; the "whole range or error" rule breaks on it | `[~]` closed by the iPadOS report and reopened by the iPhone report in r3 (a `206` may also begin later than asked); repaired again | `4250781`, `bbf89a8` |
+| iph-30 | HIGH | (r3) A Dolby Vision stream Apple will not decode ends in an error, though the owner's ruling is that every codec plays on the device | `[~]` | `67189a2` |
+| iph-31 | MEDIUM | (r3) The pinned FFmpeg's MP4 demuxer gives a `dav1` track no codec | `[~]` | `d1d2274` |
 
 Nothing was declined. iph-28's repair also corrects the same sentence in
 `tvos-port.md`, which was outside the round's scope.
@@ -154,3 +160,33 @@ repair commit and no more.
   declared key. The second repair stops the engine writing it at all,
   which also changes how a composed FEL picture could be shown; that
   choice is the owner's, after probe P5.
+
+## Round 3: verdicts on the second repairs (2026-11-20, `ebe5773..add36fd`)
+
+Two codex sessions, called the same way, 23:33:20Z to 23:38:20Z (iPhone)
+and to 23:39:51Z (iPadOS), exit 0 each, with the capability proof as
+before. Reports, verbatim: `ipados-r3.md` and `ios-r3.md`; prompts
+beside them.
+
+- iPadOS: 7 closed (ipd-60, ipd-70, ipd-62, ipd-66, ipd-57, ipd-69,
+  iph-29), 4 reopened (ipd-52, ipd-61, ipd-64, ipd-65), 4 new (ipd-71 to
+  ipd-74).
+- iPhone: 3 closed (iph-24, ipd-60, ipd-70), 2 reopened (ipd-61, and
+  iph-29, which the iPadOS session closed), 2 new (iph-30, iph-31).
+- What the working agent checked: the pinned dav1d wrapper's allocator
+  rounds to 128 and adds two alignment units (`libdav1d.c`), and the
+  pinned MOV tag table has no `dav1` entry (`isom_tags.c`).
+
+## Where it stands (2026-11-20, head `647c8c2`)
+
+Every finding admitted in the three rounds has a repair in the plans.
+Closed by a verdict: 27. Repaired with no verdict yet (`[~]`): ipd-61,
+ipd-64, ipd-65, ipd-71, ipd-72, ipd-73, ipd-74, iph-29, iph-30, iph-31.
+Contested: ipd-52, for the owner (`.agents/review/ipd-52.contested.md`).
+
+Each round closed most of what it was given and raised about as many new
+points in the text the repairs touched, mostly in the transport and
+timing rules: 22, then 12, then 11. The working agent's recommendation,
+put to the owner: stop reviewing the plans as documents here. What is
+left is of the kind that the code and its tests settle, and every slice
+gets its own review when it is written.

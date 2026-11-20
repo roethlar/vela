@@ -1,0 +1,16 @@
+You are the reviewer in a `codereview` repair review of this repository. It is read-only work.
+
+Repository: /Users/michael/Dev/vela
+Pins: base ebe57737bea9bcb3f10265092f19a7a605937e5c, head add36fdaf1da21e51bced94881c279df55f55db6.
+
+Capability proof first: read AGENTS.md in the repository, and run `git rev-parse add36fdaf1da21e51bced94881c279df55f55db6`. Report whether both succeeded.
+
+Scope: the plan `.agents/plans/ipados-port.md`, a design for code that is not written yet. The previous round of verdicts is in `.agents/review/codereview-2026-11-20-apple-plans-amendment/ipados-r2.md` and `.agents/review/codereview-2026-11-20-apple-plans-amendment/ios-r2.md`; the record with every identifier is `.agents/review/codereview-2026-11-20-apple-plans-amendment.md`. Between base and head, each finding that round reopened or raised was repaired in a commit of its own. The repairs that touch this plan:
+
+ipd-60 and ipd-70 in 253c903; ipd-61 in 14a6960; ipd-62 in f1b2be5; ipd-64 in 95331c5; ipd-65 in 89d3c02; ipd-66 in 1a73731; ipd-52 in c9cfd9b; ipd-57 in 5203659; ipd-69 in 986478e; iph-29 in 4250781.
+
+For each of these, read the finding and the repair's diff yourself with git, and give a verdict: closed, or reopened with the reason. Judge whether the predicted failure is closed in the plan as it stands at head, and whether the repair introduced a defect in the text it touched. Check technical claims against primary sources where you can.
+
+You may also report a new design defect in the text these repairs touched, with: a title; a severity (CRITICAL, HIGH, MEDIUM or LOW) with the impact that justifies it; file and line evidence at head; the triggering input or condition; the predicted observable failure; and a better approach.
+
+Design only: by the owner's ruling (`.agents/decisions.md`, 2026-11-18, "No tests are designed for code that has not been written"), do not raise findings that ask only for tests, test designs or coverage. A clean result is a valid outcome. Report nothing you cannot support with evidence. Do not edit any file, create commits, change refs or contact a Git remote.
