@@ -678,11 +678,24 @@ Inside:
 - **One timeline.** The synchronizer runs the play's timeline, and
   container times are placed on it by an offset the engine keeps, which
   starts at zero. When the source's clock jumps for every stream at
-  once, forward or back (an HLS discontinuity, which the demuxer
-  reports; otherwise picture and sound jumping together by the same
-  amount), the offset changes so that what follows continues where what
-  came before ends. The position reported to the page and the servers
-  is the item's own, computed back through the offset.
+  once, forward or back, the offset changes so that what follows
+  continues where what came before ends, and one offset serves every
+  stream, so picture and sound keep their distance from each other
+  (after a reset the picture may restart at zero and the sound at 0.2
+  s).
+  - For HLS the engine knows the jump from the playlist, not from
+    FFmpeg, whose pinned demuxer skips `EXT-X-DISCONTINUITY`. The core
+    reads every playlist before FFmpeg does (transport, above), and
+    passes each discontinuity on with the segment it begins; the offset
+    changes at that segment's first packets.
+  - For other sources there is no such mark. Picture and sound jumping
+    within half a second of each other, by more than the threshold, is
+    taken as the source's clock jumping.
+  - The position reported to the page and the servers is the play's
+    place on its own timeline, the item's elapsed time, which runs on
+    through a reset. The offset only places packet times on the
+    timeline, and turns a seek target back into the source's time for
+    the segment it falls in.
 - **Seeking is exact.** Both renderers, the session and the queues are
   emptied; decoding starts at the keyframe before the target; the clock
   starts again at the target itself. The picture shown is the one whose
